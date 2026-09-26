@@ -9,6 +9,17 @@ export interface DiscoveredModel {
   ownedBy?: string;
 }
 
+interface ModelRow {
+  id: string;
+  owned_by?: string;
+}
+
+function isModelRow(value: unknown): value is ModelRow {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.id === "string";
+}
+
 export async function discoverModels(
   config: Pick<ProviderConfig, "provider" | "apiKey" | "baseUrl">,
   signal?: AbortSignal
@@ -42,23 +53,23 @@ export async function discoverModels(
     );
   }
 
-  const json = await response.json();
-  const rows = Array.isArray(json?.data) ? json.data : [];
+  const json = (await response.json()) as { data?: unknown };
+  const rows: unknown[] = Array.isArray(json.data) ? json.data : [];
 
-  const models = rows
-    .filter((row: unknown): row is { id: string; owned_by?: string } => {
-      return Boolean(
-        row &&
-          typeof row === "object" &&
-          typeof (row as { id?: unknown }).id === "string"
-      );
-    })
-    .map((row) => ({
+  const models: DiscoveredModel[] = rows
+    .filter(isModelRow)
+    .map((row): DiscoveredModel => ({
       id: row.id,
-      ownedBy: typeof row.owned_by === "string" ? row.owned_by : undefined
+      ownedBy:
+        typeof row.owned_by === "string" ? row.owned_by : undefined
     }));
 
-  return [...new Map(models.map((model) => [model.id, model])).values()].sort(
-    (a, b) => a.id.localeCompare(b.id)
+  const unique = new Map<string, DiscoveredModel>();
+  for (const model of models) {
+    unique.set(model.id, model);
+  }
+
+  return [...unique.values()].sort((a, b) =>
+    a.id.localeCompare(b.id)
   );
 }
