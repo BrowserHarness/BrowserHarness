@@ -98,3 +98,29 @@ Next verification:
 1. direct chat: ask for a 30-second AI-future video script;
 2. Google Docs: run the same insertion command at least 5 times;
 3. record any remaining parser failure rate rather than treating one pass as sufficient.
+
+
+## NVIDIA runtime stall finding
+User-reported behavior on the first NVIDIA/model-discovery build:
+- direct prompts such as `write 30 sec video script about ai and its future` and `hi whats you name` were manually stopped after hanging;
+- Google Docs write task remained at **Reading the current page**.
+
+Interpretation:
+- every prompt was unnecessarily observing the current Google Doc before the model decided whether browser state was needed;
+- NVIDIA chat requests were not bounded by a client timeout;
+- NVIDIA reasoning-capable models could spend a large default output/reasoning budget before returning the BrowserCrew JSON action;
+- abort-like provider/network failures were displayed as `Stopped.`, conflating user cancellation with provider interruption.
+
+Remediation:
+1. BrowserCrew now asks the model to route the task before observing the page.
+2. Conversational/writing tasks can return `kind=final` without touching the browser.
+3. Browser tasks explicitly request `observe_page` when page state is needed.
+4. NVIDIA requests use bounded `max_tokens`, JSON Object Mode, and reasoning-disabled template kwargs for common reasoning model families.
+5. Model calls time out after 30 seconds instead of hanging indefinitely.
+6. NVIDIA HTTP 400 compatibility failures retry once with plain OpenAI-compatible chat fields.
+7. Empty model responses now produce an actionable error suggesting a chat/instruct model.
+8. Only an explicit user Stop is rendered as `Stopped.`; other aborts/errors surface separately.
+
+Latest runtime-fix commit: `8663c5b75aee631651bf9f3e4cb3b03e2c65fe02`.
+GitHub Actions run: `36254678941` — success.
+Artifact ID: `10909394225`.
