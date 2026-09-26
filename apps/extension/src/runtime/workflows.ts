@@ -3,6 +3,8 @@ export interface WorkflowLocator {
   role: string;
   accessible_name: string;
   input_type?: string;
+  requires_approval?: boolean;
+  approval_reason?: string;
 }
 
 export type RecordedWorkflowStep =
