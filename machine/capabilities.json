@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "status": "product-direction",
+  "capability_domains": [
+    {
+      "id": "browser-harness",
+      "owner": "BrowserCrew/browsercrew"
+    },
+    {
+      "id": "model-routing",
+      "owner": "BrowserCrew/browsercrew + BrowserCrew/Automation"
+    },
+    {
+      "id": "skills",
+      "owner": "BrowserCrew/Skills-"
+    },
+    {
+      "id": "workflows-watch-learn",
+      "owner": "BrowserCrew/Workflows + BrowserCrew/browsercrew"
+    },
+    {
+      "id": "agents-teams",
+      "owner": "BrowserCrew/Agent-Registry + BrowserCrew/browsercrew"
+    },
+    {
+      "id": "memory",
+      "owner": "BrowserCrew/browsercrew"
+    },
+    {
+      "id": "mcp-integrations",
+      "owner": "BrowserCrew/browsercrew + BrowserCrew/Automation"
+    },
+    {
+      "id": "security-permissions",
+      "owner": "BrowserCrew/Security-Trust + BrowserCrew/browsercrew"
+    }
+  ]
+}
