@@ -310,15 +310,22 @@ export function App() {
         );
         const controller = new AbortController();
         requestAbort.current = controller;
-        const decision = await nextAgentDecision(
-          config,
-          task,
-          observation,
-          trail,
-          controller.signal
-        );
-        requestAbort.current = null;
-        finishActivity(thinking);
+        let decision;
+        try {
+          decision = await nextAgentDecision(
+            config,
+            task,
+            observation,
+            trail,
+            controller.signal
+          );
+          finishActivity(thinking);
+        } catch (error) {
+          finishActivity(thinking, cancelled.current ? "done" : "error");
+          throw error;
+        } finally {
+          requestAbort.current = null;
+        }
 
         if (decision.kind === "final") {
           addAssistantMessage(decision.message);
