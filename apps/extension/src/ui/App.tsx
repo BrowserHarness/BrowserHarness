@@ -60,7 +60,8 @@ export function App() {
   const [paused, setPaused] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
-  const cancelled = useRef(false);\n  const pausedRef = useRef(false);
+  const cancelled = useRef(false);
+  const pausedRef = useRef(false);
 
   const refreshContext = async () => {
     const [currentTab, provider] = await Promise.all([
@@ -101,6 +102,7 @@ export function App() {
     setActivities([]);
     setRunning(true);
     setPaused(false);
+    pausedRef.current = false;
     cancelled.current = false;
 
     try {
@@ -194,6 +196,7 @@ export function App() {
     } finally {
       setRunning(false);
       setPaused(false);
+      pausedRef.current = false;
       cancelled.current = false;
     }
   };
