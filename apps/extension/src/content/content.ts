@@ -44,13 +44,15 @@ function ensureId(element: HTMLElement): string {
 function roleFor(element: HTMLElement): string {
   return (
     element.getAttribute("role") ||
-    (element.tagName === "A"
-      ? "link"
-      : element.tagName === "BUTTON"
-        ? "button"
-        : element.tagName === "INPUT"
-          ? "textbox"
-          : element.tagName.toLowerCase())
+    (element.isContentEditable
+      ? "textbox"
+      : element.tagName === "A"
+        ? "link"
+        : element.tagName === "BUTTON"
+          ? "button"
+          : element.tagName === "INPUT" || element.tagName === "TEXTAREA"
+            ? "textbox"
+            : element.tagName.toLowerCase())
   );
 }
 
@@ -107,12 +109,12 @@ function locatorFor(element: HTMLElement): WorkflowLocator {
 
 function interactiveTarget(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null;
-  return target.closest<HTMLElement>('a,button,input,textarea,select,[role],[tabindex]:not([tabindex="-1"])');
+  return target.closest<HTMLElement>('a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])');
 }
 
 function findByLocator(locator: WorkflowLocator): HTMLElement | null {
   const candidates = Array.from(
-    document.querySelectorAll<HTMLElement>('a,button,input,textarea,select,[role],[tabindex]:not([tabindex="-1"])')
+    document.querySelectorAll<HTMLElement>('a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])')
   ).filter(isVisible);
 
   return (
@@ -159,9 +161,24 @@ document.addEventListener(
   true
 );
 
+document.addEventListener(
+  "input",
+  (event) => {
+    if (!recording) return;
+    const element = interactiveTarget(event.target);
+    if (!element?.isContentEditable) return;
+    recordedSteps.push({
+      action: "type",
+      locator: locatorFor(element),
+      text: element.innerText || element.textContent || ""
+    });
+  },
+  true
+);
+
 function observe(tabId: number) {
   const selector =
-    'a,button,input,textarea,select,[role],[tabindex]:not([tabindex="-1"])';
+    'a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])';
   const elements = Array.from(document.querySelectorAll<HTMLElement>(selector))
     .filter(isVisible)
     .slice(0, 500)
@@ -199,16 +216,55 @@ function getElement(id: unknown): HTMLElement {
 
 function writeText(element: HTMLElement, text: string, replace = true) {
   element.focus();
+
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     if (element instanceof HTMLInputElement && element.type === "password") {
       throw new Error("Password fields are not replayed by Watch Me");
     }
     if (replace) element.value = "";
     element.value += text;
-    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: text
+      })
+    );
     element.dispatchEvent(new Event("change", { bubbles: true }));
-    return { typed: text.length };
+    return { typed: text.length, editor: "form-control" };
   }
+
+  if (element.isContentEditable) {
+    if (replace) {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+
+    let inserted = false;
+    try {
+      inserted = document.execCommand("insertText", false, text);
+    } catch {
+      inserted = false;
+    }
+
+    if (!inserted) {
+      if (replace) element.textContent = "";
+      element.textContent = (element.textContent || "") + text;
+      element.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          inputType: "insertText",
+          data: text
+        })
+      );
+    }
+
+    return { typed: text.length, editor: "contenteditable" };
+  }
+
   throw new Error("Element is not text-editable");
 }
 
