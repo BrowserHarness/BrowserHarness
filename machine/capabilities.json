@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "product-direction",
+  "status": "v0.1.1-model-runtime",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -8,7 +8,41 @@
     },
     {
       "id": "model-routing",
-      "owner": "BrowserCrew/browsercrew + BrowserCrew/Automation"
+      "owner": "BrowserCrew/browsercrew + BrowserCrew/Automation",
+      "runtime_contract": {
+        "model_capabilities": [
+          "chat",
+          "agent",
+          "vision",
+          "embedding",
+          "reranker",
+          "audio",
+          "image",
+          "unknown"
+        ],
+        "active_roles": [
+          "chat",
+          "agent"
+        ],
+        "saved_connections": "multiple",
+        "routing": "one primary + at most one fallback",
+        "fallback_on": [
+          "429",
+          "5xx",
+          "timeout",
+          "empty-response",
+          "agent-format-failure"
+        ],
+        "no_silent_fallback_on": [
+          "401",
+          "403",
+          "authorization/permission failure"
+        ],
+        "validation": [
+          "chat health probe",
+          "structured agent health probe"
+        ]
+      }
     },
     {
       "id": "skills",
