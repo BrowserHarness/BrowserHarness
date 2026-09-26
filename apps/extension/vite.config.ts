@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
@@ -9,9 +12,9 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        sidepanel: resolve(__dirname, "sidepanel.html"),
-        "service-worker": resolve(__dirname, "src/background/service-worker.ts"),
-        content: resolve(__dirname, "src/content/content.ts")
+        sidepanel: resolve(root, "sidepanel.html"),
+        "service-worker": resolve(root, "src/background/service-worker.ts"),
+        content: resolve(root, "src/content/content.ts")
       },
       output: {
         entryFileNames: "assets/[name].js",
