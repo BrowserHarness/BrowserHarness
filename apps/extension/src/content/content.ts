@@ -54,12 +54,54 @@ function roleFor(element: HTMLElement): string {
   );
 }
 
+const CONSEQUENTIAL_LABEL =
+  /\b(send|submit|publish|buy|purchase|checkout|place order|pay|delete|remove|change password|security|confirm order|complete order)\b/i;
+
+function riskForElement(element: HTMLElement) {
+  const name = accessibleName(element);
+  const form =
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLButtonElement ||
+    element instanceof HTMLSelectElement
+      ? element.form
+      : element.closest("form");
+
+  const formMethod = (form?.getAttribute("method") || "get").toLowerCase();
+  const isSubmitControl =
+    (element instanceof HTMLButtonElement && element.type === "submit") ||
+    (element instanceof HTMLInputElement &&
+      ["submit", "image"].includes(element.type));
+
+  const labelRisk = CONSEQUENTIAL_LABEL.test(name);
+  const postSubmitRisk = Boolean(form && isSubmitControl && formMethod !== "get");
+  const enterSubmitRisk = Boolean(
+    form &&
+      formMethod !== "get" &&
+      (element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement)
+  );
+
+  return {
+    requires_approval: labelRisk || postSubmitRisk,
+    approval_reason: labelRisk
+      ? `Activate “${name || roleFor(element)}”`
+      : postSubmitRisk
+        ? "Submit this form"
+        : undefined,
+    enter_requires_approval: enterSubmitRisk
+  };
+}
+
 function locatorFor(element: HTMLElement): WorkflowLocator {
+  const risk = riskForElement(element);
   return {
     tag: element.tagName.toLowerCase(),
     role: roleFor(element),
     accessible_name: accessibleName(element),
-    input_type: element instanceof HTMLInputElement ? element.type : undefined
+    input_type: element instanceof HTMLInputElement ? element.type : undefined,
+    requires_approval: risk.requires_approval,
+    approval_reason: risk.approval_reason
   };
 }
 
@@ -128,10 +170,15 @@ function observe(tabId: number) {
       tag: element.tagName.toLowerCase(),
       role: roleFor(element),
       accessible_name: accessibleName(element),
-      type: element instanceof HTMLInputElement ? element.type : undefined,
+      type:
+        element instanceof HTMLInputElement || element instanceof HTMLButtonElement
+          ? element.type
+          : undefined,
       visible: true,
       disabled:
-        "disabled" in element && Boolean((element as HTMLButtonElement | HTMLInputElement).disabled)
+        "disabled" in element &&
+        Boolean((element as HTMLButtonElement | HTMLInputElement).disabled),
+      ...riskForElement(element)
     }));
 
   return {
