@@ -21,7 +21,8 @@ export function isRecoverableProviderError(error: unknown): boolean {
     /timed out/i.test(message) ||
     /empty response/i.test(message) ||
     /failed the BrowserCrew structured agent capability/i.test(message) ||
-    /Model did not return a BrowserCrew action/i.test(message)
+    /Model did not return a BrowserCrew action/i.test(message) ||
+    /vision-capable model/i.test(message)
   );
 }
 
@@ -71,7 +72,8 @@ export async function agentDecisionWithFallback(
   observation: PageObservation,
   trail: string[],
   signal?: AbortSignal,
-  evidence: TabEvidence[] = []
+  evidence: TabEvidence[] = [],
+  screenshotDataUrl?: string
 ): Promise<RoutedResult<AgentDecision>> {
   return runWithFallback(primary, fallback, (connection) =>
     nextAgentDecision(
@@ -80,7 +82,8 @@ export async function agentDecisionWithFallback(
       observation,
       trail,
       signal,
-      evidence
+      evidence,
+      screenshotDataUrl
     )
   );
 }
