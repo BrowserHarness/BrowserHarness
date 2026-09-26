@@ -3,13 +3,13 @@
 **Purpose:** verify the packaged MV3 extension in real Chrome before calling v0.1 release-ready.
 
 ## Latest packaged build evidence
-- Main commit used for packaged-build CI: `cee5473dfc1d0632c9b162cf9f127620457feceb`
-- GitHub Actions run: `36247547829`
+- Main commit used for packaged-build CI: `41dbeaf406bcfe28799b9781321bfbbefdab86fa`
+- GitHub Actions run: `36249044932`
 - Result: success
 - Passed: install, TypeScript, production build, output validation, ZIP packaging, artifact upload
 - Artifact: `browsercrew-extension`
-- Artifact ID: `10907589270`
-- SHA-256 digest: `6e3c8e3f96f212469ae99f08fb37c90ba9d88bfff8ed721390eb61d728459432`
+- Artifact ID: `10908303645`
+- GitHub artifact digest: `sha256:90e38ec6204f265876c5f38d545d82d661702103be6b5e789e5fd5acfd84dad0`
 
 CI proves the package builds and contains a valid manifest plus expected entry points. It does **not** prove real Chrome behavior.
 
@@ -86,7 +86,7 @@ Pass:
 - Cancel prevents it;
 - Approve permits only the requested action.
 
-**Important:** current v0.1 approval detection is an early heuristic and must be hardened before public release, especially Enter-key/form-submit paths.
+**Important:** v0.1 now gates explicit consequential labels, non-GET form submit controls, and Enter-key submission paths. Real-site smoke testing is still required before release.
 
 ### 7. Pause / stop
 During an active run:
@@ -124,9 +124,9 @@ Pass:
 - no infinite retry.
 
 ## Public-release blockers to close after smoke testing
-- harden approval classification beyond accessible-name regex;
-- prevent Enter/key paths from bypassing submit approval;
+- continue real-site approval testing for edge-case custom controls;
 - verify provider CORS/auth behavior in packaged Chrome;
+- verify Google Docs/rich-editor typing fallback in real Chrome;
 - integrate screenshot fallback with model vision or remove the fallback claim for v0.1;
 - verify single-agent multi-tab comparison end-to-end;
 - create extension icons and Web Store listing assets;
