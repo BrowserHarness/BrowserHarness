@@ -58,11 +58,37 @@ function safeHostname(url?: string) {
   }
 }
 
-function approvalDescription(observation: PageObservation, input: Record<string, unknown>) {
+function approvalDescription(
+  observation: PageObservation,
+  tool: string,
+  input: Record<string, unknown>
+) {
   const id = input.element_id;
-  const element = observation.elements.find((candidate) => candidate.element_id === id);
-  if (!element || !APPROVAL_WORDS.test(element.accessible_name)) return null;
-  return `Click “${element.accessible_name || "this control"}” on ${safeHostname(observation.url) || "this page"}`;
+  const element =
+    typeof id === "string"
+      ? observation.elements.find((candidate) => candidate.element_id === id)
+      : undefined;
+  const host = safeHostname(observation.url) || "this page";
+
+  if (tool === "click" && element) {
+    if (element.requires_approval) {
+      return `${element.approval_reason || `Activate “${element.accessible_name || "this control"}”`} on ${host}`;
+    }
+    if (APPROVAL_WORDS.test(element.accessible_name)) {
+      return `Click “${element.accessible_name || "this control"}” on ${host}`;
+    }
+  }
+
+  if (tool === "press_key" && String(input.key || "").toLowerCase() === "enter") {
+    if (!element) {
+      return `Press Enter on ${host}; this may submit the active form`;
+    }
+    if (element.enter_requires_approval) {
+      return `Press Enter in “${element.accessible_name || element.role}” on ${host}; this may submit a non-GET form`;
+    }
+  }
+
+  return null;
 }
 
 export function App() {
@@ -187,7 +213,11 @@ export function App() {
       for (const step of workflow.steps) {
         if (cancelled.current) break;
 
-        if (step.action === "click" && APPROVAL_WORDS.test(step.locator.accessible_name)) {
+        if (
+          step.action === "click" &&
+          (step.locator.requires_approval ||
+            APPROVAL_WORDS.test(step.locator.accessible_name))
+        ) {
           const approved = await requestApproval(
             `Replay “${step.locator.accessible_name || "this action"}” on ${currentHost || "this page"}`
           );
@@ -286,8 +316,12 @@ export function App() {
           return;
         }
 
-        const description = approvalDescription(observation, decision.input);
-        if (decision.tool === "click" && description) {
+        const description = approvalDescription(
+          observation,
+          decision.tool,
+          decision.input
+        );
+        if (description) {
           const approved = await requestApproval(description);
           setApproval(null);
           if (!approved) {
