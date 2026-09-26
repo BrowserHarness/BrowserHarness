@@ -35,6 +35,9 @@ jobs:
           test -f apps/extension/dist/assets/content.js
           node -e "JSON.parse(require('fs').readFileSync('apps/extension/dist/manifest.json','utf8'))"
 
+      - name: MVP automated contract gate
+        run: npm run validate:mvp
+
       - name: Package extension
         run: |
           cd apps/extension/dist
