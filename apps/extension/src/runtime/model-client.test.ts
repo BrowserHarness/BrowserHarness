@@ -175,6 +175,67 @@ describe("nextAgentDecision", () => {
   });
 });
 
+describe("vision screenshot planning", () => {
+  it("sends screenshot evidence as multimodal content for vision models", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  kind: "final",
+                  message: "Visual page understood"
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    await nextAgentDecision(
+      {
+        ...nvidia,
+        model: "qwen/qwen2.5-vl-72b-instruct"
+      },
+      "Describe this page",
+      observation,
+      [],
+      undefined,
+      [],
+      "data:image/png;base64,ZmFrZQ=="
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body));
+    expect(body.messages[1].content).toEqual([
+      { type: "text", text: expect.any(String) },
+      {
+        type: "image_url",
+        image_url: {
+          url: "data:image/png;base64,ZmFrZQ=="
+        }
+      }
+    ]);
+  });
+
+  it("rejects screenshot evidence for a non-vision model", async () => {
+    await expect(
+      nextAgentDecision(
+        nvidia,
+        "Describe this page",
+        observation,
+        [],
+        undefined,
+        [],
+        "data:image/png;base64,ZmFrZQ=="
+      )
+    ).rejects.toThrow("vision-capable model");
+  });
+});
+
 describe("parseAgentDecision", () => {
   it("extracts a balanced JSON object from surrounding text", () => {
     expect(
