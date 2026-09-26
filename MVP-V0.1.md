@@ -19,7 +19,10 @@ Persistent chat controls:
 ## Supported providers
 1. OpenAI
 2. Anthropic
-3. OpenAI-compatible endpoint
+3. NVIDIA hosted NIM
+4. OpenAI-compatible endpoint
+
+Where a provider exposes an OpenAI-compatible `/models` endpoint, BrowserCrew should discover available model IDs automatically after credentials are entered and present them in a searchable selector. Manual model entry remains available as a fallback.
 
 Other providers/local runtimes are post-MVP unless they can be added through the compatible adapter without delaying release.
 
