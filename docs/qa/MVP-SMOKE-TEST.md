@@ -1,138 +1,125 @@
-# BrowserCrew v0.1 Chrome Smoke-Test Gate
+# BrowserCrew v0.1 Final Real-Chrome Acceptance Gate
 
-**Purpose:** verify the packaged MV3 extension in real Chrome before calling v0.1 release-ready.
+**Purpose:** perform the smallest necessary manual acceptance pass after the automated MVP gate is green.
 
-## Latest packaged build evidence
-- Main commit used for packaged-build CI: `41dbeaf406bcfe28799b9781321bfbbefdab86fa`
-- GitHub Actions run: `36249044932`
-- Result: success
-- Passed: install, TypeScript, production build, output validation, ZIP packaging, artifact upload
-- Artifact: `browsercrew-extension`
-- Artifact ID: `10908303645`
-- GitHub artifact digest: `sha256:90e38ec6204f265876c5f38d545d82d661702103be6b5e789e5fd5acfd84dad0`
+## Automated prerequisite
+Do not start manual acceptance unless the exact candidate has already passed:
+- TypeScript;
+- all unit/regression tests;
+- production build;
+- MV3 output validation;
+- MVP automated contract gate;
+- ZIP packaging and artifact upload.
 
-CI proves the package builds and contains a valid manifest plus expected entry points. It does **not** prove real Chrome behavior.
+Verified automated code baseline before final docs reconciliation:
+- code SHA: `76218f69e16afae0f079d0cf4b4956754df39dfa`
+- GitHub Actions run: `36262532519`
+- tests: **63/63 across 14 files**
+- result: **success**
 
-## Manual Chrome install
-1. Download the `browsercrew-extension` artifact from the successful workflow run.
-2. Extract the outer artifact ZIP; it contains the packaged BrowserCrew extension ZIP.
-3. Extract the BrowserCrew extension ZIP.
-4. Open `chrome://extensions`.
-5. Enable Developer mode.
-6. Choose **Load unpacked**.
-7. Select the extracted extension folder containing `manifest.json`.
-8. Pin/open BrowserCrew and confirm the side panel loads without console errors.
+## What automation already covers
+The deterministic runtime suite covers:
+1. current-page read;
+2. navigation and post-action verification;
+3. site search;
+4. form fill without submit;
+5. multi-tab retained evidence;
+6. approval cancellation before consequential action;
+7. pause and stop gates;
+8. Watch Me workflow storage contract;
+9. stale-element re-observation/recovery;
+10. unsupported-page failure;
+11. provider 429/timeout/fallback policy;
+12. model capability discovery and Chat/Agent probes;
+13. screenshot handoff to vision-capable models;
+14. local-history privacy behavior;
+15. optional website/custom-endpoint permission helpers;
+16. MV3 permission posture and extension icons.
 
-## Provider smoke tests
-Run separately with:
-- OpenAI
-- Anthropic
-- one OpenAI-compatible endpoint
+## Final manual acceptance only
 
-Verify:
-- connection settings persist locally;
-- invalid credentials produce understandable errors;
-- valid credentials can complete a read-only page task;
-- API keys never appear in agent activity or browser console logs.
-
-## Release scenarios
-
-### 1. Current-page read
-Prompt: **Summarize this page.**
-
-Pass:
-- BrowserCrew observes the active normal webpage;
-- response matches visible page content;
-- no mutation occurs.
-
-### 2. Navigate
-Prompt: **Open the pricing page on this site.**
+### A. Install the packaged build
+1. Extract the CI artifact and inner extension ZIP.
+2. Open `chrome://extensions`.
+3. Enable Developer mode.
+4. Load the unpacked folder containing `manifest.json`.
+5. Open the BrowserCrew side panel.
 
 Pass:
-- agent uses semantic page elements or navigate;
-- final URL is correct;
-- BrowserCrew re-observes after navigation.
+- side panel renders;
+- no startup console errors;
+- temporary MVP extension icon appears.
 
-### 3. Site search
-Prompt: **Search this site for <term>.**
-
-Pass:
-- input receives the text;
-- search is triggered;
-- results page/state is verified.
-
-### 4. Form fill without submit
-Prompt: **Fill these fields but do not submit.**
+### B. Validate one live model
+In **Models & connections**:
+1. connect one provider;
+2. select a model;
+3. run **Test Chat + Agent & save**.
 
 Pass:
-- requested non-sensitive fields are filled;
-- submit/send is not triggered;
-- resulting values/state are observable.
+- Chat health is healthy;
+- Agent health is healthy for browser automation;
+- no API key appears in visible activity/log output.
 
-### 5. Multi-tab single-agent comparison
-Prompt: **Open the first three items in separate tabs and compare them.**
+Optional: configure one second healthy model as Fallback and confirm the header shows **Auto**.
 
-Pass:
-- tabs are created;
-- agent can switch/observe them;
-- comparison cites information actually observed.
-
-### 6. Consequential-action approval
-Attempt a send/submit/purchase/delete/security-changing action.
+### C. Direct chat
+Prompt:
+`write a 30 second video script about AI and its future`
 
 Pass:
-- action stops before execution;
-- exact proposed action is shown in chat;
+- response is returned as ordinary chat;
+- BrowserCrew does not read the current webpage.
+
+### D. Normal browser task
+Use a safe normal website task such as current-page summary, navigation, or site search.
+
+Pass:
+- observe → decide → act → verify is visible;
+- result matches the page;
+- no repeated-action loop.
+
+### E. Browser access
+Test with all-sites access off, then enable it in Settings.
+
+Pass:
+- current-tab invocation works where Chrome grants active-tab access;
+- cross-site/multi-tab access asks for or uses the optional website permission;
+- permission failure is reported as `PERMISSION_REQUIRED`, not as a generic reload error.
+
+### F. Google Docs adapter
+Open Google Docs, place the cursor, and request a short insertion.
+
+Pass:
+- BrowserCrew detects the Google Docs adapter;
+- text is inserted at the active document editor target;
+- activity finishes instead of hanging.
+
+### G. Watch Me
+Record a safe click/text workflow and replay it.
+
+Pass:
+- semantic steps save locally;
+- password fields are not captured;
+- replay completes;
+- consequential replay actions still require approval.
+
+### H. Consequential approval
+Attempt a harmless test flow whose final control is classified as send/submit/purchase/delete/security-changing, without completing a real transaction.
+
+Pass:
+- BrowserCrew stops before the action;
 - Cancel prevents it;
-- Approve permits only the requested action.
+- Approve permits only that proposed action.
 
-**Important:** v0.1 now gates explicit consequential labels, non-GET form submit controls, and Enter-key submission paths. Real-site smoke testing is still required before release.
-
-### 7. Pause / stop
-During an active run:
-- Pause freezes progression;
-- Resume continues;
-- Stop ends the run and cancels a pending approval.
-
-### 8. Watch Me
-1. Start Record.
-2. Perform safe clicks/text entry on one page.
-3. Finish recording.
-4. Replay.
+### I. Vision screenshot
+Only if a validated vision-capable Agent model is available, use a visually sparse/canvas page that causes the agent to request `screenshot`.
 
 Pass:
-- workflow saves locally;
-- password fields are never recorded/replayed;
-- replay resolves semantic locators;
-- consequential recorded clicks still require approval.
+- screenshot is captured;
+- image is sent only to the vision-capable model;
+- next planning turn uses the visual evidence;
+- non-vision models reject screenshot evidence cleanly.
 
-Current v0.1 Watch Me is intentionally current-page/site-scoped; navigation recording is not yet a release claim.
-
-### 9. Stale-element recovery
-Cause page state to change after observation.
-
-Pass:
-- stale element returns a typed failure;
-- agent re-observes;
-- retries remain bounded.
-
-### 10. Unsupported/protected page
-Try a Chrome internal page.
-
-Pass:
-- BrowserCrew shows a clear unsupported-page/content-script error;
-- no infinite retry.
-
-## Public-release blockers to close after smoke testing
-- continue real-site approval testing for edge-case custom controls;
-- verify provider CORS/auth behavior in packaged Chrome;
-- verify Google Docs/rich-editor typing fallback in real Chrome;
-- integrate screenshot fallback with model vision or remove the fallback claim for v0.1;
-- verify single-agent multi-tab comparison end-to-end;
-- create extension icons and Web Store listing assets;
-- publish privacy policy / terms / support contact;
-- review broad host permissions for Chrome Web Store disclosure and least privilege;
-- add a usable task-history view or explicitly document history as retained local state only.
-
-## Ship rule
-Fix failures in the ten release scenarios before adding post-MVP features.
+## Public-release rule
+If this focused real-Chrome acceptance passes, v0.1 can move from **automated-complete** to **release candidate accepted**. Failures should be recorded as concrete acceptance blockers; do not reopen post-MVP scope.
