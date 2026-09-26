@@ -1,3 +1,5 @@
+import { loadPreferences } from "../settings/preferences";
+
 export interface TaskHistoryEntry {
   id: string;
   task: string;
@@ -18,6 +20,9 @@ export async function loadTaskHistory(): Promise<TaskHistoryEntry[]> {
 export async function saveTaskHistoryEntry(
   entry: Omit<TaskHistoryEntry, "id" | "timestamp">
 ): Promise<void> {
+  const preferences = await loadPreferences();
+  if (!preferences.retainTaskHistory) return;
+
   const previous = await loadTaskHistory();
   const next: TaskHistoryEntry = {
     ...entry,
