@@ -167,6 +167,62 @@ describe("Browser MVP engine scenarios", () => {
     expect(h.contexts[1].observation.title).toBe("Pricing");
   });
 
+  it("runs a site search and verifies the results state", async () => {
+    const searchElement = {
+      element_id: "bc-search",
+      tag: "input",
+      role: "textbox",
+      accessible_name: "Search",
+      visible: true,
+      disabled: false,
+      enter_requires_approval: false
+    };
+    const h = harness({
+      observations: [
+        page(1, "Home", "Search", [searchElement]),
+        page(1, "Home", "BrowserCrew", [searchElement]),
+        page(1, "Results", "BrowserCrew result 1")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "type",
+          input: {
+            element_id: "bc-search",
+            text: "BrowserCrew"
+          },
+          note: "Entering search term"
+        },
+        {
+          kind: "tool",
+          tool: "press_key",
+          input: {
+            element_id: "bc-search",
+            key: "Enter"
+          },
+          note: "Running search"
+        },
+        {
+          kind: "final",
+          message: "Search results are visible."
+        }
+      ]
+    });
+
+    const result = await runBrowserTask(
+      "Search this site for BrowserCrew",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(
+      h.toolMock.mock.calls.map(([tool]) => tool)
+    ).toEqual(
+      expect.arrayContaining(["type", "press_key"])
+    );
+    expect(h.contexts.at(-1)?.observation.title).toBe("Results");
+  });
+
   it("fills a form field without submitting", async () => {
     const inputElement = {
       element_id: "bc-name",
