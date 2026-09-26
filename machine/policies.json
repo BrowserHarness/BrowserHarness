@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "autonomy_levels": [
+    "A0",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5"
+  ],
+  "default_new_workflow_autonomy": "A0",
+  "tab_mutation_default": "exclusive",
+  "web_content_trust": "untrusted",
+  "post_mutation_verification": true,
+  "self_improvement": "candidate-evaluate-promote",
+  "secret_values_in_git": false
+}
