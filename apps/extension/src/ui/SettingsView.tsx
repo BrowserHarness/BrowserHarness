@@ -91,6 +91,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   const [connectionMessage, setConnectionMessage] = useState("");
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
   const [routing, setRouting] = useState<RuntimeRoutingConfig>({});
+  const [endpointAccess, setEndpointAccess] = useState(true);
 
   const providerDefinition = PROVIDERS[provider];
   const effectiveBaseUrl = useMemo(
@@ -113,6 +114,15 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     void refreshRegistry();
   }, []);
 
+  useEffect(() => {
+    if (provider !== "openai-compatible" || !effectiveBaseUrl) {
+      setEndpointAccess(true);
+      return;
+    }
+
+    void hasEndpointAccess(effectiveBaseUrl).then(setEndpointAccess);
+  }, [provider, effectiveBaseUrl]);
+
   const resetConnectionTest = () => {
     setConnectionState("idle");
     setConnectionMessage("");
@@ -120,6 +130,17 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
 
   const loadModels = async (signal?: AbortSignal) => {
     if (!discoveryAvailable || !apiKey.trim() || !effectiveBaseUrl) return;
+
+    if (
+      provider === "openai-compatible" &&
+      !(await hasEndpointAccess(effectiveBaseUrl))
+    ) {
+      setEndpointAccess(false);
+      setModelsError(
+        "Grant this custom endpoint permission before BrowserCrew can load its models."
+      );
+      return;
+    }
 
     setModelsLoading(true);
     setModelsError("");
@@ -198,6 +219,18 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   });
 
   const handleTestAndSave = async () => {
+    if (provider === "openai-compatible") {
+      const granted = await ensureEndpointAccess(effectiveBaseUrl);
+      setEndpointAccess(granted);
+      if (!granted) {
+        setConnectionState("error");
+        setConnectionMessage(
+          "Chrome did not grant access to this custom model endpoint."
+        );
+        return;
+      }
+    }
+
     const config = candidateConfig();
     setConnectionState("testing");
     setConnectionMessage("Running Chat and Agent capability checks…");
@@ -361,6 +394,25 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                 fullWidth
               />
             )}
+
+            {provider === "openai-compatible" &&
+              effectiveBaseUrl &&
+              !endpointAccess && (
+                <Button
+                  variant="outlined"
+                  onClick={async () => {
+                    const granted =
+                      await ensureEndpointAccess(effectiveBaseUrl);
+                    setEndpointAccess(granted);
+                    if (granted) {
+                      setModelsError("");
+                      void loadModels();
+                    }
+                  }}
+                >
+                  Grant access to custom endpoint
+                </Button>
+              )}
 
             <TextField
               label="API key"
@@ -629,6 +681,8 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
             </Stack>
           </Paper>
         )}
+
+        <MvpSettingsSections />
       </Stack>
     </Box>
   );
