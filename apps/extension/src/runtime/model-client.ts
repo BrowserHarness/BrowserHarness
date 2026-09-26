@@ -8,10 +8,15 @@ export type AgentDecision =
   | { kind: "tool"; tool: ToolName; input: Record<string, unknown>; note: string }
   | { kind: "final"; message: string };
 
-export interface ModelHealthResult {
+export interface CapabilityProbeResult {
   ok: true;
   latencyMs: number;
   preview: string;
+}
+
+export interface ModelHealthResult {
+  chat: CapabilityProbeResult;
+  agent: CapabilityProbeResult;
 }
 
 const TOOL_NAMES = new Set<ToolName>([
@@ -412,10 +417,10 @@ export async function directChatCompletion(
   );
 }
 
-export async function testModelConnection(
+export async function testChatCapability(
   config: ProviderConfig,
   signal?: AbortSignal
-): Promise<ModelHealthResult> {
+): Promise<CapabilityProbeResult> {
   const started = performance.now();
 
   const preview =
@@ -441,6 +446,62 @@ export async function testModelConnection(
     latencyMs: Math.round(performance.now() - started),
     preview: preview.slice(0, 80)
   };
+}
+
+export async function testAgentCapability(
+  config: ProviderConfig,
+  signal?: AbortSignal
+): Promise<CapabilityProbeResult> {
+  const started = performance.now();
+  const probeObservation: PageObservation = {
+    tab_id: 0,
+    url: "https://browsercrew.local/health-check",
+    title: "BrowserCrew Agent Health Check",
+    visible_text: "A button named Continue is available.",
+    elements: [
+      {
+        element_id: "bc-health-1",
+        tag: "button",
+        role: "button",
+        accessible_name: "Continue",
+        visible: true,
+        disabled: false
+      }
+    ]
+  };
+
+  const decision = await nextAgentDecision(
+    config,
+    'Click the "Continue" button.',
+    probeObservation,
+    [],
+    signal
+  );
+
+  if (
+    decision.kind !== "tool" ||
+    decision.tool !== "click" ||
+    decision.input.element_id !== "bc-health-1"
+  ) {
+    throw new Error(
+      "Model passed chat but failed the BrowserCrew structured agent capability check."
+    );
+  }
+
+  return {
+    ok: true,
+    latencyMs: Math.round(performance.now() - started),
+    preview: "Structured browser action OK"
+  };
+}
+
+export async function testModelConnection(
+  config: ProviderConfig,
+  signal?: AbortSignal
+): Promise<ModelHealthResult> {
+  const chat = await testChatCapability(config, signal);
+  const agent = await testAgentCapability(config, signal);
+  return { chat, agent };
 }
 
 export async function nextAgentDecision(
