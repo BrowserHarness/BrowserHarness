@@ -150,7 +150,11 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
 
     try {
       const result = await testModelConnection(config);
-      await saveProviderConfig(config);
+      await saveProviderConfig({
+        ...config,
+        validatedAt: new Date().toISOString(),
+        validatedLatencyMs: result.latencyMs
+      });
       setConnectionState("success");
       setConnectionMessage(
         `Connected • ${result.latencyMs} ms • ${result.preview || "model responded"}`
