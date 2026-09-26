@@ -271,7 +271,7 @@ export function App() {
   const runTask = async () => {
     const task = prompt.trim();
     if (!task || running) return;
-    if (!config?.apiKey || !config.model) {
+    if (!config?.apiKey || !config.model || !config.validatedAt) {
       setView("settings");
       return;
     }
