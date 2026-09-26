@@ -120,6 +120,15 @@ chrome.runtime.onMessage.addListener((request: ExtensionRequest, _sender, sendRe
         sendResponse(await runTool(request.tool, request.input));
         return;
       }
+      if (request.type === "WATCH_START" || request.type === "WATCH_STOP" || request.type === "WATCH_REPLAY_STEP") {
+        const tab = await targetTab(typeof request.tab_id === "number" ? { tab_id: request.tab_id } : {});
+        const payload =
+          request.type === "WATCH_REPLAY_STEP"
+            ? { type: request.type, step: request.step }
+            : { type: request.type };
+        sendResponse(await sendToTab(tab.id!, payload));
+        return;
+      }
       sendResponse({ ok: false, error: { code: "INTERNAL_ERROR", message: "Unknown request" } });
     } catch (error) {
       sendResponse({
