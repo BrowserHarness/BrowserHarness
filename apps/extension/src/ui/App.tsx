@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import AddIcon from "@mui/icons-material/Add";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import PauseIcon from "@mui/icons-material/Pause";
+import ReplayIcon from "@mui/icons-material/Replay";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import StopIcon from "@mui/icons-material/Stop";
@@ -26,6 +27,11 @@ import {
 import { loadProviderConfig, type ProviderConfig } from "../settings/provider-store";
 import { nextAgentDecision } from "../runtime/model-client";
 import type { PageObservation, ToolResult } from "../runtime/protocol";
+import {
+  saveWorkflow,
+  type RecordedWorkflowStep,
+  type SavedWorkflow
+} from "../runtime/workflows";
 import { SettingsView } from "./SettingsView";
 
 type Message = { id: string; role: "user" | "assistant"; text: string };
@@ -36,17 +42,27 @@ type Approval = {
   resolve: (approved: boolean) => void;
 };
 
-const APPROVAL_WORDS = /\b(send|submit|publish|buy|purchase|checkout|place order|pay|delete|remove|change password|security)\b/i;
+const APPROVAL_WORDS =
+  /\b(send|submit|publish|buy|purchase|checkout|place order|pay|delete|remove|change password|security)\b/i;
 
 async function extensionMessage<T>(request: unknown): Promise<ToolResult<T>> {
   return chrome.runtime.sendMessage(request);
+}
+
+function safeHostname(url?: string) {
+  if (!url) return "";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
 }
 
 function approvalDescription(observation: PageObservation, input: Record<string, unknown>) {
   const id = input.element_id;
   const element = observation.elements.find((candidate) => candidate.element_id === id);
   if (!element || !APPROVAL_WORDS.test(element.accessible_name)) return null;
-  return `Click “${element.accessible_name || "this control"}” on ${new URL(observation.url).hostname}`;
+  return `Click “${element.accessible_name || "this control"}” on ${safeHostname(observation.url) || "this page"}`;
 }
 
 export function App() {
@@ -58,6 +74,8 @@ export function App() {
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [lastWorkflow, setLastWorkflow] = useState<SavedWorkflow | null>(null);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const cancelled = useRef(false);
@@ -76,6 +94,13 @@ export function App() {
     void refreshContext();
   }, [view]);
 
+  const addAssistantMessage = (text: string) => {
+    setMessages((items) => [
+      ...items,
+      { id: crypto.randomUUID(), role: "assistant", text }
+    ]);
+  };
+
   const addActivity = (text: string, state: Activity["state"] = "working") => {
     const id = crypto.randomUUID();
     setActivities((items) => [...items.slice(-6), { id, text, state }]);
@@ -83,11 +108,133 @@ export function App() {
   };
 
   const finishActivity = (id: string, state: Activity["state"] = "done") => {
-    setActivities((items) => items.map((item) => (item.id === id ? { ...item, state } : item)));
+    setActivities((items) =>
+      items.map((item) => (item.id === id ? { ...item, state } : item))
+    );
   };
 
   const requestApproval = (description: string) =>
     new Promise<boolean>((resolve) => setApproval({ description, resolve }));
+
+  const handleRecord = async () => {
+    if (!tab?.tab_id) {
+      addAssistantMessage("Open a normal webpage before recording a workflow.");
+      return;
+    }
+
+    if (!recording) {
+      const result = await extensionMessage<{ recording: boolean }>({
+        type: "WATCH_START",
+        tab_id: tab.tab_id
+      });
+      if (!result.ok) {
+        addAssistantMessage(result.error?.message || "I couldn't start recording on this page.");
+        return;
+      }
+      setRecording(true);
+      addAssistantMessage(
+        "Recording this page. Show me the clicks and text entry you want BrowserCrew to learn. Password fields are never recorded."
+      );
+      return;
+    }
+
+    const result = await extensionMessage<{ steps: RecordedWorkflowStep[] }>({
+      type: "WATCH_STOP",
+      tab_id: tab.tab_id
+    });
+    setRecording(false);
+    if (!result.ok || !result.data) {
+      addAssistantMessage(result.error?.message || "I couldn't finish this recording.");
+      return;
+    }
+
+    const steps = result.data.steps;
+    if (steps.length === 0) {
+      addAssistantMessage("Recording stopped. I didn't capture any reusable actions.");
+      return;
+    }
+
+    const workflow: SavedWorkflow = {
+      id: crypto.randomUUID(),
+      name: `Workflow ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      created_at: new Date().toISOString(),
+      url: tab.url || "",
+      steps
+    };
+    await saveWorkflow(workflow);
+    setLastWorkflow(workflow);
+    addAssistantMessage(
+      `Saved “${workflow.name}” with ${steps.length} step${steps.length === 1 ? "" : "s"}. You can replay it from this chat.`
+    );
+  };
+
+  const replayWorkflow = async (workflow: SavedWorkflow) => {
+    if (!tab?.tab_id) return;
+    const recordedHost = safeHostname(workflow.url);
+    const currentHost = safeHostname(tab.url);
+    if (recordedHost && currentHost && recordedHost !== currentHost) {
+      addAssistantMessage(
+        `Open ${recordedHost} before replaying “${workflow.name}”. The v0.1 recorder is intentionally site-scoped.`
+      );
+      return;
+    }
+
+    setRunning(true);
+    cancelled.current = false;
+    setActivities([]);
+
+    try {
+      for (const step of workflow.steps) {
+        if (cancelled.current) break;
+
+        if (step.action === "click" && APPROVAL_WORDS.test(step.locator.accessible_name)) {
+          const approved = await requestApproval(
+            `Replay “${step.locator.accessible_name || "this action"}” on ${currentHost || "this page"}`
+          );
+          setApproval(null);
+          if (!approved) {
+            addAssistantMessage("Workflow replay stopped before that action.");
+            return;
+          }
+        }
+
+        const activity = addActivity(
+          step.action === "click"
+            ? `Replaying click: ${step.locator.accessible_name || step.locator.role}`
+            : `Replaying text entry: ${step.locator.accessible_name || step.locator.role}`
+        );
+
+        const result = await extensionMessage({
+          type: "WATCH_REPLAY_STEP",
+          tab_id: tab.tab_id,
+          step
+        });
+        finishActivity(activity, result.ok ? "done" : "error");
+        if (!result.ok) {
+          throw new Error(result.error?.message || "Workflow replay failed");
+        }
+
+        await extensionMessage({
+          type: "BROWSER_TOOL",
+          tool: "wait",
+          input: { milliseconds: 350 }
+        });
+      }
+
+      if (cancelled.current) {
+        addAssistantMessage("Workflow replay stopped.");
+      } else {
+        addAssistantMessage(`Finished replaying “${workflow.name}”.`);
+      }
+    } catch (error) {
+      addAssistantMessage(
+        error instanceof Error ? error.message : "Workflow replay failed."
+      );
+    } finally {
+      setRunning(false);
+      cancelled.current = false;
+    }
+  };
 
   const runTask = async () => {
     const task = prompt.trim();
@@ -98,7 +245,10 @@ export function App() {
     }
 
     setPrompt("");
-    setMessages((items) => [...items, { id: crypto.randomUUID(), role: "user", text: task }]);
+    setMessages((items) => [
+      ...items,
+      { id: crypto.randomUUID(), role: "user", text: task }
+    ]);
     setActivities([]);
     setRunning(true);
     setPaused(false);
@@ -113,7 +263,9 @@ export function App() {
         input: {}
       });
       if (!observationResult.ok || !observationResult.data) {
-        throw new Error(observationResult.error?.message || "Could not observe this page");
+        throw new Error(
+          observationResult.error?.message || "Could not observe this page"
+        );
       }
       let observation = observationResult.data;
 
@@ -122,15 +274,14 @@ export function App() {
           await new Promise((resolve) => window.setTimeout(resolve, 150));
         }
 
-        const thinking = addActivity(step === 0 ? "Reading the current page" : "Deciding the next action");
+        const thinking = addActivity(
+          step === 0 ? "Reading the current page" : "Deciding the next action"
+        );
         const decision = await nextAgentDecision(config, task, observation, trail);
         finishActivity(thinking);
 
         if (decision.kind === "final") {
-          setMessages((items) => [
-            ...items,
-            { id: crypto.randomUUID(), role: "assistant", text: decision.message }
-          ]);
+          addAssistantMessage(decision.message);
           await saveHistory(task, decision.message);
           return;
         }
@@ -140,15 +291,14 @@ export function App() {
           const approved = await requestApproval(description);
           setApproval(null);
           if (!approved) {
-            setMessages((items) => [
-              ...items,
-              { id: crypto.randomUUID(), role: "assistant", text: "I stopped before that action." }
-            ]);
+            addAssistantMessage("I stopped before that action.");
             return;
           }
         }
 
-        const activityId = addActivity(decision.note || `Using ${decision.tool}`);
+        const activityId = addActivity(
+          decision.note || `Using ${decision.tool}`
+        );
         const result = await extensionMessage({
           type: "BROWSER_TOOL",
           tool: decision.tool,
@@ -161,8 +311,16 @@ export function App() {
           trail.push("Element became stale; re-observing before retry.");
         }
 
-        if (["navigate", "click", "type", "press_key", "scroll", "open_tab", "switch_tab"].includes(decision.tool)) {
-          await extensionMessage({ type: "BROWSER_TOOL", tool: "wait", input: { milliseconds: 450 } });
+        if (
+          ["navigate", "click", "type", "press_key", "scroll", "open_tab", "switch_tab"].includes(
+            decision.tool
+          )
+        ) {
+          await extensionMessage({
+            type: "BROWSER_TOOL",
+            tool: "wait",
+            input: { milliseconds: 450 }
+          });
         }
 
         observationResult = await extensionMessage<PageObservation>({
@@ -171,28 +329,25 @@ export function App() {
           input: {}
         });
         if (!observationResult.ok || !observationResult.data) {
-          throw new Error(observationResult.error?.message || "Could not verify the page after the action");
+          throw new Error(
+            observationResult.error?.message ||
+              "Could not verify the page after the action"
+          );
         }
         observation = observationResult.data;
       }
 
       if (cancelled.current) {
-        setMessages((items) => [
-          ...items,
-          { id: crypto.randomUUID(), role: "assistant", text: "Stopped." }
-        ]);
+        addAssistantMessage("Stopped.");
       } else {
         throw new Error("Task reached the v0.1 action limit before completion");
       }
     } catch (error) {
-      setMessages((items) => [
-        ...items,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: error instanceof Error ? error.message : "BrowserCrew hit an unexpected error."
-        }
-      ]);
+      addAssistantMessage(
+        error instanceof Error
+          ? error.message
+          : "BrowserCrew hit an unexpected error."
+      );
     } finally {
       setRunning(false);
       setPaused(false);
@@ -206,32 +361,82 @@ export function App() {
     const stored = await chrome.storage.local.get(key);
     const previous = Array.isArray(stored[key]) ? stored[key] : [];
     await chrome.storage.local.set({
-      [key]: [{ task, result, timestamp: new Date().toISOString(), url: tab?.url }, ...previous].slice(0, 50)
+      [key]: [
+        { task, result, timestamp: new Date().toISOString(), url: tab?.url },
+        ...previous
+      ].slice(0, 50)
     });
   };
 
-  if (view === "settings") return <SettingsView onBack={() => setView("chat")} />;
+  const handleStop = () => {
+    cancelled.current = true;
+    pausedRef.current = false;
+    setPaused(false);
+    if (approval) {
+      approval.resolve(false);
+      setApproval(null);
+    }
+  };
+
+  if (view === "settings") {
+    return <SettingsView onBack={() => setView("chat")} />;
+  }
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", bgcolor: "background.default" }}>
-      <AppBar position="sticky" color="transparent" elevation={0} sx={{ borderBottom: 1, borderColor: "divider", backdropFilter: "blur(12px)" }}>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        bgcolor: "background.default"
+      }}
+    >
+      <AppBar
+        position="sticky"
+        color="transparent"
+        elevation={0}
+        sx={{
+          borderBottom: 1,
+          borderColor: "divider",
+          backdropFilter: "blur(12px)"
+        }}
+      >
         <Toolbar variant="dense" sx={{ minHeight: 56, gap: 1 }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="h6" noWrap>BrowserCrew</Typography>
+            <Typography variant="h6" noWrap>
+              BrowserCrew
+            </Typography>
             <Typography variant="caption" color="text.secondary" noWrap>
-              {tab?.url ? new URL(tab.url).hostname : "No supported tab"}
+              {safeHostname(tab?.url) || "No supported tab"}
             </Typography>
           </Box>
 
           <Button size="small" onClick={(event) => setModelAnchor(event.currentTarget)}>
             {config?.model || "Connect AI"}
           </Button>
-          <Menu anchorEl={modelAnchor} open={Boolean(modelAnchor)} onClose={() => setModelAnchor(null)}>
-            <MenuItem disabled>{config ? config.provider : "No provider connected"}</MenuItem>
-            <MenuItem onClick={() => { setModelAnchor(null); setView("settings"); }}>Manage models…</MenuItem>
+          <Menu
+            anchorEl={modelAnchor}
+            open={Boolean(modelAnchor)}
+            onClose={() => setModelAnchor(null)}
+          >
+            <MenuItem disabled>
+              {config ? config.provider : "No provider connected"}
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setModelAnchor(null);
+                setView("settings");
+              }}
+            >
+              Manage models…
+            </MenuItem>
           </Menu>
           <Tooltip title="Settings">
-            <IconButton size="small" onClick={() => setView("settings")} aria-label="Settings">
+            <IconButton
+              size="small"
+              onClick={() => setView("settings")}
+              aria-label="Settings"
+            >
               <SettingsOutlinedIcon />
             </IconButton>
           </Tooltip>
@@ -241,41 +446,108 @@ export function App() {
       <Box sx={{ px: 2, pt: 1.5 }}>
         <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }}>
           <Chip size="small" label="Personal" variant="outlined" />
-          <Chip size="small" label={tab?.title || "Current tab"} variant="outlined" />
+          <Chip
+            size="small"
+            label={tab?.title || "Current tab"}
+            variant="outlined"
+          />
+          {recording && (
+            <Chip
+              size="small"
+              color="error"
+              label="Recording"
+              icon={<FiberManualRecordIcon />}
+            />
+          )}
         </Stack>
       </Box>
 
       <Box sx={{ flex: 1, p: 2, overflowY: "auto" }}>
         {messages.length === 0 ? (
-          <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ minHeight: 300, textAlign: "center" }}>
+          <Stack
+            alignItems="center"
+            justifyContent="center"
+            spacing={2}
+            sx={{ minHeight: 300, textAlign: "center" }}
+          >
             <Typography variant="h5">Give your browser a task.</Typography>
             <Typography color="text.secondary" sx={{ maxWidth: 300 }}>
               Ask BrowserCrew to read, navigate, compare, fill, or work across tabs.
             </Typography>
-            {!config && <Button variant="contained" onClick={() => setView("settings")}>Connect your AI</Button>}
+            {!config && (
+              <Button variant="contained" onClick={() => setView("settings")}>
+                Connect your AI
+              </Button>
+            )}
             <Stack direction="row" flexWrap="wrap" gap={1} justifyContent="center">
-              {["Summarize this page", "Find the best option", "Fill this form"].map((suggestion) => (
-                <Chip key={suggestion} label={suggestion} onClick={() => setPrompt(suggestion)} />
-              ))}
+              {["Summarize this page", "Find the best option", "Fill this form"].map(
+                (suggestion) => (
+                  <Chip
+                    key={suggestion}
+                    label={suggestion}
+                    onClick={() => setPrompt(suggestion)}
+                  />
+                )
+              )}
             </Stack>
           </Stack>
         ) : (
           <Stack spacing={2}>
             {messages.map((message) => (
-              <Box key={message.id} sx={{ alignSelf: message.role === "user" ? "flex-end" : "stretch", maxWidth: message.role === "user" ? "88%" : "100%" }}>
-                <Paper variant={message.role === "user" ? "outlined" : "elevation"} elevation={message.role === "assistant" ? 0 : 0} sx={{ p: 1.5, bgcolor: message.role === "user" ? "action.hover" : "transparent" }}>
+              <Box
+                key={message.id}
+                sx={{
+                  alignSelf: message.role === "user" ? "flex-end" : "stretch",
+                  maxWidth: message.role === "user" ? "88%" : "100%"
+                }}
+              >
+                <Paper
+                  variant={message.role === "user" ? "outlined" : "elevation"}
+                  elevation={0}
+                  sx={{
+                    p: 1.5,
+                    bgcolor:
+                      message.role === "user" ? "action.hover" : "transparent"
+                  }}
+                >
                   <Typography variant="body2">{message.text}</Typography>
                 </Paper>
               </Box>
             ))}
 
+            {lastWorkflow && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<ReplayIcon />}
+                onClick={() => void replayWorkflow(lastWorkflow)}
+                disabled={running || recording}
+                sx={{ alignSelf: "flex-start" }}
+              >
+                Replay {lastWorkflow.name}
+              </Button>
+            )}
+
             {activities.length > 0 && (
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" color="text.secondary">Agent activity</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Agent activity
+                </Typography>
                 <Stack spacing={0.75} mt={1}>
                   {activities.map((activity) => (
-                    <Stack key={activity.id} direction="row" spacing={1} alignItems="center">
-                      {activity.state === "working" ? <CircularProgress size={13} /> : <Box component="span">{activity.state === "done" ? "✓" : "!"}</Box>}
+                    <Stack
+                      key={activity.id}
+                      direction="row"
+                      spacing={1}
+                      alignItems="center"
+                    >
+                      {activity.state === "working" ? (
+                        <CircularProgress size={13} />
+                      ) : (
+                        <Box component="span">
+                          {activity.state === "done" ? "✓" : "!"}
+                        </Box>
+                      )}
                       <Typography variant="body2">{activity.text}</Typography>
                     </Stack>
                   ))}
@@ -284,12 +556,23 @@ export function App() {
             )}
 
             {approval && (
-              <Alert severity="warning" action={
-                <Stack direction="row" spacing={0.5}>
-                  <Button size="small" onClick={() => approval.resolve(false)}>Cancel</Button>
-                  <Button size="small" variant="contained" onClick={() => approval.resolve(true)}>Approve</Button>
-                </Stack>
-              }>
+              <Alert
+                severity="warning"
+                action={
+                  <Stack direction="row" spacing={0.5}>
+                    <Button size="small" onClick={() => approval.resolve(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => approval.resolve(true)}
+                    >
+                      Approve
+                    </Button>
+                  </Stack>
+                }
+              >
                 BrowserCrew wants to: {approval.description}
               </Alert>
             )}
@@ -301,10 +584,25 @@ export function App() {
       <Box sx={{ p: 1.5 }}>
         {running && (
           <Stack direction="row" spacing={1} mb={1}>
-            <Button size="small" startIcon={<PauseIcon />} onClick={() => setPaused((value) => { const next = !value; pausedRef.current = next; return next; })}>
+            <Button
+              size="small"
+              startIcon={<PauseIcon />}
+              onClick={() =>
+                setPaused((value) => {
+                  const next = !value;
+                  pausedRef.current = next;
+                  return next;
+                })
+              }
+            >
               {paused ? "Resume" : "Pause"}
             </Button>
-            <Button size="small" color="error" startIcon={<StopIcon />} onClick={() => { cancelled.current = true; pausedRef.current = false; setPaused(false); }}>
+            <Button
+              size="small"
+              color="error"
+              startIcon={<StopIcon />}
+              onClick={handleStop}
+            >
               Stop
             </Button>
           </Stack>
@@ -326,9 +624,33 @@ export function App() {
             input: {
               endAdornment: (
                 <Stack direction="row" alignItems="center">
-                  <Tooltip title="Attach/context — next MVP slice"><span><IconButton size="small" disabled><AddIcon /></IconButton></span></Tooltip>
-                  <Tooltip title="Watch Me & Learn — MVP"><IconButton size="small" onClick={() => setPrompt((value) => value || "Record this workflow")}><FiberManualRecordIcon fontSize="small" /></IconButton></Tooltip>
-                  <IconButton size="small" color="primary" onClick={() => void runTask()} disabled={!prompt.trim() || running} aria-label="Send">
+                  <Tooltip title="Attach/context — next MVP slice">
+                    <span>
+                      <IconButton size="small" disabled>
+                        <AddIcon />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip
+                    title={recording ? "Finish teaching" : "Watch Me & Learn"}
+                  >
+                    <IconButton
+                      size="small"
+                      color={recording ? "error" : "default"}
+                      onClick={() => void handleRecord()}
+                      disabled={running}
+                      aria-label={recording ? "Finish recording" : "Record workflow"}
+                    >
+                      <FiberManualRecordIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <IconButton
+                    size="small"
+                    color="primary"
+                    onClick={() => void runTask()}
+                    disabled={!prompt.trim() || running || recording}
+                    aria-label="Send"
+                  >
                     <SendRoundedIcon />
                   </IconButton>
                 </Stack>
