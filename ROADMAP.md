@@ -17,7 +17,8 @@ Goal: install BrowserCrew, connect an AI provider, give the current tab a task, 
 - Single agent execution loop
 - DOM/accessibility observation + screenshot fallback
 - Core tools: observe_page, navigate, click, type, press_key, scroll, wait, open_tab, switch_tab, close_tab, screenshot
-- OpenAI, Anthropic and OpenAI-compatible provider connections
+- OpenAI, Anthropic, NVIDIA and OpenAI-compatible provider connections
+- Automatic model discovery for providers exposing compatible `/models` endpoints, with manual fallback
 - Single-agent multi-tab operation
 - Inline activity, pause/stop and consequential-action approvals
 - Local task history
