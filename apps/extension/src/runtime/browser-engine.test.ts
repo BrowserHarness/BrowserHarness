@@ -305,6 +305,32 @@ describe("Browser MVP engine scenarios", () => {
     ).toHaveLength(0);
   });
 
+  it("honors the pause gate before requesting each model decision", async () => {
+    let pauseGatePassed = false;
+    const h = harness({
+      observations: [page(1, "Page", "Content")],
+      decisions: () => {
+        expect(pauseGatePassed).toBe(true);
+        return {
+          kind: "final",
+          message: "Done after pause gate."
+        };
+      }
+    });
+
+    h.dependencies.waitWhilePaused = vi.fn(async () => {
+      pauseGatePassed = true;
+    });
+
+    const result = await runBrowserTask(
+      "Do work after pause",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(h.dependencies.waitWhilePaused).toHaveBeenCalledOnce();
+  });
+
   it("returns stopped when cancellation is already requested", async () => {
     const h = harness({
       observations: [page(1, "Page", "Content")],
