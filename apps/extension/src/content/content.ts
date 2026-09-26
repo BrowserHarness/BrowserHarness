@@ -198,6 +198,25 @@ function observe(tabId: number) {
       ...riskForElement(element)
     }));
 
+  const googleDocsEditor = googleDocsEditorTarget();
+  if (
+    googleDocsEditor &&
+    !elements.some((element) => element.element_id === "bc-google-doc-editor")
+  ) {
+    elements.unshift({
+      element_id: "bc-google-doc-editor",
+      tag: "google-docs-editor",
+      role: "textbox",
+      accessible_name: "Document content",
+      type: undefined,
+      visible: true,
+      disabled: false,
+      requires_approval: false,
+      approval_reason: undefined,
+      enter_requires_approval: false
+    });
+  }
+
   return {
     tab_id: tabId,
     url: location.href,
@@ -207,15 +226,56 @@ function observe(tabId: number) {
   };
 }
 
+function googleDocsEditorTarget(): HTMLElement | null {
+  if (location.hostname !== "docs.google.com") return null;
+  const iframe = document.querySelector<HTMLIFrameElement>(".docs-texteventtarget-iframe");
+  const frameDocument = iframe?.contentDocument;
+  if (!frameDocument) return null;
+  const active = frameDocument.activeElement;
+  if (active instanceof HTMLElement) return active;
+  return frameDocument.body instanceof HTMLElement ? frameDocument.body : null;
+}
+
 function getElement(id: unknown): HTMLElement {
   if (typeof id !== "string") throw new Error("Missing element_id");
+  if (id === "bc-google-doc-editor") {
+    const editor = googleDocsEditorTarget();
+    if (!editor) throw new Error("Google Docs editor target not found");
+    return editor;
+  }
   const element = document.querySelector<HTMLElement>(`[${ID_ATTR}="${CSS.escape(id)}"]`);
   if (!element) throw new Error("Element not found");
   return element;
 }
 
+function dispatchGoogleDocsText(element: HTMLElement, text: string) {
+  const ownerDocument = element.ownerDocument;
+  element.focus();
+  element.ownerDocument.defaultView?.focus();
+
+  for (const char of text) {
+    const keyCode = char === "\n" ? 13 : char.charCodeAt(0);
+    const event = ownerDocument.createEvent("Event");
+    event.initEvent("keypress", true, true);
+    Object.defineProperty(event, "key", { value: char === "\n" ? "Enter" : char });
+    Object.defineProperty(event, "keyCode", { value: keyCode });
+    Object.defineProperty(event, "which", { value: keyCode });
+    Object.defineProperty(event, "charCode", { value: char === "\n" ? 0 : keyCode });
+    element.dispatchEvent(event);
+  }
+
+  return { typed: text.length, editor: "google-docs-text-event-target" };
+}
+
 function writeText(element: HTMLElement, text: string, replace = true) {
   element.focus();
+
+  if (
+    location.hostname === "docs.google.com" &&
+    element.ownerDocument !== document
+  ) {
+    return dispatchGoogleDocsText(element, text);
+  }
 
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     if (element instanceof HTMLInputElement && element.type === "password") {
@@ -235,9 +295,10 @@ function writeText(element: HTMLElement, text: string, replace = true) {
   }
 
   if (element.isContentEditable) {
+    const ownerDocument = element.ownerDocument;
     if (replace) {
-      const selection = window.getSelection();
-      const range = document.createRange();
+      const selection = ownerDocument.getSelection();
+      const range = ownerDocument.createRange();
       range.selectNodeContents(element);
       selection?.removeAllRanges();
       selection?.addRange(range);
@@ -245,7 +306,7 @@ function writeText(element: HTMLElement, text: string, replace = true) {
 
     let inserted = false;
     try {
-      inserted = document.execCommand("insertText", false, text);
+      inserted = ownerDocument.execCommand("insertText", false, text);
     } catch {
       inserted = false;
     }
