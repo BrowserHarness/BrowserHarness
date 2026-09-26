@@ -67,3 +67,34 @@ Remediation:
 - if injection still fails, the UI instructs the user to reload that tab once.
 
 This keeps normal-page recovery automatic while preserving an explicit protected-page boundary.
+
+
+## Mixed Google Docs / Groq retest
+User-reported sequence:
+- `write 30 sec video script about ai and its future` → **Model did not return a BrowserCrew action**
+- `Write "BrowserCrew Google Docs test" at the current cursor position.` → parse failure
+- same Docs command → **PASS**, text inserted successfully
+- same Docs command again → parse failure while activity stayed at **Reading the current page**
+
+Interpretation:
+- Google Docs editor control is now proven viable by at least one real insertion.
+- The dominant intermittent failure is the model action contract, not the editor transport.
+- Direct chat/final-answer tasks were affected by the same malformed model response issue.
+
+Remediation shipped in candidate build:
+- detect Groq through the OpenAI-compatible base URL;
+- request `response_format: {"type":"json_object"}`;
+- set `include_reasoning: false`;
+- use low reasoning effort for Groq GPT-OSS models to keep the browser-control loop responsive;
+- parse balanced JSON objects defensively;
+- accept a small set of equivalent action/message shapes;
+- perform one bounded repair retry when the first response is not a valid BrowserCrew action.
+
+Latest parser-fix commit: `c507d8f05916e8e016add31a0cd69aa23735b55b`.
+GitHub Actions run: `36250049822` — success.
+Artifact ID: `10908409160`.
+
+Next verification:
+1. direct chat: ask for a 30-second AI-future video script;
+2. Google Docs: run the same insertion command at least 5 times;
+3. record any remaining parser failure rate rather than treating one pass as sufficient.
