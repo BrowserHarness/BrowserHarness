@@ -1,6 +1,10 @@
 import type { RecordedWorkflowStep, WorkflowLocator } from "../runtime/workflows";
 import { adapterForUrl } from "./adapters/registry";
 import {
+  MAX_INTERACTIVE_ELEMENTS,
+  compactVisibleText
+} from "./observation";
+import {
   GOOGLE_DOCS_EDITOR_ID,
   dispatchGoogleDocsText,
   googleDocsEditorTarget,
@@ -188,7 +192,7 @@ function observe(tabId: number) {
     'a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])';
   const elements = Array.from(document.querySelectorAll<HTMLElement>(selector))
     .filter(isVisible)
-    .slice(0, 250)
+    .slice(0, MAX_INTERACTIVE_ELEMENTS)
     .map((element) => ({
       element_id: ensureId(element),
       tag: element.tagName.toLowerCase(),
@@ -228,10 +232,7 @@ function observe(tabId: number) {
     tab_id: tabId,
     url: location.href,
     title: document.title,
-    visible_text: (document.body?.innerText || "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 6_000),
+    visible_text: compactVisibleText(document.body?.innerText || ""),
     elements,
     adapter: adapterForUrl(location.href)
   };
