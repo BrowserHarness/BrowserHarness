@@ -34,7 +34,7 @@ import {
   directChatWithFallback,
   agentDecisionWithFallback
 } from "../runtime/model-router";
-import { createLoopGuard, registerDecision } from "../runtime/loop-guard";
+import { runBrowserTask } from "../runtime/browser-engine";
 import { classifyTaskIntent } from "../runtime/intent";
 import type { PageObservation, ToolResult } from "../runtime/protocol";
 import {
@@ -364,157 +364,84 @@ export function App() {
           ? fallback
           : null;
 
-      const trail: string[] = [];
-      const loopGuard = createLoopGuard();
+      const controller = new AbortController();
+      requestAbort.current = controller;
 
-      const observeActivity = addActivity("Reading the current page");
-      const initial = await extensionMessage<PageObservation>({
-        type: "BROWSER_TOOL",
-        tool: "observe_page",
-        input: {}
-      });
-
-      finishActivity(
-        observeActivity,
-        initial.ok && initial.data ? "done" : "error"
-      );
-
-      if (!initial.ok || !initial.data) {
-        throw new Error(
-          initial.error?.message || "Could not observe this page"
-        );
-      }
-
-      let observation = initial.data;
-
-      for (let step = 0; step < 12 && !cancelled.current; step += 1) {
-        while (pausedRef.current && !cancelled.current) {
-          await new Promise((resolve) => window.setTimeout(resolve, 150));
-        }
-
-        const thinking = addActivity("Deciding the next action");
-        const controller = new AbortController();
-        requestAbort.current = controller;
-
-        try {
-          const routed = await agentDecisionWithFallback(
-            agentPrimary,
-            agentFallback,
-            task,
+      const result = await runBrowserTask(
+        task,
+        {
+          decide: async ({
+            task: browserTask,
             observation,
             trail,
-            controller.signal
-          );
-          finishActivity(thinking);
-
-          if (routed.usedFallback) {
-            trail.push(
-              `provider fallback: ${agentPrimary.label} → ${agentFallback?.label || "fallback"}`
+            evidence,
+            signal
+          }) => {
+            const routed = await agentDecisionWithFallback(
+              agentPrimary,
+              agentFallback,
+              browserTask,
+              observation,
+              trail,
+              signal,
+              evidence
             );
-          }
-
-          const decision = routed.result;
-
-          if (decision.kind === "final") {
-            addAssistantMessage(decision.message);
-            await saveHistory(task, decision.message);
-            return;
-          }
-
-          const loopCheck = registerDecision(loopGuard, decision);
-          if (!loopCheck.ok) {
-            throw new Error(loopCheck.reason);
-          }
-
-          const description = approvalDescription(
-            observation,
-            decision.tool,
-            decision.input
-          );
-
-          if (description) {
+            return {
+              decision: routed.result,
+              usedFallback: routed.usedFallback
+            };
+          },
+          tool: (tool, input = {}) =>
+            extensionMessage({
+              type: "BROWSER_TOOL",
+              tool,
+              input
+            }),
+          approvalDescription: (observation, tool, input) =>
+            approvalDescription(observation, tool, input),
+          requestApproval: async (description) => {
             const approved = await requestApproval(description);
             setApproval(null);
-            if (!approved) {
-              addAssistantMessage("I stopped before that action.");
-              return;
-            }
-          }
-
-          const activityId = addActivity(
-            decision.note || `Using ${decision.tool}`
-          );
-
-          const result = await extensionMessage<PageObservation>({
-            type: "BROWSER_TOOL",
-            tool: decision.tool,
-            input: decision.input
-          });
-
-          finishActivity(activityId, result.ok ? "done" : "error");
-          trail.push(`${decision.tool}: ${JSON.stringify(result)}`);
-
-          if (!result.ok) {
-            if (result.error?.code === "ELEMENT_NOT_FOUND") {
-              trail.push("Element became stale; re-observe before retry.");
-            } else {
-              throw new Error(
-                result.error?.message ||
-                  `Browser tool ${decision.tool} failed`
+            return approved;
+          },
+          isCancelled: () => cancelled.current,
+          waitWhilePaused: async () => {
+            while (pausedRef.current && !cancelled.current) {
+              await new Promise((resolve) =>
+                window.setTimeout(resolve, 150)
               );
             }
-          }
-
-          if (
-            [
-              "navigate",
-              "click",
-              "type",
-              "press_key",
-              "scroll",
-              "open_tab",
-              "switch_tab"
-            ].includes(decision.tool)
-          ) {
-            await extensionMessage({
-              type: "BROWSER_TOOL",
-              tool: "wait",
-              input: { milliseconds: 450 }
-            });
-
-            const verified = await extensionMessage<PageObservation>({
-              type: "BROWSER_TOOL",
-              tool: "observe_page",
-              input: {}
-            });
-
-            if (!verified.ok || !verified.data) {
-              throw new Error(
-                verified.error?.message ||
-                  "Could not verify the page after the action"
+          },
+          withActivity: async (label, operation) => {
+            const id = addActivity(label);
+            try {
+              const value = await operation();
+              finishActivity(id);
+              return value;
+            } catch (error) {
+              finishActivity(
+                id,
+                cancelled.current ? "done" : "error"
               );
+              throw error;
             }
-
-            observation = verified.data;
-            trail.push(
-              `verification: adapter=${verified.data.adapter || "generic-web"} page=${verified.data.title} url=${verified.data.url}`
+          },
+          onFallback: () => {
+            addActivity(
+              "Primary unavailable — used fallback model",
+              "done"
             );
           }
-        } catch (error) {
-          finishActivity(thinking, cancelled.current ? "done" : "error");
-          throw error;
-        } finally {
-          requestAbort.current = null;
-        }
-      }
+        },
+        controller.signal
+      );
 
-      if (cancelled.current) {
-        addAssistantMessage("Stopped.");
-      } else {
-        throw new Error(
-          "Task reached the v0.1.1 bounded action limit before completion."
-        );
+      requestAbort.current = null;
+      addAssistantMessage(result.message);
+      if (result.status === "completed") {
+        await saveHistory(task, result.message);
       }
+      return;
     } catch (error) {
       if (cancelled.current) {
         addAssistantMessage("Stopped.");
