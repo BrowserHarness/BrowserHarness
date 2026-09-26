@@ -106,6 +106,7 @@ export function App() {
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const cancelled = useRef(false);
   const pausedRef = useRef(false);
+  const requestAbort = useRef<AbortController | null>(null);
 
   const refreshContext = async () => {
     const [currentTab, provider] = await Promise.all([
@@ -307,7 +308,16 @@ export function App() {
         const thinking = addActivity(
           step === 0 ? "Reading the current page" : "Deciding the next action"
         );
-        const decision = await nextAgentDecision(config, task, observation, trail);
+        const controller = new AbortController();
+        requestAbort.current = controller;
+        const decision = await nextAgentDecision(
+          config,
+          task,
+          observation,
+          trail,
+          controller.signal
+        );
+        requestAbort.current = null;
         finishActivity(thinking);
 
         if (decision.kind === "final") {
@@ -377,12 +387,17 @@ export function App() {
         throw new Error("Task reached the v0.1 action limit before completion");
       }
     } catch (error) {
-      addAssistantMessage(
-        error instanceof Error
-          ? error.message
-          : "BrowserCrew hit an unexpected error."
-      );
+      if (cancelled.current || (error instanceof DOMException && error.name === "AbortError")) {
+        addAssistantMessage("Stopped.");
+      } else {
+        addAssistantMessage(
+          error instanceof Error
+            ? error.message
+            : "BrowserCrew hit an unexpected error."
+        );
+      }
     } finally {
+      requestAbort.current = null;
       setRunning(false);
       setPaused(false);
       pausedRef.current = false;
@@ -404,6 +419,8 @@ export function App() {
 
   const handleStop = () => {
     cancelled.current = true;
+    requestAbort.current?.abort();
+    requestAbort.current = null;
     pausedRef.current = false;
     setPaused(false);
     if (approval) {
@@ -445,6 +462,18 @@ export function App() {
             </Typography>
           </Box>
 
+          {running && (
+            <Tooltip title="Stop current task">
+              <IconButton
+                size="small"
+                color="error"
+                onClick={handleStop}
+                aria-label="Stop current task"
+              >
+                <StopIcon />
+              </IconButton>
+            </Tooltip>
+          )}
           <Button size="small" onClick={(event) => setModelAnchor(event.currentTarget)}>
             {config?.model || "Connect AI"}
           </Button>
