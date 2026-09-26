@@ -375,6 +375,7 @@ export function App() {
             observation,
             trail,
             evidence,
+            screenshotDataUrl,
             signal
           }) => {
             const routed = await agentDecisionWithFallback(
@@ -384,7 +385,8 @@ export function App() {
               observation,
               trail,
               signal,
-              evidence
+              evidence,
+              screenshotDataUrl
             );
             return {
               decision: routed.result,
