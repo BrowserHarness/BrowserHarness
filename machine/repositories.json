@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "canonical_owner": "BrowserCrew/browsercrew",
+  "repositories": [
+    {
+      "slug": "browsercrew",
+      "role": "product-runtime"
+    },
+    {
+      "slug": "Progress-Memory",
+      "role": "continuity"
+    },
+    {
+      "slug": "Workflows",
+      "role": "procedures"
+    },
+    {
+      "slug": "Skills-",
+      "alias": "Skills",
+      "role": "reusable-capabilities"
+    },
+    {
+      "slug": "Agent-Registry",
+      "role": "agents-teams"
+    },
+    {
+      "slug": "Automation",
+      "role": "scheduled-orchestration"
+    },
+    {
+      "slug": "design-system",
+      "role": "product-design"
+    },
+    {
+      "slug": "Brand",
+      "role": "brand-positioning"
+    },
+    {
+      "slug": "Website",
+      "role": "commercial-website"
+    },
+    {
+      "slug": "Docs-",
+      "alias": "Docs",
+      "role": "public-documentation"
+    },
+    {
+      "slug": "Marketing",
+      "role": "growth"
+    },
+    {
+      "slug": "Content",
+      "role": "content-production"
+    },
+    {
+      "slug": "Competitor-Analysis",
+      "role": "competitive-intelligence"
+    },
+    {
+      "slug": "AI-Tool-Intelligence",
+      "role": "ecosystem-research"
+    },
+    {
+      "slug": "Monetization",
+      "role": "pricing-economics"
+    },
+    {
+      "slug": "Data-Analytics",
+      "role": "measurement"
+    },
+    {
+      "slug": "Customer-Ops",
+      "role": "customer-lifecycle"
+    },
+    {
+      "slug": "Security-Trust",
+      "role": "security-privacy-trust"
+    },
+    {
+      "slug": ".github",
+      "role": "org-governance"
+    },
+    {
+      "slug": "browsercrew.github.io",
+      "role": "thin-public-pages"
+    }
+  ]
+}
