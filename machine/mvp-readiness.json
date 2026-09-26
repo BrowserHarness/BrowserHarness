@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "product": "BrowserCrew",
+  "milestone": "v0.1 MVP",
+  "status": "automated_complete_manual_acceptance_pending",
+  "verified_baseline": {
+    "sha": "0fb47d5967efa83ffe8e504ceaeaa9472f60c6f1",
+    "github_actions_run_id": 36262713831,
+    "result": "success",
+    "tests": {
+      "files_passed": 14,
+      "tests_passed": 63
+    },
+    "gates": {
+      "typecheck": "pass",
+      "unit_regression": "pass",
+      "production_build": "pass",
+      "mv3_validation": "pass",
+      "mvp_contract_validation": "pass",
+      "package": "pass",
+      "artifact_upload": "pass"
+    },
+    "artifact": {
+      "id": 10913037268,
+      "name": "browsercrew-extension",
+      "digest": "sha256:18208b3fa3dc075b61ee075124983a2edb74f605c9d1cd9f93cd96028602c706"
+    }
+  },
+  "implemented_mvp_domains": [
+    "chat-first side panel",
+    "direct-chat vs browser-agent runtime separation",
+    "OpenAI, Anthropic, NVIDIA and OpenAI-compatible provider paths",
+    "automatic compatible model discovery",
+    "model capability classification",
+    "separate Chat and Agent health validation",
+    "multiple saved connections",
+    "Primary plus one validated Fallback",
+    "recoverable provider failover",
+    "single-agent browser execution",
+    "multi-tab retained evidence",
+    "all 11 browser tools",
+    "mutation verification",
+    "stale-element recovery",
+    "duplicate-action loop protection",
+    "pause and stop",
+    "consequential-action approvals",
+    "Google Docs site adapter",
+    "vision screenshot evidence handoff",
+    "Watch Me workflow persistence and replay",
+    "local task history UI and privacy retention setting",
+    "optional website permissions",
+    "custom endpoint origin permissions",
+    "system/light/dark appearance",
+    "privacy, terms, support and Web Store release baseline",
+    "generated temporary extension icons",
+    "machine-checkable MVP CI gate"
+  ],
+  "final_manual_acceptance": [
+    "load packaged extension in real Chrome",
+    "validate at least one live provider/model with Chat and Agent probes",
+    "verify current-tab and optional all-sites permission prompts",
+    "complete one normal browser task end-to-end",
+    "verify Google Docs insertion against current Docs implementation",
+    "record and replay one real Watch Me workflow",
+    "verify consequential approval UI on a safe real-site flow",
+    "optionally verify live screenshot vision path with a validated vision model"
+  ],
+  "post_mvp_scope_blocked_until_manual_acceptance": [
+    "multi-agent teams",
+    "deep memory",
+    "MCP",
+    "automatic Skill promotion",
+    "scheduling/background agents",
+    "marketplace",
+    "cloud sync",
+    "team/enterprise admin"
+  ],
+  "updated_on": "2026-09-26"
+}
