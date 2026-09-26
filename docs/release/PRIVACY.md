@@ -1,0 +1,46 @@
+# BrowserCrew Privacy — v0.1 MVP
+
+BrowserCrew is a local-first Chrome extension. The v0.1 MVP does not operate a BrowserCrew cloud backend.
+
+## Data stored locally
+BrowserCrew may store the following in Chrome extension local storage:
+- AI provider connection configuration and API keys;
+- validated model health/capability metadata;
+- Primary/Fallback routing preferences;
+- completed task history when local history retention is enabled;
+- recorded Watch Me workflows;
+- appearance and privacy preferences.
+
+Task history can be disabled and cleared from Settings.
+
+## Data sent to AI providers
+When the user submits a request, BrowserCrew sends only the information needed to the selected AI provider:
+- the user's prompt;
+- bounded page observations for browser-agent tasks;
+- retained evidence from a limited number of observed tabs when needed for the same task;
+- a screenshot only when a vision-capable model explicitly requests visual evidence.
+
+Provider requests go directly from the extension to the provider endpoint configured by the user.
+
+## Browser access
+BrowserCrew uses Chrome's active-tab permission for the tab on which the user invokes the extension. Cross-site and multi-tab automation requires optional website access granted by the user.
+
+Known AI provider API domains are declared as extension host permissions so direct provider requests can function. Custom OpenAI-compatible endpoints require an explicit origin grant.
+
+## Analytics
+The v0.1 MVP does not send BrowserCrew product analytics to a BrowserCrew cloud service.
+
+## Sensitive actions
+BrowserCrew requires explicit user approval before consequential actions such as send, submit, purchase, delete, or account/security changes.
+
+## Secrets
+Provider API keys are never committed to BrowserCrew source repositories and are not included in task activity output.
+
+## Deletion
+Users can clear task history from Settings. Removing the extension through Chrome removes its extension-local storage according to Chrome's extension storage behavior.
+
+## Third-party providers
+AI providers process data according to their own terms and privacy policies. Users choose and configure their provider directly.
+
+## Scope
+This document describes the BrowserCrew v0.1 MVP architecture and should be updated before any cloud sync, hosted inference, telemetry, team features, or remote storage is introduced.
