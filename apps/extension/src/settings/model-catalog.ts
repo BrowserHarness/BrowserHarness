@@ -3,10 +3,18 @@ import {
   providerBaseUrl,
   type ProviderConfig
 } from "../settings/provider-store";
+import {
+  classifyModelCapabilities,
+  primaryCapabilityLabel,
+  type ModelCapabilities,
+  type ModelCapability
+} from "./model-capabilities";
 
 export interface DiscoveredModel {
   id: string;
   ownedBy?: string;
+  capabilities: ModelCapabilities;
+  primaryCapability: ModelCapability;
 }
 
 interface ModelRow {
@@ -56,20 +64,26 @@ export async function discoverModels(
   const json = (await response.json()) as { data?: unknown };
   const rows: unknown[] = Array.isArray(json.data) ? json.data : [];
 
-  const models: DiscoveredModel[] = rows
-    .filter(isModelRow)
-    .map((row): DiscoveredModel => ({
+  const unique = new Map<string, DiscoveredModel>();
+  for (const row of rows.filter(isModelRow)) {
+    const capabilities = classifyModelCapabilities(row.id);
+    unique.set(row.id, {
       id: row.id,
       ownedBy:
-        typeof row.owned_by === "string" ? row.owned_by : undefined
-    }));
-
-  const unique = new Map<string, DiscoveredModel>();
-  for (const model of models) {
-    unique.set(model.id, model);
+        typeof row.owned_by === "string" ? row.owned_by : undefined,
+      capabilities,
+      primaryCapability: primaryCapabilityLabel(capabilities)
+    });
   }
 
-  return [...unique.values()].sort((a, b) =>
-    a.id.localeCompare(b.id)
-  );
+  return [...unique.values()].sort((a, b) => {
+    const rank = (model: DiscoveredModel) => {
+      if (model.capabilities.agent) return 0;
+      if (model.capabilities.chat) return 1;
+      if (model.capabilities.vision) return 2;
+      if (model.capabilities.unknown) return 3;
+      return 4;
+    };
+    return rank(a) - rank(b) || a.id.localeCompare(b.id);
+  });
 }
