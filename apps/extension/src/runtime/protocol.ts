@@ -57,5 +57,6 @@ export interface ToolResult<T = unknown> {
   error?: {
     code: string;
     message: string;
+    details?: string;
   };
 }
