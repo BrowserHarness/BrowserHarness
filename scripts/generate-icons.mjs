@@ -1,8 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 
-const ROOT = resolve(process.cwd());
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(SCRIPT_DIR, "..");
 const OUT = resolve(ROOT, "apps/extension/public/icons");
 
 function crc32(buffer) {
