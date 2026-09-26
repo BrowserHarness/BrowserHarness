@@ -263,19 +263,36 @@ async function callOpenAICompatible(
 ): Promise<string> {
   const base = providerBaseUrl(config.provider, config.baseUrl);
 
-  const response = await fetchWithTimeout(
-    `${base}/chat/completions`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`
+  const request = async (body: Record<string, unknown>) =>
+    fetchWithTimeout(
+      `${base}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify(body)
       },
-      body: JSON.stringify(providerRequestBody(config, prompt))
-    },
-    30_000,
-    signal
-  );
+      30_000,
+      signal
+    );
+
+  const primaryBody = providerRequestBody(config, prompt);
+  let response = await request(primaryBody);
+
+  if (!response.ok && isNvidia(config) && response.status === 400) {
+    const fallbackBody: Record<string, unknown> = {
+      model: config.model,
+      temperature: 0,
+      max_tokens: 700,
+      messages: [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: prompt }
+      ]
+    };
+    response = await request(fallbackBody);
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -285,7 +302,13 @@ async function callOpenAICompatible(
   }
 
   const json = await response.json();
-  return String(json?.choices?.[0]?.message?.content || "");
+  const content = String(json?.choices?.[0]?.message?.content || "");
+  if (!content.trim()) {
+    throw new Error(
+      `Model ${config.model} returned an empty response. Choose a chat/instruct model and try again.`
+    );
+  }
+  return content;
 }
 
 async function callAnthropic(
