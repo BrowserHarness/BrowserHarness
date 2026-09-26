@@ -8,6 +8,8 @@
 - Progress-Memory and evaluation baseline
 
 ## v0.1 — Ship-fast MVP
+**Status:** automated feature-complete; final real-Chrome acceptance pending.
+
 Goal: install BrowserCrew, connect an AI provider, give the current tab a task, and reliably observe/act/verify with visible activity and approval gates.
 
 ### Required
@@ -37,6 +39,8 @@ Goal: install BrowserCrew, connect an AI provider, give the current tab a task, 
 - BrowserCrew-hosted inference
 
 ## v0.1.1 — Reliable Model + Agent Runtime
+**Status:** integrated into the v0.1 MVP candidate; automated gate green.
+
 Goal: make provider/model behavior predictable before expanding product scope.
 
 ### Required
