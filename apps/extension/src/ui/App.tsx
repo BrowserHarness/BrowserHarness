@@ -25,7 +25,8 @@ import {
   Typography
 } from "@mui/material";
 import { loadProviderConfig, type ProviderConfig } from "../settings/provider-store";
-import { nextAgentDecision } from "../runtime/model-client";
+import { directChatCompletion, nextAgentDecision } from "../runtime/model-client";
+import { classifyTaskIntent } from "../runtime/intent";
 import type { PageObservation, ToolResult } from "../runtime/protocol";
 import {
   saveWorkflow,
@@ -286,23 +287,59 @@ export function App() {
     pausedRef.current = false;
     cancelled.current = false;
 
+    const intent = classifyTaskIntent(task);
+
     try {
+      if (intent === "chat") {
+        const activity = addActivity("Thinking");
+        const controller = new AbortController();
+        requestAbort.current = controller;
+
+        try {
+          const answer = await directChatCompletion(
+            config,
+            task,
+            controller.signal
+          );
+          finishActivity(activity);
+          addAssistantMessage(answer);
+          await saveHistory(task, answer);
+          return;
+        } catch (error) {
+          finishActivity(activity, cancelled.current ? "done" : "error");
+          throw error;
+        } finally {
+          requestAbort.current = null;
+        }
+      }
+
       const trail: string[] = [];
-      let observation: PageObservation | null = null;
+      const observeActivity = addActivity("Reading the current page");
+      const initial = await extensionMessage<PageObservation>({
+        type: "BROWSER_TOOL",
+        tool: "observe_page",
+        input: {}
+      });
+
+      finishActivity(
+        observeActivity,
+        initial.ok && initial.data ? "done" : "error"
+      );
+
+      if (!initial.ok || !initial.data) {
+        throw new Error(
+          initial.error?.message || "Could not observe this page"
+        );
+      }
+
+      let observation = initial.data;
 
       for (let step = 0; step < 12 && !cancelled.current; step += 1) {
         while (pausedRef.current && !cancelled.current) {
           await new Promise((resolve) => window.setTimeout(resolve, 150));
         }
 
-        const thinking = addActivity(
-          step === 0
-            ? "Understanding request"
-            : observation
-              ? "Deciding the next action"
-              : "Choosing the next step"
-        );
-
+        const thinking = addActivity("Deciding the next action");
         const controller = new AbortController();
         requestAbort.current = controller;
         let decision;
@@ -329,13 +366,11 @@ export function App() {
           return;
         }
 
-        const description =
-          observation &&
-          approvalDescription(
-            observation,
-            decision.tool,
-            decision.input
-          );
+        const description = approvalDescription(
+          observation,
+          decision.tool,
+          decision.input
+        );
 
         if (description) {
           const approved = await requestApproval(description);
@@ -368,15 +403,6 @@ export function App() {
                 `Browser tool ${decision.tool} failed`
             );
           }
-        }
-
-        if (
-          decision.tool === "observe_page" &&
-          result.ok &&
-          result.data
-        ) {
-          observation = result.data;
-          continue;
         }
 
         if (
