@@ -20,17 +20,48 @@ async function targetTab(input: Record<string, unknown> = {}) {
   return activeTab();
 }
 
+function isInjectableUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 async function sendToTab(tabId: number, payload: unknown): Promise<ToolResult> {
   try {
     return await chrome.tabs.sendMessage(tabId, payload);
   } catch {
-    return {
-      ok: false,
-      error: {
-        code: "CONTENT_SCRIPT_UNAVAILABLE",
-        message: "BrowserCrew cannot control this page. Chrome internal pages and some protected pages are not supported."
-      }
-    };
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !isInjectableUrl(tab.url)) {
+      return {
+        ok: false,
+        error: {
+          code: "UNSUPPORTED_PAGE",
+          message: "BrowserCrew cannot control Chrome internal pages, the Chrome Web Store, or other protected browser pages."
+        }
+      };
+    }
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["assets/content.js"]
+      });
+      return await chrome.tabs.sendMessage(tabId, payload);
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "CONTENT_SCRIPT_UNAVAILABLE",
+          message:
+            "BrowserCrew could not attach to this page automatically. Reload this tab once and try again.",
+          details: error instanceof Error ? error.message : String(error)
+        }
+      } as ToolResult;
+    }
   }
 }
 
