@@ -26,6 +26,7 @@ import {
   type ProviderId
 } from "../settings/provider-store";
 import { discoverModels } from "../settings/model-catalog";
+import { testModelConnection } from "../runtime/model-client";
 
 export function SettingsView({ onBack }: { onBack: () => void }) {
   const [provider, setProvider] = useState<ProviderId>("openai");
@@ -35,7 +36,10 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [connectionState, setConnectionState] = useState<
+    "idle" | "testing" | "success" | "error"
+  >("idle");
+  const [connectionMessage, setConnectionMessage] = useState("");
 
   const providerDefinition = PROVIDERS[provider];
   const effectiveBaseUrl = useMemo(
@@ -114,6 +118,11 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     };
   }, [provider, apiKey, effectiveBaseUrl, discoveryAvailable]);
 
+  const resetConnectionTest = () => {
+    setConnectionState("idle");
+    setConnectionMessage("");
+  };
+
   const handleProviderChange = (next: ProviderId) => {
     setProvider(next);
     setApiKey("");
@@ -121,21 +130,39 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     setModels([]);
     setModelsError("");
     setBaseUrl(PROVIDERS[next].defaultBaseUrl || "");
+    resetConnectionTest();
   };
 
-  const handleSave = async () => {
-    const config: ProviderConfig = {
-      provider,
-      apiKey: apiKey.trim(),
-      model: model.trim(),
-      baseUrl:
-        provider === "openai-compatible" || provider === "nvidia"
-          ? effectiveBaseUrl
-          : undefined
-    };
-    await saveProviderConfig(config);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
+  const candidateConfig = (): ProviderConfig => ({
+    provider,
+    apiKey: apiKey.trim(),
+    model: model.trim(),
+    baseUrl:
+      provider === "openai-compatible" || provider === "nvidia"
+        ? effectiveBaseUrl
+        : undefined
+  });
+
+  const handleTestAndSave = async () => {
+    const config = candidateConfig();
+    setConnectionState("testing");
+    setConnectionMessage("Testing this exact model…");
+
+    try {
+      const result = await testModelConnection(config);
+      await saveProviderConfig(config);
+      setConnectionState("success");
+      setConnectionMessage(
+        `Connected • ${result.latencyMs} ms • ${result.preview || "model responded"}`
+      );
+    } catch (error) {
+      setConnectionState("error");
+      setConnectionMessage(
+        error instanceof Error
+          ? error.message
+          : "This model did not pass the connection test."
+      );
+    }
   };
 
   return (
@@ -175,7 +202,10 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
             value={effectiveBaseUrl}
             onChange={(event) =>
               provider === "openai-compatible"
-                ? setBaseUrl(event.target.value)
+                ? (() => {
+                    setBaseUrl(event.target.value);
+                    resetConnectionTest();
+                  })()
                 : undefined
             }
             slotProps={{
@@ -195,7 +225,10 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
         <TextField
           label="API key"
           value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
+          onChange={(event) => {
+            setApiKey(event.target.value);
+            resetConnectionTest();
+          }}
           type="password"
           autoComplete="off"
           fullWidth
@@ -209,8 +242,14 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
             options={models}
             value={model || null}
             loading={modelsLoading}
-            onChange={(_event, value) => setModel(value || "")}
-            onInputChange={(_event, value) => setModel(value)}
+            onChange={(_event, value) => {
+              setModel(value || "");
+              resetConnectionTest();
+            }}
+            onInputChange={(_event, value) => {
+              setModel(value);
+              resetConnectionTest();
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -264,23 +303,40 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           )}
         </Stack>
 
-        {saved && (
-          <Alert severity="success">
-            Connection settings saved locally.
+        {connectionState === "success" && (
+          <Alert severity="success">{connectionMessage}</Alert>
+        )}
+
+        {connectionState === "error" && (
+          <Alert severity="error">{connectionMessage}</Alert>
+        )}
+
+        {connectionState === "testing" && (
+          <Alert severity="info" icon={<CircularProgress size={18} />}>
+            {connectionMessage}
           </Alert>
         )}
 
         <Button
           variant="contained"
-          onClick={handleSave}
+          onClick={() => void handleTestAndSave()}
           disabled={
+            connectionState === "testing" ||
             !apiKey.trim() ||
             !model.trim() ||
             (provider === "openai-compatible" && !effectiveBaseUrl)
           }
         >
-          Save connection
+          {connectionState === "testing"
+            ? "Testing model…"
+            : "Test & save connection"}
         </Button>
+
+        <Typography variant="caption" color="text.secondary">
+          BrowserCrew saves a provider only after the selected model completes a
+          small inference health check. This prevents a non-responsive model from
+          becoming the active chat model.
+        </Typography>
 
         <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
           Progressive settings
