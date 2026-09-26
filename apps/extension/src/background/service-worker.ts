@@ -46,6 +46,9 @@ async function runTool(tool: string, input: Record<string, unknown> = {}): Promi
       url: typeof input.url === "string" ? input.url : undefined,
       active: input.active !== false
     });
+    if (!tab?.id) {
+      return { ok: false, error: { code: "TAB_NOT_FOUND", message: "Chrome did not return the created tab" } };
+    }
     return { ok: true, data: { tab_id: tab.id, url: tab.url } };
   }
 
@@ -54,6 +57,9 @@ async function runTool(tool: string, input: Record<string, unknown> = {}): Promi
       return { ok: false, error: { code: "TAB_NOT_FOUND", message: "tab_id is required" } };
     }
     const tab = await chrome.tabs.update(input.tab_id, { active: true });
+    if (!tab?.id) {
+      return { ok: false, error: { code: "TAB_NOT_FOUND", message: "Tab could not be activated" } };
+    }
     return { ok: true, data: { tab_id: tab.id, url: tab.url } };
   }
 
@@ -73,6 +79,9 @@ async function runTool(tool: string, input: Record<string, unknown> = {}): Promi
       return { ok: false, error: { code: "NAVIGATION_FAILED", message: "url is required" } };
     }
     const updated = await chrome.tabs.update(tabId, { url: input.url });
+    if (!updated?.id) {
+      return { ok: false, error: { code: "NAVIGATION_FAILED", message: "Chrome did not return the navigated tab" } };
+    }
     return { ok: true, data: { tab_id: updated.id, url: input.url } };
   }
 
