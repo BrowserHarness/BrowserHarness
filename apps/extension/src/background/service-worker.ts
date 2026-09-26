@@ -1,4 +1,5 @@
 import type { ExtensionRequest, ToolResult } from "../runtime/protocol";
+import { originPatternForUrl } from "../settings/browser-access";
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
@@ -52,15 +53,32 @@ async function sendToTab(tabId: number, payload: unknown): Promise<ToolResult> {
       });
       return await chrome.tabs.sendMessage(tabId, payload);
     } catch (error) {
+      const pattern = tab.url ? originPatternForUrl(tab.url) : null;
+      const hasOriginPermission = pattern
+        ? await chrome.permissions.contains({ origins: [pattern] })
+        : false;
+
+      if (!hasOriginPermission) {
+        return {
+          ok: false,
+          error: {
+            code: "PERMISSION_REQUIRED",
+            message:
+              "BrowserCrew needs website access for this tab. Grant all-sites access in Settings for cross-site and multi-tab automation.",
+            details: error instanceof Error ? error.message : String(error)
+          }
+        };
+      }
+
       return {
         ok: false,
         error: {
           code: "CONTENT_SCRIPT_UNAVAILABLE",
           message:
-            "BrowserCrew could not attach to this page automatically. Reload this tab once and try again.",
+            "BrowserCrew could not attach to this page even though site access is granted. Reload this tab once and try again.",
           details: error instanceof Error ? error.message : String(error)
         }
-      } as ToolResult;
+      };
     }
   }
 }
