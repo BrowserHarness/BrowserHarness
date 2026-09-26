@@ -43,6 +43,11 @@ import {
   testAgentCapability,
   testChatCapability
 } from "../runtime/model-client";
+import { MvpSettingsSections } from "./MvpSettingsSections";
+import {
+  ensureEndpointAccess,
+  hasEndpointAccess
+} from "../settings/browser-access";
 
 function healthFromError(error: unknown): CapabilityHealth {
   const message = error instanceof Error ? error.message : String(error);
