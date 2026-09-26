@@ -608,16 +608,25 @@ export function App() {
             </Tooltip>
           )}
           <Button size="small" onClick={(event) => setModelAnchor(event.currentTarget)}>
-            {primary?.model || "Connect AI"}
+            {fallback ? "Auto" : primary?.model || "Connect AI"}
           </Button>
           <Menu
             anchorEl={modelAnchor}
             open={Boolean(modelAnchor)}
             onClose={() => setModelAnchor(null)}
           >
-            <MenuItem disabled>
-              {primary ? primary.provider : "No provider connected"}
-            </MenuItem>
+            {primary ? (
+              <MenuItem disabled>
+                Primary · ${primary.label}
+              </MenuItem>
+            ) : (
+              <MenuItem disabled>No provider connected</MenuItem>
+            )}
+            {fallback && (
+              <MenuItem disabled>
+                Fallback · ${fallback.label}
+              </MenuItem>
+            )}
             <MenuItem
               onClick={() => {
                 setModelAnchor(null);
