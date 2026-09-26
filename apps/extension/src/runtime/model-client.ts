@@ -3,6 +3,7 @@ import {
   type ProviderConfig
 } from "../settings/provider-store";
 import type { PageObservation, ToolName } from "./protocol";
+import type { TabEvidence } from "./tab-evidence";
 
 export type AgentDecision =
   | { kind: "tool"; tool: ToolName; input: Record<string, unknown>; note: string }
@@ -170,13 +171,17 @@ function reasoningCanBeDisabled(model: string): boolean {
 function agentPrompt(
   task: string,
   observation: PageObservation,
-  trail: string[]
+  trail: string[],
+  evidence: TabEvidence[]
 ) {
   return `USER GOAL:
 ${task}
 
 CURRENT PAGE OBSERVATION:
 ${JSON.stringify(observation)}
+
+OBSERVED TAB EVIDENCE:
+${evidence.length ? JSON.stringify(evidence) : "No retained tab evidence yet."}
 
 RECENT EXECUTION EVIDENCE:
 ${trail.slice(-8).join("\n") || "No actions yet."}
@@ -509,9 +514,10 @@ export async function nextAgentDecision(
   task: string,
   observation: PageObservation,
   trail: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  evidence: TabEvidence[] = []
 ): Promise<AgentDecision> {
-  const prompt = agentPrompt(task, observation, trail);
+  const prompt = agentPrompt(task, observation, trail, evidence);
 
   const raw =
     config.provider === "anthropic"
