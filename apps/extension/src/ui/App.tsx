@@ -617,14 +617,14 @@ export function App() {
           >
             {primary ? (
               <MenuItem disabled>
-                Primary · ${primary.label}
+                {`Primary · ${primary.label}`}
               </MenuItem>
             ) : (
               <MenuItem disabled>No provider connected</MenuItem>
             )}
             {fallback && (
               <MenuItem disabled>
-                Fallback · ${fallback.label}
+                {`Fallback · ${fallback.label}`}
               </MenuItem>
             )}
             <MenuItem
