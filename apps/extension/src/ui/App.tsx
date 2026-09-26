@@ -670,7 +670,7 @@ export function App() {
             <Typography color="text.secondary" sx={{ maxWidth: 300 }}>
               Ask BrowserCrew to read, navigate, compare, fill, or work across tabs.
             </Typography>
-            {!config && (
+            {!primary && (
               <Button variant="contained" onClick={() => setView("settings")}>
                 Connect your AI
               </Button>
