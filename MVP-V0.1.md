@@ -1,30 +1,46 @@
 # BrowserCrew v0.1 MVP Contract
 
-**Status:** approved scope  
+**Status:** automated implementation complete; final real-Chrome acceptance pending  
 **Priority:** ship a useful product fast.
 
 ## Product promise
-A user can install BrowserCrew, connect a supported AI provider, open any normal webpage, ask BrowserCrew to perform a browser task, watch its actions, and approve consequential actions before they happen.
+A user can install BrowserCrew, connect a supported AI provider, open a normal webpage, give BrowserCrew a browser task, watch structured activity, and approve consequential actions before they happen.
+
+## Verified automated baseline
+- Product code SHA: `76218f69e16afae0f079d0cf4b4956754df39dfa`
+- GitHub Actions run: `36262532519`
+- Result: **success**
+- Unit/regression tests: **63/63 across 14 files**
+- TypeScript: **PASS**
+- Production build: **PASS**
+- MV3 validation: **PASS**
+- MVP automated contract gate: **PASS**
+- ZIP packaging/upload: **PASS**
 
 ## Primary UX
-Chat is the product. Advanced configuration is progressively revealed through Settings or contextual controls.
+Chat is the product. Settings and secondary surfaces are progressively disclosed.
 
-Persistent chat controls:
+Persistent surfaces now include:
 - current tab/context;
-- model selector;
-- workspace selector;
+- validated Primary/Fallback model routing;
+- Chat vs Browser-Agent runtime separation;
+- task history;
 - Record / Watch Me;
-- settings.
+- Settings.
 
-## Supported providers
+## Supported provider paths
 1. OpenAI
 2. Anthropic
 3. NVIDIA hosted NIM
-4. OpenAI-compatible endpoint
+4. OpenAI-compatible endpoints, including Groq
 
-Where a provider exposes an OpenAI-compatible `/models` endpoint, BrowserCrew should discover available model IDs automatically after credentials are entered and present them in a searchable selector. Manual model entry remains available as a fallback.
-
-Other providers/local runtimes are post-MVP unless they can be added through the compatible adapter without delaying release.
+BrowserCrew supports:
+- automatic model discovery where a compatible `/models` endpoint exists;
+- capability classification;
+- separate Chat and Agent health probes;
+- multiple saved connections;
+- one Primary plus at most one validated Fallback;
+- bounded failover for recoverable provider/model failures.
 
 ## Browser tools
 - observe_page
@@ -39,51 +55,55 @@ Other providers/local runtimes are post-MVP unless they can be added through the
 - close_tab
 - screenshot
 
+Vision-capable Agent models can consume a captured screenshot on the next planning turn when DOM/text evidence is insufficient. Screenshot evidence is visual context only; browser mutations still require semantic page controls.
+
 ## Required product behavior
-- one agent;
-- may operate multiple tabs;
-- activity shown as structured events, not hidden reasoning;
-- user can pause/stop immediately;
-- mutations are verified after execution;
-- send/publish/submit/purchase/delete/security-changing actions require approval by default;
-- task history is local-first;
-- API/provider configuration remains on-device for v0.1;
-- webpage/retrieved text is untrusted input.
-
-## Watch Me MVP
-Record semantic browser actions, save them as a named workflow, and replay them. Generalization, automatic Skill promotion and self-improvement are post-MVP.
-
-## Settings
-- Models
-- Connections
-- Workspaces
-- Agents
-- Skills
-- Workflows
-- Memory
-- Browser Access
-- Permissions
-- Privacy
-- Appearance
-- Advanced
-- About
-
-Only Models/Connections, Browser Access, Permissions, Privacy and Appearance need full MVP functionality. Other sections may be progressive placeholders if not needed by release scenarios.
+Implemented:
+- one browser agent;
+- multi-tab operation with retained observed-tab evidence;
+- structured activity instead of hidden reasoning;
+- pause/stop;
+- mutation verification;
+- stale-element re-observation;
+- duplicate-action loop protection;
+- bounded steps/retries;
+- consequential-action approvals;
+- local task history with privacy retention control;
+- local Watch Me workflow persistence/replay;
+- API/provider configuration stored locally;
+- webpage/retrieved text treated as untrusted input;
+- optional website permission model rather than blanket install-time host access;
+- functional Browser Access, Permissions, Privacy, and Appearance settings;
+- Google Docs behind an explicit site-adapter boundary.
 
 ## Release acceptance scenarios
-1. Summarize the current page.
-2. Navigate a site to a requested destination.
-3. Search within a site.
-4. Fill a form without submitting.
-5. Open multiple items in tabs and compare them.
-6. Stop for approval before a consequential action.
-7. Record and replay a simple workflow.
-8. Pause and stop an active run.
-9. Recover once from a stale/missing element by re-observing.
-10. No API keys or raw page content in analytics/log output.
+Automated engine coverage now exists for:
+1. current-page read;
+2. navigation + verification;
+3. site search;
+4. form fill without submission;
+5. multi-tab retained evidence/comparison support;
+6. approval cancellation before consequential action;
+7. pause/stop execution gates;
+8. Watch Me workflow persistence contract;
+9. stale-element recovery;
+10. unsupported/protected-page failure.
+
+Additional automated coverage includes provider fallback, 429 handling, model discovery/capabilities, screenshot vision handoff, task-history privacy, permissions, manifest security posture, and packaging.
+
+## Manual acceptance still required
+CI cannot prove live Chrome/provider/site behavior. Before public release, one final real-Chrome pass must verify:
+- unpacked packaged extension loads cleanly;
+- at least one live provider/model passes Chat + Agent health checks;
+- website permission prompts behave correctly;
+- one normal browser task executes end-to-end;
+- Google Docs insertion works in the current Docs implementation;
+- Watch Me captures and replays real DOM events;
+- consequential approval UI works on a real site;
+- a vision model consumes a real captured screenshot if vision is included in release acceptance.
 
 ## Non-goals
-Multi-agent teams, deep memory, Skill marketplace, automatic Skill promotion, MCP, scheduling, cloud sync, team admin, enterprise controls and BrowserCrew-hosted inference.
+Multi-agent teams, deep semantic/episodic memory, Skill marketplace, automatic Skill promotion, MCP, scheduling, cloud sync, team administration, BrowserCrew-hosted inference, audio/image-generation execution, and more than one fallback hop.
 
 ## Ship rule
-If a proposed feature does not improve one of the acceptance scenarios above, it does not block v0.1.
+No post-MVP features block v0.1. Public release requires the final real-Chrome acceptance pass after this automated-complete baseline.
