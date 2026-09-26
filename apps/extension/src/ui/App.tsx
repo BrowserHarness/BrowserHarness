@@ -3,6 +3,7 @@ import AddIcon from "@mui/icons-material/Add";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import PauseIcon from "@mui/icons-material/Pause";
 import ReplayIcon from "@mui/icons-material/Replay";
+import HistoryOutlinedIcon from "@mui/icons-material/HistoryOutlined";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import StopIcon from "@mui/icons-material/Stop";
@@ -42,6 +43,8 @@ import {
   type SavedWorkflow
 } from "../runtime/workflows";
 import { SettingsView } from "./SettingsView";
+import { HistoryView } from "./HistoryView";
+import { saveTaskHistoryEntry } from "../runtime/history";
 
 type Message = { id: string; role: "user" | "assistant"; text: string };
 type Activity = { id: string; text: string; state: "working" | "done" | "error" };
@@ -101,7 +104,7 @@ function approvalDescription(
 }
 
 export function App() {
-  const [view, setView] = useState<"chat" | "settings">("chat");
+  const [view, setView] = useState<"chat" | "settings" | "history">("chat");
   const [tab, setTab] = useState<CurrentTab | null>(null);
   const [primary, setPrimary] = useState<ProviderConnection | null>(null);
   const [fallback, setFallback] = useState<ProviderConnection | null>(null);
@@ -539,14 +542,10 @@ export function App() {
   };
 
   const saveHistory = async (task: string, result: string) => {
-    const key = "browsercrew.taskHistory";
-    const stored = await chrome.storage.local.get(key);
-    const previous = Array.isArray(stored[key]) ? stored[key] : [];
-    await chrome.storage.local.set({
-      [key]: [
-        { task, result, timestamp: new Date().toISOString(), url: tab?.url },
-        ...previous
-      ].slice(0, 50)
+    await saveTaskHistoryEntry({
+      task,
+      result,
+      url: tab?.url
     });
   };
 
@@ -564,6 +563,10 @@ export function App() {
 
   if (view === "settings") {
     return <SettingsView onBack={() => setView("chat")} />;
+  }
+
+  if (view === "history") {
+    return <HistoryView onBack={() => setView("chat")} />;
   }
 
   return (
@@ -636,6 +639,15 @@ export function App() {
               Manage models…
             </MenuItem>
           </Menu>
+          <Tooltip title="Task history">
+            <IconButton
+              size="small"
+              onClick={() => setView("history")}
+              aria-label="Task history"
+            >
+              <HistoryOutlinedIcon />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Settings">
             <IconButton
               size="small"
