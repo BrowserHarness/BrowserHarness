@@ -288,17 +288,7 @@ export function App() {
 
     try {
       const trail: string[] = [];
-      let observationResult = await extensionMessage<PageObservation>({
-        type: "BROWSER_TOOL",
-        tool: "observe_page",
-        input: {}
-      });
-      if (!observationResult.ok || !observationResult.data) {
-        throw new Error(
-          observationResult.error?.message || "Could not observe this page"
-        );
-      }
-      let observation = observationResult.data;
+      let observation: PageObservation | null = null;
 
       for (let step = 0; step < 12 && !cancelled.current; step += 1) {
         while (pausedRef.current && !cancelled.current) {
@@ -306,11 +296,17 @@ export function App() {
         }
 
         const thinking = addActivity(
-          step === 0 ? "Reading the current page" : "Deciding the next action"
+          step === 0
+            ? "Understanding request"
+            : observation
+              ? "Deciding the next action"
+              : "Choosing the next step"
         );
+
         const controller = new AbortController();
         requestAbort.current = controller;
         let decision;
+
         try {
           decision = await nextAgentDecision(
             config,
@@ -333,11 +329,14 @@ export function App() {
           return;
         }
 
-        const description = approvalDescription(
-          observation,
-          decision.tool,
-          decision.input
-        );
+        const description =
+          observation &&
+          approvalDescription(
+            observation,
+            decision.tool,
+            decision.input
+          );
+
         if (description) {
           const approved = await requestApproval(description);
           setApproval(null);
@@ -350,52 +349,90 @@ export function App() {
         const activityId = addActivity(
           decision.note || `Using ${decision.tool}`
         );
-        const result = await extensionMessage({
+
+        const result = await extensionMessage<PageObservation>({
           type: "BROWSER_TOOL",
           tool: decision.tool,
           input: decision.input
         });
+
         finishActivity(activityId, result.ok ? "done" : "error");
         trail.push(`${decision.tool}: ${JSON.stringify(result)}`);
 
-        if (!result.ok && result.error?.code === "ELEMENT_NOT_FOUND") {
-          trail.push("Element became stale; re-observing before retry.");
+        if (!result.ok) {
+          if (result.error?.code === "ELEMENT_NOT_FOUND") {
+            trail.push("Element became stale; re-observe before retry.");
+          } else {
+            throw new Error(
+              result.error?.message ||
+                `Browser tool ${decision.tool} failed`
+            );
+          }
         }
 
         if (
-          ["navigate", "click", "type", "press_key", "scroll", "open_tab", "switch_tab"].includes(
-            decision.tool
-          )
+          decision.tool === "observe_page" &&
+          result.ok &&
+          result.data
+        ) {
+          observation = result.data;
+          continue;
+        }
+
+        if (
+          [
+            "navigate",
+            "click",
+            "type",
+            "press_key",
+            "scroll",
+            "open_tab",
+            "switch_tab"
+          ].includes(decision.tool)
         ) {
           await extensionMessage({
             type: "BROWSER_TOOL",
             tool: "wait",
             input: { milliseconds: 450 }
           });
-        }
 
-        observationResult = await extensionMessage<PageObservation>({
-          type: "BROWSER_TOOL",
-          tool: "observe_page",
-          input: {}
-        });
-        if (!observationResult.ok || !observationResult.data) {
-          throw new Error(
-            observationResult.error?.message ||
-              "Could not verify the page after the action"
+          const verified = await extensionMessage<PageObservation>({
+            type: "BROWSER_TOOL",
+            tool: "observe_page",
+            input: {}
+          });
+
+          if (!verified.ok || !verified.data) {
+            throw new Error(
+              verified.error?.message ||
+                "Could not verify the page after the action"
+            );
+          }
+
+          observation = verified.data;
+          trail.push(
+            `verification: page=${verified.data.title} url=${verified.data.url}`
           );
         }
-        observation = observationResult.data;
       }
 
       if (cancelled.current) {
         addAssistantMessage("Stopped.");
       } else {
-        throw new Error("Task reached the v0.1 action limit before completion");
+        throw new Error(
+          "Task reached the v0.1 action limit before completion"
+        );
       }
     } catch (error) {
-      if (cancelled.current || (error instanceof DOMException && error.name === "AbortError")) {
+      if (cancelled.current) {
         addAssistantMessage("Stopped.");
+      } else if (
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      ) {
+        addAssistantMessage(
+          "The model request was interrupted unexpectedly. Please try again."
+        );
       } else {
         addAssistantMessage(
           error instanceof Error
