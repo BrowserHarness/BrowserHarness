@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "owner": "BrowserCrew/browsercrew",
+  "version": "0.1",
+  "tools": [
+    {
+      "id": "observe_page",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "navigate",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
+      "id": "click",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
+      "id": "type",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
+      "id": "press_key",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
+      "id": "scroll",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "wait",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "open_tab",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
+      "id": "switch_tab",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "close_tab",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
+      "id": "screenshot",
+      "mutation": false,
+      "approval": "never"
+    }
+  ]
+}
