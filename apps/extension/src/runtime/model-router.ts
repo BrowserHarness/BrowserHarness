@@ -1,4 +1,5 @@
 import type { PageObservation } from "./protocol";
+import type { TabEvidence } from "./tab-evidence";
 import {
   directChatCompletion,
   nextAgentDecision,
@@ -69,9 +70,17 @@ export async function agentDecisionWithFallback(
   task: string,
   observation: PageObservation,
   trail: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  evidence: TabEvidence[] = []
 ): Promise<RoutedResult<AgentDecision>> {
   return runWithFallback(primary, fallback, (connection) =>
-    nextAgentDecision(connection, task, observation, trail, signal)
+    nextAgentDecision(
+      connection,
+      task,
+      observation,
+      trail,
+      signal,
+      evidence
+    )
   );
 }
