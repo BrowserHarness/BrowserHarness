@@ -11,6 +11,12 @@
     "scripting"
   ],
   "host_permissions": [
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://integrate.api.nvidia.com/*",
+    "https://api.groq.com/*"
+  ],
+  "optional_host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
@@ -23,17 +29,5 @@
   },
   "action": {
     "default_title": "Open BrowserCrew"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "assets/content.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ]
+  }
 }
