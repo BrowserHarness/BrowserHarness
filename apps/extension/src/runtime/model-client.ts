@@ -1,4 +1,4 @@
-import type { ProviderConfig } from "../settings/provider-store";
+import { providerBaseUrl, type ProviderConfig } from "../settings/provider-store";
 import type { PageObservation, ToolName } from "./protocol";
 
 export type AgentDecision =
@@ -171,10 +171,7 @@ async function callOpenAICompatible(
   prompt: string,
   signal?: AbortSignal
 ): Promise<string> {
-  const base =
-    config.provider === "openai"
-      ? "https://api.openai.com/v1"
-      : String(config.baseUrl || "").replace(/\/$/, "");
+  const base = providerBaseUrl(config.provider, config.baseUrl);
 
   const groq = isGroq(config);
   const body: Record<string, unknown> = {
