@@ -21,6 +21,9 @@ export interface InteractiveElement {
   type?: string;
   visible: boolean;
   disabled: boolean;
+  requires_approval?: boolean;
+  approval_reason?: string;
+  enter_requires_approval?: boolean;
 }
 
 export interface PageObservation {
