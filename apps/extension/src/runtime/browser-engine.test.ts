@@ -43,7 +43,7 @@ function harness(options: {
   const contexts: BrowserDecisionContext[] = [];
   let decisionIndex = 0;
 
-  const tool = vi.fn(async (name: ToolName) => {
+  const toolMock = vi.fn(async (name: ToolName) => {
     if (name === "observe_page") {
       const observation = observations.shift();
       return observation
@@ -61,7 +61,8 @@ function harness(options: {
     if (queued?.length) return queued.shift()!;
 
     return { ok: true, data: {} };
-  }) as BrowserEngineDependencies["tool"];
+  });
+  const tool = toolMock as BrowserEngineDependencies["tool"];
 
   const requestApproval = vi.fn(async () => options.approval ?? true);
   const waitWhilePaused = vi.fn(async () => undefined);
@@ -100,6 +101,7 @@ function harness(options: {
   return {
     dependencies,
     tool,
+    toolMock,
     contexts,
     requestApproval,
     waitWhilePaused,
@@ -123,7 +125,7 @@ describe("Browser MVP engine scenarios", () => {
 
     expect(result.status).toBe("completed");
     expect(result.message).toContain("AI");
-    expect(h.tool.mock.calls.map(([tool]) => tool)).toEqual([
+    expect(h.toolMock.mock.calls.map(([tool]) => tool)).toEqual([
       "observe_page"
     ]);
   });
@@ -161,7 +163,7 @@ describe("Browser MVP engine scenarios", () => {
 
     const result = await runBrowserTask("Open pricing", h.dependencies);
     expect(result.status).toBe("completed");
-    expect(h.tool.mock.calls.map(([tool]) => tool)).toContain("navigate");
+    expect(h.toolMock.mock.calls.map(([tool]) => tool)).toContain("navigate");
     expect(h.contexts[1].observation.title).toBe("Pricing");
   });
 
@@ -201,7 +203,7 @@ describe("Browser MVP engine scenarios", () => {
       h.dependencies
     );
 
-    const tools = h.tool.mock.calls.map(([tool]) => tool);
+    const tools = h.toolMock.mock.calls.map(([tool]) => tool);
     expect(tools).toContain("type");
     expect(tools).not.toContain("press_key");
     expect(tools).not.toContain("click");
@@ -299,7 +301,7 @@ describe("Browser MVP engine scenarios", () => {
     expect(result.status).toBe("approval-cancelled");
     expect(h.requestApproval).toHaveBeenCalledOnce();
     expect(
-      h.tool.mock.calls.filter(([tool]) => tool === "click")
+      h.toolMock.mock.calls.filter(([tool]) => tool === "click")
     ).toHaveLength(0);
   });
 
@@ -381,7 +383,7 @@ describe("Browser MVP engine scenarios", () => {
     const result = await runBrowserTask("Search", h.dependencies);
     expect(result.status).toBe("completed");
     expect(
-      h.tool.mock.calls.filter(([tool]) => tool === "observe_page")
+      h.toolMock.mock.calls.filter(([tool]) => tool === "observe_page")
     ).toHaveLength(3);
   });
 
@@ -413,7 +415,7 @@ describe("Browser MVP engine scenarios", () => {
     ).rejects.toThrow("repeated action loop");
 
     expect(
-      h.tool.mock.calls.filter(([tool]) => tool === "click")
+      h.toolMock.mock.calls.filter(([tool]) => tool === "click")
     ).toHaveLength(2);
   });
 
@@ -459,7 +461,7 @@ describe("Browser MVP engine scenarios", () => {
 
     expect(result.status).toBe("completed");
     expect(
-      h.tool.mock.calls.filter(([tool]) => tool === "screenshot")
+      h.toolMock.mock.calls.filter(([tool]) => tool === "screenshot")
     ).toHaveLength(1);
   });
 
