@@ -96,19 +96,41 @@ describe("directChatCompletion", () => {
 });
 
 describe("testModelConnection", () => {
-  it("accepts a small successful inference response", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: "OK" } }]
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
+  it("requires both chat and structured agent capability", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "OK" } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
       )
-    );
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    kind: "tool",
+                    tool: "click",
+                    input: { element_id: "bc-health-1" },
+                    note: "Clicking Continue"
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
 
     const result = await testModelConnection(nvidia);
-    expect(result.ok).toBe(true);
-    expect(result.preview).toBe("OK");
+    expect(result.chat.ok).toBe(true);
+    expect(result.chat.preview).toBe("OK");
+    expect(result.agent.ok).toBe(true);
+    expect(result.agent.preview).toContain("Structured browser action");
   });
 });
 
