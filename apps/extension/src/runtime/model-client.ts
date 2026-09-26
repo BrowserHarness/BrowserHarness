@@ -4,6 +4,7 @@ import {
 } from "../settings/provider-store";
 import type { PageObservation, ToolName } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
+import { classifyModelCapabilities } from "../settings/model-capabilities";
 
 export type AgentDecision =
   | { kind: "tool"; tool: ToolName; input: Record<string, unknown>; note: string }
@@ -46,7 +47,7 @@ To use a tool:
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
 
-Prefer semantic element_id values from the current observation. Never invent an element_id.
+Prefer semantic element_id values from the current observation. Never invent an element_id.\nUse screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
 Do not request send, submit, publish, purchase, delete, payment, or account/security-changing actions unless necessary for the user's explicit goal; BrowserCrew applies approval policy separately.`;
 
 const CHAT_SYSTEM =
@@ -172,7 +173,9 @@ function agentPrompt(
   task: string,
   observation: PageObservation,
   trail: string[],
-  evidence: TabEvidence[]
+  evidence: TabEvidence[],
+  visionAvailable: boolean,
+  screenshotAttached: boolean
 ) {
   return `USER GOAL:
 ${task}
@@ -183,9 +186,16 @@ ${JSON.stringify(observation)}
 OBSERVED TAB EVIDENCE:
 ${evidence.length ? JSON.stringify(evidence) : "No retained tab evidence yet."}
 
+VISION AVAILABLE:
+${visionAvailable ? "yes" : "no"}
+
+SCREENSHOT ATTACHED:
+${screenshotAttached ? "yes" : "no"}
+
 RECENT EXECUTION EVIDENCE:
 ${trail.slice(-8).join("\n") || "No actions yet."}
 
+If DOM/text evidence is insufficient and VISION AVAILABLE is yes, you may request screenshot once and inspect it on the next turn.
 Choose the next single browser action or finish.
 Return one JSON object only.`;
 }
@@ -287,13 +297,29 @@ async function openAICompatibleRequest(
   return content;
 }
 
+function anthropicImageContent(dataUrl: string) {
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
+  if (!match) {
+    throw new Error("Screenshot data is not a supported base64 image.");
+  }
+  return {
+    type: "image",
+    source: {
+      type: "base64",
+      media_type: match[1],
+      data: match[2]
+    }
+  };
+}
+
 async function anthropicRequest(
   config: ProviderConfig,
   system: string,
   prompt: string,
   maxTokens: number,
   timeoutMs: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  screenshotDataUrl?: string
 ): Promise<string> {
   const response = await fetchWithTimeout(
     "https://api.anthropic.com/v1/messages",
@@ -310,7 +336,17 @@ async function anthropicRequest(
         max_tokens: maxTokens,
         temperature: 0,
         system,
-        messages: [{ role: "user", content: prompt }]
+        messages: [
+          {
+            role: "user",
+            content: screenshotDataUrl
+              ? [
+                  { type: "text", text: prompt },
+                  anthropicImageContent(screenshotDataUrl)
+                ]
+              : prompt
+          }
+        ]
       })
     },
     timeoutMs,
@@ -362,14 +398,28 @@ function chatBody(config: ProviderConfig, prompt: string, maxTokens: number) {
   return body;
 }
 
-function agentBody(config: ProviderConfig, prompt: string) {
+function agentBody(
+  config: ProviderConfig,
+  prompt: string,
+  screenshotDataUrl?: string
+) {
+  const userContent = screenshotDataUrl
+    ? [
+        { type: "text", text: prompt },
+        {
+          type: "image_url",
+          image_url: { url: screenshotDataUrl }
+        }
+      ]
+    : prompt;
+
   const body: Record<string, unknown> = {
     model: config.model,
     temperature: 0,
     max_tokens: 700,
     messages: [
       { role: "system", content: AGENT_SYSTEM },
-      { role: "user", content: prompt }
+      { role: "user", content: userContent }
     ]
   };
 
@@ -515,9 +565,26 @@ export async function nextAgentDecision(
   observation: PageObservation,
   trail: string[],
   signal?: AbortSignal,
-  evidence: TabEvidence[] = []
+  evidence: TabEvidence[] = [],
+  screenshotDataUrl?: string
 ): Promise<AgentDecision> {
-  const prompt = agentPrompt(task, observation, trail, evidence);
+  const visionAvailable =
+    classifyModelCapabilities(config.model).vision;
+
+  if (screenshotDataUrl && !visionAvailable) {
+    throw new Error(
+      "Screenshot evidence requires a vision-capable model."
+    );
+  }
+
+  const prompt = agentPrompt(
+    task,
+    observation,
+    trail,
+    evidence,
+    visionAvailable,
+    Boolean(screenshotDataUrl)
+  );
 
   const raw =
     config.provider === "anthropic"
@@ -527,11 +594,12 @@ export async function nextAgentDecision(
           prompt,
           700,
           20_000,
-          signal
+          signal,
+          screenshotDataUrl
         )
       : await openAICompatibleRequest(
           config,
-          agentBody(config, prompt),
+          agentBody(config, prompt, screenshotDataUrl),
           20_000,
           signal,
           true
@@ -561,11 +629,12 @@ No markdown or commentary.`;
             repairPrompt,
             400,
             15_000,
-            signal
+            signal,
+            screenshotDataUrl
           )
         : await openAICompatibleRequest(
             config,
-            agentBody(config, repairPrompt),
+            agentBody(config, repairPrompt, screenshotDataUrl),
             15_000,
             signal,
             true
