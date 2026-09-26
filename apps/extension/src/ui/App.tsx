@@ -24,8 +24,16 @@ import {
   Tooltip,
   Typography
 } from "@mui/material";
-import { loadProviderConfig, type ProviderConfig } from "../settings/provider-store";
-import { directChatCompletion, nextAgentDecision } from "../runtime/model-client";
+import {
+  loadActiveConnection,
+  loadFallbackConnection,
+  type ProviderConnection
+} from "../settings/provider-store";
+import {
+  directChatWithFallback,
+  agentDecisionWithFallback
+} from "../runtime/model-router";
+import { createLoopGuard, registerDecision } from "../runtime/loop-guard";
 import { classifyTaskIntent } from "../runtime/intent";
 import type { PageObservation, ToolResult } from "../runtime/protocol";
 import {
@@ -95,7 +103,8 @@ function approvalDescription(
 export function App() {
   const [view, setView] = useState<"chat" | "settings">("chat");
   const [tab, setTab] = useState<CurrentTab | null>(null);
-  const [config, setConfig] = useState<ProviderConfig | null>(null);
+  const [primary, setPrimary] = useState<ProviderConnection | null>(null);
+  const [fallback, setFallback] = useState<ProviderConnection | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -110,12 +119,15 @@ export function App() {
   const requestAbort = useRef<AbortController | null>(null);
 
   const refreshContext = async () => {
-    const [currentTab, provider] = await Promise.all([
-      extensionMessage<CurrentTab>({ type: "GET_CURRENT_TAB" }),
-      loadProviderConfig()
-    ]);
+    const [currentTab, primaryConnection, fallbackConnection] =
+      await Promise.all([
+        extensionMessage<CurrentTab>({ type: "GET_CURRENT_TAB" }),
+        loadActiveConnection(),
+        loadFallbackConnection()
+      ]);
     if (currentTab.ok && currentTab.data) setTab(currentTab.data);
-    setConfig(provider);
+    setPrimary(primaryConnection);
+    setFallback(fallbackConnection);
   };
 
   useEffect(() => {
@@ -271,7 +283,12 @@ export function App() {
   const runTask = async () => {
     const task = prompt.trim();
     if (!task || running) return;
-    if (!config?.apiKey || !config.model || !config.validatedAt) {
+
+    if (
+      !primary?.apiKey ||
+      !primary.model ||
+      primary.chatHealth.status !== "healthy"
+    ) {
       setView("settings");
       return;
     }
@@ -296,14 +313,26 @@ export function App() {
         requestAbort.current = controller;
 
         try {
-          const answer = await directChatCompletion(
-            config,
+          const routed = await directChatWithFallback(
+            primary,
+            fallback?.chatHealth.status === "healthy"
+              ? fallback
+              : null,
             task,
             controller.signal
           );
+
           finishActivity(activity);
-          addAssistantMessage(answer);
-          await saveHistory(task, answer);
+          if (routed.usedFallback) {
+            const fallbackActivity = addActivity(
+              "Primary unavailable — used fallback model",
+              "done"
+            );
+            finishActivity(fallbackActivity);
+          }
+
+          addAssistantMessage(routed.result);
+          await saveHistory(task, routed.result);
           return;
         } catch (error) {
           finishActivity(activity, cancelled.current ? "done" : "error");
@@ -313,7 +342,28 @@ export function App() {
         }
       }
 
+      const agentPrimary =
+        primary.agentHealth.status === "healthy"
+          ? primary
+          : fallback?.agentHealth.status === "healthy"
+            ? fallback
+            : null;
+
+      if (!agentPrimary) {
+        throw new Error(
+          "No validated Agent-capable model is available. Open Models & connections and run the Agent capability check."
+        );
+      }
+
+      const agentFallback =
+        agentPrimary.id === primary.id &&
+        fallback?.agentHealth.status === "healthy"
+          ? fallback
+          : null;
+
       const trail: string[] = [];
+      const loopGuard = createLoopGuard();
+
       const observeActivity = addActivity("Reading the current page");
       const initial = await extensionMessage<PageObservation>({
         type: "BROWSER_TOOL",
@@ -342,103 +392,116 @@ export function App() {
         const thinking = addActivity("Deciding the next action");
         const controller = new AbortController();
         requestAbort.current = controller;
-        let decision;
 
         try {
-          decision = await nextAgentDecision(
-            config,
+          const routed = await agentDecisionWithFallback(
+            agentPrimary,
+            agentFallback,
             task,
             observation,
             trail,
             controller.signal
           );
           finishActivity(thinking);
+
+          if (routed.usedFallback) {
+            trail.push(
+              `provider fallback: ${agentPrimary.label} → ${agentFallback?.label || "fallback"}`
+            );
+          }
+
+          const decision = routed.result;
+
+          if (decision.kind === "final") {
+            addAssistantMessage(decision.message);
+            await saveHistory(task, decision.message);
+            return;
+          }
+
+          const loopCheck = registerDecision(loopGuard, decision);
+          if (!loopCheck.ok) {
+            throw new Error(loopCheck.reason);
+          }
+
+          const description = approvalDescription(
+            observation,
+            decision.tool,
+            decision.input
+          );
+
+          if (description) {
+            const approved = await requestApproval(description);
+            setApproval(null);
+            if (!approved) {
+              addAssistantMessage("I stopped before that action.");
+              return;
+            }
+          }
+
+          const activityId = addActivity(
+            decision.note || `Using ${decision.tool}`
+          );
+
+          const result = await extensionMessage<PageObservation>({
+            type: "BROWSER_TOOL",
+            tool: decision.tool,
+            input: decision.input
+          });
+
+          finishActivity(activityId, result.ok ? "done" : "error");
+          trail.push(`${decision.tool}: ${JSON.stringify(result)}`);
+
+          if (!result.ok) {
+            if (result.error?.code === "ELEMENT_NOT_FOUND") {
+              trail.push("Element became stale; re-observe before retry.");
+            } else {
+              throw new Error(
+                result.error?.message ||
+                  `Browser tool ${decision.tool} failed`
+              );
+            }
+          }
+
+          if (
+            [
+              "navigate",
+              "click",
+              "type",
+              "press_key",
+              "scroll",
+              "open_tab",
+              "switch_tab"
+            ].includes(decision.tool)
+          ) {
+            await extensionMessage({
+              type: "BROWSER_TOOL",
+              tool: "wait",
+              input: { milliseconds: 450 }
+            });
+
+            const verified = await extensionMessage<PageObservation>({
+              type: "BROWSER_TOOL",
+              tool: "observe_page",
+              input: {}
+            });
+
+            if (!verified.ok || !verified.data) {
+              throw new Error(
+                verified.error?.message ||
+                  "Could not verify the page after the action"
+              );
+            }
+
+            observation = verified.data;
+            trail.push(
+              `verification: adapter=${verified.data.adapter || "generic-web"} page=${verified.data.title} url=${verified.data.url}`
+            );
+          }
         } catch (error) {
           finishActivity(thinking, cancelled.current ? "done" : "error");
           throw error;
         } finally {
           requestAbort.current = null;
-        }
-
-        if (decision.kind === "final") {
-          addAssistantMessage(decision.message);
-          await saveHistory(task, decision.message);
-          return;
-        }
-
-        const description = approvalDescription(
-          observation,
-          decision.tool,
-          decision.input
-        );
-
-        if (description) {
-          const approved = await requestApproval(description);
-          setApproval(null);
-          if (!approved) {
-            addAssistantMessage("I stopped before that action.");
-            return;
-          }
-        }
-
-        const activityId = addActivity(
-          decision.note || `Using ${decision.tool}`
-        );
-
-        const result = await extensionMessage<PageObservation>({
-          type: "BROWSER_TOOL",
-          tool: decision.tool,
-          input: decision.input
-        });
-
-        finishActivity(activityId, result.ok ? "done" : "error");
-        trail.push(`${decision.tool}: ${JSON.stringify(result)}`);
-
-        if (!result.ok) {
-          if (result.error?.code === "ELEMENT_NOT_FOUND") {
-            trail.push("Element became stale; re-observe before retry.");
-          } else {
-            throw new Error(
-              result.error?.message ||
-                `Browser tool ${decision.tool} failed`
-            );
-          }
-        }
-
-        if (
-          [
-            "navigate",
-            "click",
-            "type",
-            "press_key",
-            "scroll",
-            "open_tab",
-            "switch_tab"
-          ].includes(decision.tool)
-        ) {
-          await extensionMessage({
-            type: "BROWSER_TOOL",
-            tool: "wait",
-            input: { milliseconds: 450 }
-          });
-
-          const verified = await extensionMessage<PageObservation>({
-            type: "BROWSER_TOOL",
-            tool: "observe_page",
-            input: {}
-          });
-
-          if (!verified.ok || !verified.data) {
-            throw new Error(
-              verified.error?.message ||
-                "Could not verify the page after the action"
-            );
-          }
-
-          observation = verified.data;
-          trail.push(
-            `verification: page=${verified.data.title} url=${verified.data.url}`
-          );
         }
       }
 
@@ -446,7 +509,7 @@ export function App() {
         addAssistantMessage("Stopped.");
       } else {
         throw new Error(
-          "Task reached the v0.1 action limit before completion"
+          "Task reached the v0.1.1 bounded action limit before completion."
         );
       }
     } catch (error) {
@@ -545,7 +608,7 @@ export function App() {
             </Tooltip>
           )}
           <Button size="small" onClick={(event) => setModelAnchor(event.currentTarget)}>
-            {config?.model || "Connect AI"}
+            {primary?.model || "Connect AI"}
           </Button>
           <Menu
             anchorEl={modelAnchor}
@@ -553,7 +616,7 @@ export function App() {
             onClose={() => setModelAnchor(null)}
           >
             <MenuItem disabled>
-              {config ? config.provider : "No provider connected"}
+              {primary ? primary.provider : "No provider connected"}
             </MenuItem>
             <MenuItem
               onClick={() => {
