@@ -60,7 +60,7 @@ export function App() {
   const [paused, setPaused] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
-  const cancelled = useRef(false);
+  const cancelled = useRef(false);\n  const pausedRef = useRef(false);
 
   const refreshContext = async () => {
     const [currentTab, provider] = await Promise.all([
@@ -116,7 +116,7 @@ export function App() {
       let observation = observationResult.data;
 
       for (let step = 0; step < 12 && !cancelled.current; step += 1) {
-        while (paused && !cancelled.current) {
+        while (pausedRef.current && !cancelled.current) {
           await new Promise((resolve) => window.setTimeout(resolve, 150));
         }
 
@@ -298,10 +298,10 @@ export function App() {
       <Box sx={{ p: 1.5 }}>
         {running && (
           <Stack direction="row" spacing={1} mb={1}>
-            <Button size="small" startIcon={<PauseIcon />} onClick={() => setPaused((value) => !value)}>
+            <Button size="small" startIcon={<PauseIcon />} onClick={() => setPaused((value) => { const next = !value; pausedRef.current = next; return next; })}>
               {paused ? "Resume" : "Pause"}
             </Button>
-            <Button size="small" color="error" startIcon={<StopIcon />} onClick={() => { cancelled.current = true; setPaused(false); }}>
+            <Button size="small" color="error" startIcon={<StopIcon />} onClick={() => { cancelled.current = true; pausedRef.current = false; setPaused(false); }}>
               Stop
             </Button>
           </Stack>
