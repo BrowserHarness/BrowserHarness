@@ -36,6 +36,29 @@ Goal: install BrowserCrew, connect an AI provider, give the current tab a task, 
 - Team/enterprise administration
 - BrowserCrew-hosted inference
 
+## v0.1.1 — Reliable Model + Agent Runtime
+Goal: make provider/model behavior predictable before expanding product scope.
+
+### Required
+- Multiple saved provider/model connections
+- Capability classification: chat, agent, vision, embedding, reranker, audio, image, unknown
+- Separate Chat and Agent health probes
+- Explicit Primary + one Fallback model
+- Failover only on recoverable provider/model failures
+- Direct chat isolated from browser-agent planning
+- Compact page observations (bounded visible text + interactive elements)
+- Duplicate-action loop detection and bounded execution
+- Explicit site-adapter boundary with Google Docs adapter
+- Internal-first stability gate with regression tests before user acceptance
+
+### Deferred from v0.1.1
+- Multi-agent teams
+- Full vision execution path
+- Embedding-backed memory
+- Audio/image-generation model execution
+- Automatic model benchmarking/ranking
+- More than one fallback hop
+
 ## v0.2 — Better workflows + Skills
 - Workflow variables and branches
 - Reusable Skill runtime
