@@ -417,6 +417,52 @@ describe("Browser MVP engine scenarios", () => {
     ).toHaveLength(2);
   });
 
+  it("carries screenshot visual evidence into the next planning turn", async () => {
+    const screenshot = "data:image/png;base64,ZmFrZQ==";
+    let turn = 0;
+    const h = harness({
+      observations: [page(1, "Canvas", "")],
+      decisions: (context) => {
+        turn += 1;
+        if (turn === 1) {
+          expect(context.screenshotDataUrl).toBeUndefined();
+          return {
+            kind: "tool",
+            tool: "screenshot",
+            input: {},
+            note: "Inspecting the page visually"
+          };
+        }
+        expect(context.screenshotDataUrl).toBe(screenshot);
+        return {
+          kind: "final",
+          message: "The screenshot shows the requested content."
+        };
+      },
+      toolResults: {
+        screenshot: [
+          {
+            ok: true,
+            data: {
+              tab_id: 1,
+              data_url: screenshot
+            }
+          }
+        ]
+      }
+    });
+
+    const result = await runBrowserTask(
+      "Describe this visual page",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(
+      h.tool.mock.calls.filter(([tool]) => tool === "screenshot")
+    ).toHaveLength(1);
+  });
+
   it("fails clearly when the initial page cannot be observed", async () => {
     const tool = vi.fn(async () => ({
       ok: false,
