@@ -15,6 +15,7 @@ export interface BrowserDecisionContext {
   observation: PageObservation;
   trail: string[];
   evidence: TabEvidence[];
+  screenshotDataUrl?: string;
   signal?: AbortSignal;
 }
 
@@ -108,6 +109,7 @@ export async function runBrowserTask(
   }
 
   let observation = initial.data;
+  let screenshotDataUrl: string | undefined;
   evidenceStore.record(observation);
 
   for (let step = 0; step < maxSteps; step += 1) {
@@ -122,6 +124,7 @@ export async function runBrowserTask(
 
     await dependencies.waitWhilePaused();
 
+    const screenshotForDecision = screenshotDataUrl;
     const routed = await dependencies.withActivity(
       "Deciding the next action",
       () =>
@@ -130,9 +133,11 @@ export async function runBrowserTask(
           observation,
           trail,
           evidence: evidenceStore.list(),
+          screenshotDataUrl: screenshotForDecision,
           signal
         })
     );
+    screenshotDataUrl = undefined;
 
     if (routed.usedFallback) {
       dependencies.onFallback?.();
@@ -175,6 +180,19 @@ export async function runBrowserTask(
       decision.note || `Using ${decision.tool}`,
       () => dependencies.tool(decision.tool, decision.input)
     );
+
+    if (decision.tool === "screenshot" && result.ok) {
+      const data =
+        result.data && typeof result.data === "object"
+          ? (result.data as { data_url?: unknown })
+          : null;
+      if (typeof data?.data_url !== "string") {
+        throw new Error("Screenshot tool did not return image data.");
+      }
+      screenshotDataUrl = data.data_url;
+      trail.push("screenshot: captured visual evidence");
+      continue;
+    }
 
     trail.push(
       `${decision.tool}: ${JSON.stringify(result)}`
