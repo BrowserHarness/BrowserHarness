@@ -51,7 +51,11 @@ ${trail.slice(-8).join("\n") || "No actions yet."}
 Choose the next single action or finish.`;
 }
 
-async function callOpenAICompatible(config: ProviderConfig, prompt: string): Promise<string> {
+async function callOpenAICompatible(
+  config: ProviderConfig,
+  prompt: string,
+  signal?: AbortSignal
+): Promise<string> {
   const base =
     config.provider === "openai"
       ? "https://api.openai.com/v1"
@@ -62,6 +66,7 @@ async function callOpenAICompatible(config: ProviderConfig, prompt: string): Pro
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.apiKey}`
     },
+    signal,
     body: JSON.stringify({
       model: config.model,
       temperature: 0,
@@ -76,7 +81,11 @@ async function callOpenAICompatible(config: ProviderConfig, prompt: string): Pro
   return String(json?.choices?.[0]?.message?.content || "");
 }
 
-async function callAnthropic(config: ProviderConfig, prompt: string): Promise<string> {
+async function callAnthropic(
+  config: ProviderConfig,
+  prompt: string,
+  signal?: AbortSignal
+): Promise<string> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -85,6 +94,7 @@ async function callAnthropic(config: ProviderConfig, prompt: string): Promise<st
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true"
     },
+    signal,
     body: JSON.stringify({
       model: config.model,
       max_tokens: 900,
@@ -102,12 +112,13 @@ export async function nextAgentDecision(
   config: ProviderConfig,
   task: string,
   observation: PageObservation,
-  trail: string[]
+  trail: string[],
+  signal?: AbortSignal
 ): Promise<AgentDecision> {
   const prompt = promptFor(task, observation, trail);
   const raw =
     config.provider === "anthropic"
-      ? await callAnthropic(config, prompt)
-      : await callOpenAICompatible(config, prompt);
+      ? await callAnthropic(config, prompt, signal)
+      : await callOpenAICompatible(config, prompt, signal);
   return parseDecision(raw);
 }
