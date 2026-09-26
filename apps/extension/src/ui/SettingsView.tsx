@@ -116,6 +116,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
 
   const handleProviderChange = (next: ProviderId) => {
     setProvider(next);
+    setApiKey("");
     setModel("");
     setModels([]);
     setModelsError("");
