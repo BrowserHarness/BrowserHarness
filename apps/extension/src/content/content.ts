@@ -1,4 +1,11 @@
 import type { RecordedWorkflowStep, WorkflowLocator } from "../runtime/workflows";
+import { adapterForUrl } from "./adapters/registry";
+import {
+  GOOGLE_DOCS_EDITOR_ID,
+  dispatchGoogleDocsText,
+  googleDocsEditorTarget,
+  isGoogleDocsLocation
+} from "./adapters/google-docs";
 
 type ContentRequest =
   | { type: "OBSERVE_PAGE"; tab_id: number }
@@ -181,7 +188,7 @@ function observe(tabId: number) {
     'a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])';
   const elements = Array.from(document.querySelectorAll<HTMLElement>(selector))
     .filter(isVisible)
-    .slice(0, 500)
+    .slice(0, 250)
     .map((element) => ({
       element_id: ensureId(element),
       tag: element.tagName.toLowerCase(),
@@ -201,10 +208,10 @@ function observe(tabId: number) {
   const googleDocsEditor = googleDocsEditorTarget();
   if (
     googleDocsEditor &&
-    !elements.some((element) => element.element_id === "bc-google-doc-editor")
+    !elements.some((element) => element.element_id === GOOGLE_DOCS_EDITOR_ID)
   ) {
     elements.unshift({
-      element_id: "bc-google-doc-editor",
+      element_id: GOOGLE_DOCS_EDITOR_ID,
       tag: "google-docs-editor",
       role: "textbox",
       accessible_name: "Document content",
@@ -221,24 +228,18 @@ function observe(tabId: number) {
     tab_id: tabId,
     url: location.href,
     title: document.title,
-    visible_text: (document.body?.innerText || "").slice(0, 20_000),
-    elements
+    visible_text: (document.body?.innerText || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 6_000),
+    elements,
+    adapter: adapterForUrl(location.href)
   };
-}
-
-function googleDocsEditorTarget(): HTMLElement | null {
-  if (location.hostname !== "docs.google.com") return null;
-  const iframe = document.querySelector<HTMLIFrameElement>(".docs-texteventtarget-iframe");
-  const frameDocument = iframe?.contentDocument;
-  if (!frameDocument) return null;
-  const active = frameDocument.activeElement;
-  if (active instanceof HTMLElement) return active;
-  return frameDocument.body instanceof HTMLElement ? frameDocument.body : null;
 }
 
 function getElement(id: unknown): HTMLElement {
   if (typeof id !== "string") throw new Error("Missing element_id");
-  if (id === "bc-google-doc-editor") {
+  if (id === GOOGLE_DOCS_EDITOR_ID) {
     const editor = googleDocsEditorTarget();
     if (!editor) throw new Error("Google Docs editor target not found");
     return editor;
@@ -248,30 +249,11 @@ function getElement(id: unknown): HTMLElement {
   return element;
 }
 
-function dispatchGoogleDocsText(element: HTMLElement, text: string) {
-  const ownerDocument = element.ownerDocument;
-  element.focus();
-  element.ownerDocument.defaultView?.focus();
-
-  for (const char of text) {
-    const keyCode = char === "\n" ? 13 : char.charCodeAt(0);
-    const event = ownerDocument.createEvent("Event");
-    event.initEvent("keypress", true, true);
-    Object.defineProperty(event, "key", { value: char === "\n" ? "Enter" : char });
-    Object.defineProperty(event, "keyCode", { value: keyCode });
-    Object.defineProperty(event, "which", { value: keyCode });
-    Object.defineProperty(event, "charCode", { value: char === "\n" ? 0 : keyCode });
-    element.dispatchEvent(event);
-  }
-
-  return { typed: text.length, editor: "google-docs-text-event-target" };
-}
-
 function writeText(element: HTMLElement, text: string, replace = true) {
   element.focus();
 
   if (
-    location.hostname === "docs.google.com" &&
+    isGoogleDocsLocation(location) &&
     element.ownerDocument !== document
   ) {
     return dispatchGoogleDocsText(element, text);
