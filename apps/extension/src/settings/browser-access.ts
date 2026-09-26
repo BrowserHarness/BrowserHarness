@@ -24,6 +24,12 @@ export function originPatternForUrl(url: string): string | null {
   }
 }
 
+export async function hasEndpointAccess(url: string): Promise<boolean> {
+  const pattern = originPatternForUrl(url);
+  if (!pattern) return false;
+  return chrome.permissions.contains({ origins: [pattern] });
+}
+
 export async function ensureEndpointAccess(url: string): Promise<boolean> {
   const pattern = originPatternForUrl(url);
   if (!pattern) return false;
