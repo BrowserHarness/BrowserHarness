@@ -9,6 +9,8 @@ export interface ProviderConfig {
   apiKey: string;
   model: string;
   baseUrl?: string;
+  validatedAt?: string;
+  validatedLatencyMs?: number;
 }
 
 export interface ProviderDefinition {
