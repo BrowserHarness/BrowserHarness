@@ -49,3 +49,21 @@ Install the next CI-green artifact and rerun:
 3. verify ordinary page summary still passes with Groq.
 
 Do not mark Google Docs writing passed until this is confirmed in real Chrome.
+
+
+## Additional runtime finding
+### Content script unavailable after extension reload
+Observed error:
+`BrowserCrew cannot control this page. Chrome internal pages and some protected pages are not supported.`
+
+Likely cause on a normal Google Docs tab:
+- the extension was reloaded while the tab was already open;
+- Chrome does not retroactively run manifest content scripts in an already-loaded page after an unpacked-extension reload.
+
+Remediation:
+- add the `scripting` permission;
+- when a message to a normal HTTP(S) tab fails, BrowserCrew attempts to inject `assets/content.js` and retries automatically;
+- true protected browser pages return `UNSUPPORTED_PAGE` instead of the misleading generic content-script message;
+- if injection still fails, the UI instructs the user to reload that tab once.
+
+This keeps normal-page recovery automatic while preserving an explicit protected-page boundary.
