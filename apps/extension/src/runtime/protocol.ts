@@ -32,6 +32,7 @@ export interface PageObservation {
   title: string;
   visible_text: string;
   elements: InteractiveElement[];
+  adapter?: "google-docs" | "generic-web";
 }
 
 export type BrowserToolRequest = {
