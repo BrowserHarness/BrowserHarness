@@ -1185,6 +1185,29 @@ chrome.runtime.onMessage.addListener(
           return;
         }
 
+        if (request.type === "WATCH_STATUS") {
+          const active = await getWatchRecording();
+          sendResponse({
+            ok: true,
+            data: active
+              ? {
+                  recording: true,
+                  recording_id: active.id,
+                  started_at: active.started_at,
+                  root_tab_id: active.root_tab_id,
+                  current_tab_id: active.current_tab_id,
+                  tab_count: active.tab_ids.length,
+                  step_count: active.steps.length,
+                  event_count: active.events.length,
+                  boundary_step_id: active.boundary_step_id
+                }
+              : {
+                  recording: false
+                }
+          });
+          return;
+        }
+
         if (request.type === "WATCH_START") {
           const resolved = await targetTab(
             typeof request.tab_id === "number"
