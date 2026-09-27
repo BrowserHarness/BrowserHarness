@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-full-browser-agent-parity",
+  "status": "v0.2-watch-me-v2-cross-page-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -57,7 +57,29 @@
           "inferred_inputs": true,
           "reinjection_safe": true,
           "resilient_locator_matching": true,
-          "cross_page_recording": "next milestone"
+          "ownership": "background service worker + chrome.storage.session",
+          "content_role": "stateless step producer",
+          "cross_page_recording": true,
+          "navigation_events": "top-frame webNavigation committed/completed",
+          "rearm_after_navigation": true,
+          "tab_events": [
+            "opened",
+            "activated",
+            "closed"
+          ],
+          "tab_adoption": [
+            "tabs opened by a recorded tab",
+            "tabs/windows explicitly activated while Watch Me is recording"
+          ],
+          "side_panel_rehydration": "WATCH_STATUS",
+          "workflow_format_version": 3,
+          "boundary": "boundary_step_id = last accepted actionable step",
+          "evidence_limits": {
+            "max_steps": 1000,
+            "max_events": 2000,
+            "max_tabs": 50,
+            "max_approximate_bytes": 2000000
+          }
         },
         "reference_audit": "docs/research/KIMI-EXTENSION-REFERENCE-AUDIT.md",
         "permission_envelope": {
@@ -168,7 +190,17 @@
     },
     {
       "id": "workflows-watch-learn",
-      "owner": "BrowserCrew/Workflows + BrowserCrew/browsercrew"
+      "owner": "BrowserCrew/Workflows + BrowserCrew/browsercrew",
+      "runtime_contract": {
+        "watch_me_v2": "verified cross-page/multi-tab recorder",
+        "workflow_version": 3,
+        "evidence": [
+          "action steps",
+          "navigation",
+          "tab open/activation/close"
+        ],
+        "next": "Record → Skill and Session → Skill compiler"
+      }
     },
     {
       "id": "agents-teams",
