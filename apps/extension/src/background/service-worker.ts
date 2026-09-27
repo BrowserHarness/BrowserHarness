@@ -1,3 +1,4 @@
+import type { RecordedWorkflowStep } from "../runtime/workflows";
 import type {
   ExtensionRequest,
   PageObservation,
@@ -43,6 +44,16 @@ import {
   waitForTabUsable,
   type NavigationReadyResult
 } from "./navigation";
+import {
+  appendWatchEvent,
+  appendWatchStep,
+  getWatchRecording,
+  markWatchTabClosed,
+  startWatchRecording,
+  stopWatchRecording,
+  trackWatchTab,
+  watchRecordingSummary
+} from "./watch-recording";
 import {
   borrowTab,
   closeTaskSession,
@@ -1101,6 +1112,117 @@ async function handleBridgeCommand(
   );
 }
 
+async function armWatchTab(tabId: number): Promise<ToolResult> {
+  return sendToTab(tabId, { type: "WATCH_ARM" });
+}
+
+async function disarmWatchTab(
+  tabId: number
+): Promise<RecordedWorkflowStep | null> {
+  const result = await sendToTab(tabId, {
+    type: "WATCH_DISARM"
+  });
+
+  if (!result.ok || !result.data) return null;
+
+  const data = result.data as {
+    final_step?: RecordedWorkflowStep;
+  };
+  return data.final_step || null;
+}
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0) return;
+
+  void (async () => {
+    const session = await getWatchRecording();
+    if (!session || !session.tab_ids.includes(details.tabId)) {
+      return;
+    }
+
+    await appendWatchEvent({
+      type: "navigation",
+      tab_id: details.tabId,
+      url: details.url,
+      transition_type: details.transitionType,
+      transition_qualifiers: details.transitionQualifiers
+    });
+  })();
+});
+
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId !== 0) return;
+
+  void (async () => {
+    const session = await getWatchRecording();
+    if (!session || !session.tab_ids.includes(details.tabId)) {
+      return;
+    }
+
+    await armWatchTab(details.tabId).catch(() => undefined);
+  })();
+});
+
+chrome.tabs.onCreated.addListener((tab) => {
+  if (typeof tab.id !== "number") return;
+
+  void (async () => {
+    const session = await getWatchRecording();
+    if (!session) return;
+
+    const belongs =
+      typeof tab.openerTabId === "number" &&
+      session.tab_ids.includes(tab.openerTabId);
+
+    if (!belongs) return;
+
+    await trackWatchTab(tab.id!);
+    await appendWatchEvent({
+      type: "tab_opened",
+      tab_id: tab.id!,
+      opener_tab_id: tab.openerTabId,
+      url: tab.url,
+      title: tab.title
+    });
+  })();
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  void (async () => {
+    const session = await getWatchRecording();
+    if (!session || !session.tab_ids.includes(activeInfo.tabId)) {
+      return;
+    }
+
+    const tab = await chrome.tabs
+      .get(activeInfo.tabId)
+      .catch(() => null);
+
+    await appendWatchEvent({
+      type: "tab_activated",
+      tab_id: activeInfo.tabId,
+      window_id: activeInfo.windowId,
+      url: tab?.url,
+      title: tab?.title
+    });
+  })();
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void (async () => {
+    const session = await getWatchRecording();
+    if (!session || !session.tab_ids.includes(tabId)) {
+      return;
+    }
+
+    await appendWatchEvent({
+      type: "tab_closed",
+      tab_id: tabId
+    });
+    await markWatchTabClosed(tabId);
+  })();
+});
+
 startBridgeClient(handleBridgeCommand);
 
 chrome.runtime.onMessage.addListener(
@@ -1137,22 +1259,142 @@ chrome.runtime.onMessage.addListener(
           return;
         }
 
-        if (
-          request.type === "WATCH_START" ||
-          request.type === "WATCH_STOP" ||
-          request.type === "WATCH_REPLAY_STEP"
-        ) {
+        if (request.type === "WATCH_START") {
           const resolved = await targetTab(
             typeof request.tab_id === "number"
               ? { tab_id: request.tab_id }
               : {}
           );
-          const payload =
-            request.type === "WATCH_REPLAY_STEP"
-              ? { type: request.type, step: request.step }
-              : { type: request.type };
+
+          const session = await startWatchRecording(resolved.tab);
+          const armed = await armWatchTab(resolved.tab.id!);
+
+          if (!armed.ok) {
+            await stopWatchRecording();
+            sendResponse(armed);
+            return;
+          }
+
+          sendResponse({
+            ok: true,
+            data: {
+              recording: true,
+              recording_id: session.id,
+              root_tab_id: session.root_tab_id,
+              start_url: session.start_url
+            }
+          });
+          return;
+        }
+
+        if (request.type === "WATCH_CAPTURE_STEP") {
+          const tabId = _sender.tab?.id;
+          if (typeof tabId !== "number") {
+            sendResponse({
+              ok: false,
+              error: {
+                code: "WATCH_TAB_REQUIRED",
+                message:
+                  "Recorded workflow steps must come from a browser tab"
+              }
+            });
+            return;
+          }
+
+          const captured = await appendWatchStep(
+            tabId,
+            request.step
+          );
+          sendResponse({
+            ok: Boolean(captured.session),
+            data: {
+              accepted: captured.accepted
+            },
+            ...(!captured.session
+              ? {
+                  error: {
+                    code: "WATCH_NOT_RECORDING",
+                    message:
+                      "No active Watch Me recording session"
+                  }
+                }
+              : {})
+          });
+          return;
+        }
+
+        if (request.type === "WATCH_STOP") {
+          const active = await getWatchRecording();
+          if (!active) {
+            sendResponse({
+              ok: false,
+              error: {
+                code: "WATCH_NOT_RECORDING",
+                message: "No active Watch Me recording session"
+              }
+            });
+            return;
+          }
+
+          for (const tabId of active.tab_ids) {
+            const finalStep = await disarmWatchTab(tabId).catch(
+              () => null
+            );
+            if (finalStep) {
+              await appendWatchStep(tabId, finalStep);
+            }
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 25));
+
+          const completed = await stopWatchRecording();
+          if (!completed) {
+            sendResponse({
+              ok: false,
+              error: {
+                code: "WATCH_NOT_RECORDING",
+                message:
+                  "Watch Me recording ended before it could be saved"
+              }
+            });
+            return;
+          }
+
+          const currentTab = await chrome.tabs
+            .get(completed.current_tab_id)
+            .catch(() => null);
+
+          sendResponse({
+            ok: true,
+            data: {
+              recording: false,
+              recording_id: completed.id,
+              started_at: completed.started_at,
+              start_url: completed.start_url,
+              end_url:
+                currentTab?.url ||
+                completed.steps.at(-1)?.url ||
+                completed.start_url,
+              steps: completed.steps,
+              events: completed.events,
+              boundary_step_id: completed.boundary_step_id,
+              recording: watchRecordingSummary(completed)
+            }
+          });
+          return;
+        }
+
+        if (request.type === "WATCH_REPLAY_STEP") {
+          const resolved = await targetTab(
+            typeof request.tab_id === "number"
+              ? { tab_id: request.tab_id }
+              : {}
+          );
           sendResponse(
-            await sendToTab(resolved.tab.id!, payload)
+            await sendToTab(resolved.tab.id!, {
+              type: request.type,
+              step: request.step
+            })
           );
           return;
         }
