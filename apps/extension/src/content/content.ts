@@ -310,7 +310,111 @@ function getElement(id: unknown): HTMLElement {
   return element;
 }
 
-function writeText(element: HTMLElement, text: string, replace = true) {
+function dispatchBeforeInput(
+  element: HTMLElement,
+  text: string
+): void {
+  try {
+    element.dispatchEvent(
+      new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "insertText",
+        data: text
+      })
+    );
+  } catch {
+    // Older pages may not support constructing beforeinput directly.
+  }
+}
+
+function setNativeControlValue(
+  element: HTMLInputElement | HTMLTextAreaElement,
+  value: string
+): void {
+  const prototype =
+    element instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(
+    prototype,
+    "value"
+  )?.set;
+
+  if (setter) {
+    setter.call(element, value);
+  } else {
+    element.value = value;
+  }
+}
+
+function insertContentEditableText(
+  element: HTMLElement,
+  text: string,
+  replace: boolean
+): void {
+  const ownerDocument = element.ownerDocument;
+  const selection = ownerDocument.getSelection();
+
+  if (replace) {
+    const range = ownerDocument.createRange();
+    range.selectNodeContents(element);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  dispatchBeforeInput(element, text);
+
+  let inserted = false;
+  try {
+    inserted = ownerDocument.execCommand(
+      "insertText",
+      false,
+      text
+    );
+  } catch {
+    inserted = false;
+  }
+
+  if (!inserted) {
+    const activeSelection = ownerDocument.getSelection();
+    let range =
+      activeSelection && activeSelection.rangeCount > 0
+        ? activeSelection.getRangeAt(0)
+        : null;
+
+    if (!range) {
+      range = ownerDocument.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+    }
+
+    if (replace) {
+      range.deleteContents();
+    }
+
+    const node = ownerDocument.createTextNode(text);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    activeSelection?.removeAllRanges();
+    activeSelection?.addRange(range);
+  }
+
+  element.dispatchEvent(
+    new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+      data: text
+    })
+  );
+}
+
+function writeText(
+  element: HTMLElement,
+  text: string,
+  replace = true
+) {
   element.focus();
 
   if (
@@ -320,12 +424,25 @@ function writeText(element: HTMLElement, text: string, replace = true) {
     return dispatchGoogleDocsText(element, text);
   }
 
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    if (element instanceof HTMLInputElement && element.type === "password") {
-      throw new Error("Password fields are not replayed by Watch Me");
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    if (
+      element instanceof HTMLInputElement &&
+      element.type === "password"
+    ) {
+      throw new Error(
+        "Password fields are not replayed by Watch Me"
+      );
     }
-    if (replace) element.value = "";
-    element.value += text;
+
+    const nextValue = replace
+      ? text
+      : `${element.value}${text}`;
+
+    dispatchBeforeInput(element, text);
+    setNativeControlValue(element, nextValue);
     element.dispatchEvent(
       new InputEvent("input", {
         bubbles: true,
@@ -333,40 +450,24 @@ function writeText(element: HTMLElement, text: string, replace = true) {
         data: text
       })
     );
-    element.dispatchEvent(new Event("change", { bubbles: true }));
-    return { typed: text.length, editor: "form-control" };
+    element.dispatchEvent(
+      new Event("change", { bubbles: true })
+    );
+
+    return {
+      typed: text.length,
+      editor: "form-control",
+      mode: "native-value"
+    };
   }
 
   if (element.isContentEditable) {
-    const ownerDocument = element.ownerDocument;
-    if (replace) {
-      const selection = ownerDocument.getSelection();
-      const range = ownerDocument.createRange();
-      range.selectNodeContents(element);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-    }
-
-    let inserted = false;
-    try {
-      inserted = ownerDocument.execCommand("insertText", false, text);
-    } catch {
-      inserted = false;
-    }
-
-    if (!inserted) {
-      if (replace) element.textContent = "";
-      element.textContent = (element.textContent || "") + text;
-      element.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          inputType: "insertText",
-          data: text
-        })
-      );
-    }
-
-    return { typed: text.length, editor: "contenteditable" };
+    insertContentEditableText(element, text, replace);
+    return {
+      typed: text.length,
+      editor: "contenteditable",
+      mode: "contenteditable"
+    };
   }
 
   throw new Error("Element is not text-editable");
