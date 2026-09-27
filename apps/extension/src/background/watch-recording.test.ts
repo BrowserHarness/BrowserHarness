@@ -162,6 +162,48 @@ describe("background Watch Me recording session", () => {
     expect(await getWatchRecording()).toBeNull();
   });
 
+  it("drops oversize evidence without moving the workflow boundary", async () => {
+    await startWatchRecording(rootTab());
+    await appendWatchStep(7, clickStep("Boundary"));
+
+    const before = await getWatchRecording();
+    const boundary = before?.boundary_step_id;
+
+    const huge: RecordedWorkflowStep = {
+      action: "type",
+      locator: {
+        tag: "textarea",
+        role: "textbox",
+        accessible_name: "Huge payload"
+      },
+      text: "x".repeat(
+        watchRecordingLimits().max_approximate_bytes + 10_000
+      )
+    };
+
+    const captured = await appendWatchStep(7, huge);
+    const after = await getWatchRecording();
+
+    expect(captured.accepted).toBe(false);
+    expect(after?.steps).toHaveLength(1);
+    expect(after?.boundary_step_id).toBe(boundary);
+    expect(after?.dropped_steps).toBe(1);
+
+    await appendWatchEvent({
+      type: "navigation",
+      tab_id: 7,
+      url:
+        "https://example.com/" +
+        "y".repeat(
+          watchRecordingLimits().max_approximate_bytes + 10_000
+        )
+    });
+
+    const final = await getWatchRecording();
+    expect(final?.dropped_events).toBe(1);
+    expect(final?.boundary_step_id).toBe(boundary);
+  });
+
   it("reports bounded evidence limits and recording summary", async () => {
     const limits = watchRecordingLimits();
     expect(limits.max_steps).toBeGreaterThanOrEqual(500);
