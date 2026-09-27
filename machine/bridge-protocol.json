@@ -80,6 +80,7 @@
   },
   "tools": [
     "observe_page",
+    "read_page",
     "navigate",
     "click",
     "type",
@@ -92,5 +93,15 @@
     "switch_tab",
     "close_tab",
     "screenshot"
-  ]
+  ],
+  "read_page": {
+    "purpose": "bounded full-page/document extraction without expanding observe_page",
+    "defaults": {
+      "max_chars": 12000,
+      "max_screens": 40,
+      "budget_ms": 15000
+    },
+    "continuation": "use next_start when present",
+    "frames": "top-frame result may include readable frame_id/#f handles"
+  }
 }
