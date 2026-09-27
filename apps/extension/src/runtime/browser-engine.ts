@@ -61,6 +61,7 @@ const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
   "press_key",
   "scroll",
   "open_tab",
+  "find_tab",
   "switch_tab"
 ];
 
