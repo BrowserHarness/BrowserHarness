@@ -11,6 +11,10 @@ import {
 import { originPatternForUrl } from "../settings/browser-access";
 import { readPage } from "./read-page";
 import {
+  screenshotVisibilityError,
+  shouldActivateNewTaskTab
+} from "./tab-policy";
+import {
   waitForTabUsable,
   type NavigationReadyResult
 } from "./navigation";
@@ -204,7 +208,7 @@ async function runTool(
   if (tool === "open_tab") {
     const tab = await chrome.tabs.create({
       url: typeof input.url === "string" ? input.url : undefined,
-      active: input.active === true
+      active: shouldActivateNewTaskTab(input)
     });
     if (!tab?.id) {
       return {
@@ -520,14 +524,11 @@ async function runTool(
   }
 
   if (tool === "screenshot") {
-    if (!tab.active) {
+    const visibilityError = screenshotVisibilityError(tab);
+    if (visibilityError) {
       return {
         ok: false,
-        error: {
-          code: "SCREENSHOT_REQUIRES_VISIBLE_TAB",
-          message:
-            "The target task tab is in the background. BrowserCrew will not capture a different foreground tab. Use switch_tab explicitly if visual evidence is necessary."
-        }
+        error: visibilityError
       };
     }
 
