@@ -72,8 +72,13 @@ export function createWatchBrowserEventHandlers(
     onActivated(activeInfo: chrome.tabs.TabActiveInfo) {
       void (async () => {
         const session = await getWatchRecording();
-        if (!session || !session.tab_ids.includes(activeInfo.tabId)) {
-          return;
+        if (!session) return;
+
+        const alreadyTracked = session.tab_ids.includes(
+          activeInfo.tabId
+        );
+        if (!alreadyTracked) {
+          await trackWatchTab(activeInfo.tabId);
         }
 
         const tab = await chrome.tabs
@@ -87,6 +92,12 @@ export function createWatchBrowserEventHandlers(
           url: tab?.url,
           title: tab?.title
         });
+
+        if (!alreadyTracked) {
+          await deps
+            .armWatchTab(activeInfo.tabId)
+            .catch(() => undefined);
+        }
       })();
     },
 
