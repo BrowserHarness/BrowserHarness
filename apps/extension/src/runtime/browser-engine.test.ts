@@ -265,6 +265,97 @@ describe("Browser MVP engine scenarios", () => {
     expect(tools).not.toContain("click");
   });
 
+  it("lists session tabs without forcing a page re-observation", async () => {
+    const h = harness({
+      observations: [page(1, "Item A", "Price $10")],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "list_tabs",
+          input: {},
+          note: "Checking task tabs"
+        },
+        {
+          kind: "final",
+          message: "Task tabs checked."
+        }
+      ],
+      toolResults: {
+        list_tabs: [
+          {
+            ok: true,
+            data: {
+              session_id: "task-1",
+              tabs: [
+                {
+                  tab_id: 1,
+                  url: "https://example.com/1",
+                  title: "Item A"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+
+    const result = await runBrowserTask(
+      "Check my task tabs",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(
+      h.toolMock.mock.calls.filter(([tool]) => tool === "observe_page")
+    ).toHaveLength(1);
+    expect(
+      h.toolMock.mock.calls.filter(([tool]) => tool === "list_tabs")
+    ).toHaveLength(1);
+  });
+
+  it("re-observes after finding and selecting a session tab", async () => {
+    const h = harness({
+      observations: [
+        page(1, "Item A", "Price $10"),
+        page(2, "Item B", "Price $20")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "find_tab",
+          input: { url: "https://example.com/2" },
+          note: "Returning to item B"
+        },
+        {
+          kind: "final",
+          message: "Returned to item B."
+        }
+      ],
+      toolResults: {
+        find_tab: [
+          {
+            ok: true,
+            data: {
+              tab_id: 2,
+              url: "https://example.com/2"
+            }
+          }
+        ]
+      }
+    });
+
+    const result = await runBrowserTask(
+      "Return to item B",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(h.contexts.at(-1)?.observation.tab_id).toBe(2);
+    expect(
+      h.toolMock.mock.calls.filter(([tool]) => tool === "observe_page")
+    ).toHaveLength(2);
+  });
+
   it("retains evidence from multiple tabs for comparison", async () => {
     const h = harness({
       observations: [
