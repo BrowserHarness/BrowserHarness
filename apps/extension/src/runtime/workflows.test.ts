@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  finalizeRecordedSteps,
+  inferWorkflowInputs,
   loadWorkflows,
   saveWorkflow,
+  type RecordedWorkflowStep,
   type SavedWorkflow
 } from "./workflows";
 
@@ -46,6 +49,81 @@ describe("workflow storage", () => {
 
     await saveWorkflow(workflow);
     expect(await loadWorkflows()).toEqual([workflow]);
+  });
+
+  it("infers reusable workflow inputs from recorded text steps", () => {
+    const steps: RecordedWorkflowStep[] = [
+      {
+        id: "step-1",
+        action: "type",
+        locator: {
+          tag: "input",
+          role: "textbox",
+          accessible_name: "Search products",
+          label: "Search products"
+        },
+        text: "mechanical keyboard"
+      },
+      {
+        id: "step-2",
+        action: "type",
+        locator: {
+          tag: "input",
+          role: "textbox",
+          accessible_name: "Search products",
+          label: "Search products"
+        },
+        text: "wireless mouse"
+      }
+    ];
+
+    expect(inferWorkflowInputs(steps)).toEqual([
+      {
+        name: "search_products",
+        label: "Search products",
+        default: "mechanical keyboard",
+        step_id: "step-1"
+      },
+      {
+        name: "search_products_2",
+        label: "Search products",
+        default: "wireless mouse",
+        step_id: "step-2"
+      }
+    ]);
+  });
+
+  it("adds readable descriptions without mutating recorded actions", () => {
+    const steps: RecordedWorkflowStep[] = [
+      {
+        action: "click",
+        locator: {
+          tag: "button",
+          role: "button",
+          accessible_name: "Search"
+        }
+      },
+      {
+        action: "key",
+        key: "Enter",
+        locator: {
+          tag: "input",
+          role: "textbox",
+          accessible_name: "Query"
+        }
+      }
+    ];
+
+    expect(finalizeRecordedSteps(steps)).toEqual([
+      expect.objectContaining({
+        action: "click",
+        description: "Click Search"
+      }),
+      expect.objectContaining({
+        action: "key",
+        description: "Press Enter in Query"
+      })
+    ]);
   });
 
   it("replaces an existing workflow version by id", async () => {
