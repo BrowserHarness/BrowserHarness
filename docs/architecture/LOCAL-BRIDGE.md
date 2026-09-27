@@ -77,18 +77,22 @@ Use `read_page` only when the compact `observe_page` view is insufficient for re
 
 The default extraction window is intentionally smaller than many browser agents (12k chars) to reduce provider token/rate-limit pressure. A top-frame read can also return readable frame IDs/handles for separate frame reads.
 
-## Core vs Advanced Bridge
-The core BrowserCrew extension deliberately does not request Chrome's `debugger` permission. Chrome does not allow that permission to be optional.
+## Full browser-control layer
+The primary BrowserCrew build exposes its full browser-agent runtime through the authenticated Local Bridge, including accessibility-tree/CDP targeting, trusted mouse/text/key input, native dialog handling, network inspection, upload, PDF export, and raw CDP escape-hatch commands.
 
-Therefore raw CDP/trusted-input support will live in a separately disclosed BrowserCrew Advanced/Bridge distribution. The core Local Bridge protocol remains compatible with the least-privilege extension.
+External agents use the same BrowserCrew task-session and result envelopes rather than maintaining a second browser-control implementation.
 
 ## Current tool surface
 - observe_page
 - read_page
+- ax_snapshot
 - navigate
 - click
+- trusted_click
 - type
+- trusted_type
 - press_key
+- trusted_key
 - scroll
 - wait
 - open_tab
@@ -97,5 +101,10 @@ Therefore raw CDP/trusted-input support will live in a separately disclosed Brow
 - switch_tab
 - close_tab
 - screenshot
+- dialog
+- network
+- upload
+- save_pdf
+- cdp
 
-Future protocol versions may add Skills, workflows, network inspection, upload, PDF, and Advanced/CDP commands without changing v0.1 command envelopes.
+The v0.1 command envelope remains stable while the tool surface expands.
