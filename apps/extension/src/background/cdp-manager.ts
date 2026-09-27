@@ -8,6 +8,14 @@ export interface JavaScriptDialogState {
 const attachedTabs = new Set<number>();
 const dialogs = new Map<number, JavaScriptDialogState>();
 
+export type CdpEventListener = (
+  tabId: number,
+  method: string,
+  params: object | undefined
+) => void;
+
+const eventListeners = new Set<CdpEventListener>();
+
 function target(tabId: number): chrome.debugger.Debuggee {
   return { tabId };
 }
@@ -39,6 +47,14 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
   if (method === "Page.javascriptDialogClosed") {
     dialogs.delete(source.tabId);
+  }
+
+  for (const listener of eventListeners) {
+    try {
+      listener(source.tabId, method, params);
+    } catch {
+      // One observer must never break the shared debugger event stream.
+    }
   }
 });
 
@@ -91,4 +107,14 @@ export async function handleJavaScriptDialog(
     ...(promptText !== undefined ? { promptText } : {})
   });
   dialogs.delete(tabId);
+}
+
+
+export function subscribeCdpEvents(
+  listener: CdpEventListener
+): () => void {
+  eventListeners.add(listener);
+  return () => {
+    eventListeners.delete(listener);
+  };
 }
