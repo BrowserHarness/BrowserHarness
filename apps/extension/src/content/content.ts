@@ -18,8 +18,8 @@ type ContentRequest =
       action: "click" | "type" | "press_key" | "scroll";
       input: Record<string, unknown>;
     }
-  | { type: "WATCH_START" }
-  | { type: "WATCH_STOP" }
+  | { type: "WATCH_ARM" }
+  | { type: "WATCH_DISARM" }
   | { type: "WATCH_REPLAY_STEP"; step: RecordedWorkflowStep };
 
 type ContentRuntimeGlobal = typeof globalThis & {
@@ -43,7 +43,6 @@ const REF_ATTR = "data-browsercrew-ref";
 let idCounter = 0;
 let refCounter = 0;
 let recording = false;
-let recordedSteps: RecordedWorkflowStep[] = [];
 let pendingTextElement: HTMLElement | null = null;
 let lastInputSignature = "";
 
@@ -379,9 +378,9 @@ function currentTextValue(element: HTMLElement): string {
   return element.innerText || element.textContent || "";
 }
 
-function flushPendingText(
+function takePendingText(
   preferred?: HTMLElement | null
-): void {
+): RecordedWorkflowStep | null {
   const element =
     preferred && isTextEntryElement(preferred)
       ? preferred
@@ -391,7 +390,7 @@ function flushPendingText(
     if (preferred === pendingTextElement) {
       pendingTextElement = null;
     }
-    return;
+    return null;
   }
 
   if (
@@ -399,7 +398,7 @@ function flushPendingText(
     element.type === "password"
   ) {
     pendingTextElement = null;
-    return;
+    return null;
   }
 
   const locator = locatorFor(element);
@@ -412,19 +411,40 @@ function flushPendingText(
     text
   });
 
-  if (signature !== lastInputSignature) {
-    recordedSteps.push({
-      ...stepContext(),
-      action: "type",
-      locator,
-      text
-    });
-    lastInputSignature = signature;
+  if (signature === lastInputSignature) {
+    if (element === pendingTextElement) {
+      pendingTextElement = null;
+    }
+    return null;
   }
 
+  lastInputSignature = signature;
   if (element === pendingTextElement) {
     pendingTextElement = null;
   }
+
+  return {
+    ...stepContext(),
+    action: "type",
+    locator,
+    text
+  };
+}
+
+function emitRecordedStep(step: RecordedWorkflowStep): void {
+  void chrome.runtime
+    .sendMessage({
+      type: "WATCH_CAPTURE_STEP",
+      step
+    })
+    .catch(() => undefined);
+}
+
+function flushPendingText(
+  preferred?: HTMLElement | null
+): void {
+  const step = takePendingText(preferred);
+  if (step) emitRecordedStep(step);
 }
 
 function recordClick(
@@ -432,7 +452,7 @@ function recordClick(
   event?: PointerEvent | MouseEvent
 ): void {
   flushPendingText();
-  recordedSteps.push({
+  emitRecordedStep({
     ...stepContext(),
     action: "click",
     locator: locatorFor(element),
@@ -522,7 +542,7 @@ document.addEventListener(
         ? interactiveTarget(document.activeElement)
         : null;
 
-    recordedSteps.push({
+    emitRecordedStep({
       ...stepContext(),
       action: "key",
       key: event.key,
@@ -875,18 +895,33 @@ const contentMessageListener = (
       sendResponse({ ok: true, data: execute(request) });
       return;
     }
-    if (request.type === "WATCH_START") {
+    if (request.type === "WATCH_ARM") {
       recording = true;
-      recordedSteps = [];
       pendingTextElement = null;
       lastInputSignature = "";
-      sendResponse({ ok: true, data: { recording: true } });
+      sendResponse({
+        ok: true,
+        data: {
+          recording: true,
+          url: location.href,
+          title: document.title
+        }
+      });
       return;
     }
-    if (request.type === "WATCH_STOP") {
-      flushPendingText();
+    if (request.type === "WATCH_DISARM") {
+      const finalStep = takePendingText();
       recording = false;
-      sendResponse({ ok: true, data: { steps: recordedSteps } });
+      pendingTextElement = null;
+      sendResponse({
+        ok: true,
+        data: {
+          recording: false,
+          final_step: finalStep || undefined,
+          url: location.href,
+          title: document.title
+        }
+      });
       return;
     }
     if (request.type === "WATCH_REPLAY_STEP") {
