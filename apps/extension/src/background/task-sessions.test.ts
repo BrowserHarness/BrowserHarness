@@ -52,6 +52,23 @@ describe("task sessions", () => {
     expect(session.current_tab_id).toBe(20);
   });
 
+  it("serializes concurrent tab mutations without losing state", async () => {
+    const session = await ensureTaskSession(
+      "task-1",
+      "Research phones"
+    );
+
+    await Promise.all([
+      borrowTab(session, 10),
+      ownTab(session, 20),
+      ownTab(session, 21)
+    ]);
+
+    const saved = await getTaskSession("task-1");
+    expect(saved?.borrowed_tab_ids).toEqual([10]);
+    expect(saved?.owned_tab_ids).toEqual([20, 21]);
+  });
+
   it("refuses to select unrelated tabs", async () => {
     let session = await ensureTaskSession("task-1", "Research phones");
     session = await borrowTab(session, 10);
