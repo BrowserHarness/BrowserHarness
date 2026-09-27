@@ -366,6 +366,9 @@ export function App() {
 
       const controller = new AbortController();
       requestAbort.current = controller;
+      const taskSessionId = crypto.randomUUID();
+      const taskSessionTitle =
+        task.length > 48 ? `${task.slice(0, 45)}…` : task;
 
       const result = await runBrowserTask(
         task,
@@ -397,7 +400,9 @@ export function App() {
             extensionMessage({
               type: "BROWSER_TOOL",
               tool,
-              input
+              input,
+              session_id: taskSessionId,
+              session_title: taskSessionTitle
             }),
           approvalDescription: (observation, tool, input) =>
             approvalDescription(observation, tool, input),
