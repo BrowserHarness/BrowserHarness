@@ -1367,7 +1367,7 @@ chrome.runtime.onMessage.addListener(
           sendResponse({
             ok: true,
             data: {
-              recording: false,
+              recording_active: false,
               recording_id: completed.id,
               started_at: completed.started_at,
               start_url: completed.start_url,
