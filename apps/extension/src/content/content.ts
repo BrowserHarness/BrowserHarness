@@ -22,12 +22,30 @@ type ContentRequest =
   | { type: "WATCH_STOP" }
   | { type: "WATCH_REPLAY_STEP"; step: RecordedWorkflowStep };
 
+type ContentRuntimeGlobal = typeof globalThis & {
+  __browsercrewContentRuntime?: {
+    abortController: AbortController;
+    messageListener?: (...args: any[]) => any;
+  };
+};
+
+const runtimeGlobal = globalThis as ContentRuntimeGlobal;
+runtimeGlobal.__browsercrewContentRuntime?.abortController.abort();
+if (runtimeGlobal.__browsercrewContentRuntime?.messageListener) {
+  chrome.runtime.onMessage.removeListener(
+    runtimeGlobal.__browsercrewContentRuntime.messageListener
+  );
+}
+const contentAbortController = new AbortController();
+
 const ID_ATTR = "data-browsercrew-id";
 const REF_ATTR = "data-browsercrew-ref";
 let idCounter = 0;
 let refCounter = 0;
 let recording = false;
 let recordedSteps: RecordedWorkflowStep[] = [];
+let pendingTextElement: HTMLElement | null = null;
+let lastInputSignature = "";
 
 function isVisible(element: Element): boolean {
   const rect = element.getBoundingClientRect();
@@ -151,15 +169,93 @@ function riskForElement(element: HTMLElement) {
   };
 }
 
+function labelFor(element: HTMLElement): string {
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (labelledBy) {
+    const text = labelledBy
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent || "")
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text) return text.slice(0, 160);
+  }
+
+  const labels =
+    "labels" in element
+      ? (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)
+          .labels
+      : null;
+  const labelText = labels?.[0]?.textContent
+    ?.replace(/\s+/g, " ")
+    .trim();
+  if (labelText) return labelText.slice(0, 160);
+
+  const closest = element.closest("label")?.textContent
+    ?.replace(/\s+/g, " ")
+    .trim();
+  return closest ? closest.slice(0, 160) : "";
+}
+
+function elementText(element: HTMLElement): string {
+  return (element.innerText || element.textContent || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
+const RECORDED_ATTRIBUTES = [
+  "id",
+  "name",
+  "type",
+  "role",
+  "href",
+  "aria-label",
+  "aria-labelledby",
+  "aria-checked",
+  "title",
+  "placeholder",
+  "alt",
+  "data-testid"
+] as const;
+
+function recordedAttributes(
+  element: HTMLElement
+): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  for (const name of RECORDED_ATTRIBUTES) {
+    const value = element.getAttribute(name)?.trim();
+    if (value) attributes[name] = value.slice(0, 240);
+  }
+  return attributes;
+}
+
 function locatorFor(element: HTMLElement): WorkflowLocator {
   const risk = riskForElement(element);
   return {
     tag: element.tagName.toLowerCase(),
     role: roleFor(element),
     accessible_name: accessibleName(element),
-    input_type: element instanceof HTMLInputElement ? element.type : undefined,
+    semantic_ref: ensureSemanticRef(element),
+    label: labelFor(element) || undefined,
+    element_text: elementText(element) || undefined,
+    attributes: recordedAttributes(element),
+    input_type:
+      element instanceof HTMLInputElement ? element.type : undefined,
     requires_approval: risk.requires_approval,
     approval_reason: risk.approval_reason
+  };
+}
+
+function stepContext(description?: string) {
+  return {
+    id: crypto.randomUUID(),
+    recorded_at: new Date().toISOString(),
+    url: location.href,
+    title: document.title,
+    scroll_x: Math.round(window.scrollX),
+    scroll_y: Math.round(window.scrollY),
+    ...(description ? { description } : {})
   };
 }
 
@@ -169,25 +265,83 @@ function interactiveTarget(target: EventTarget | null): HTMLElement | null {
 }
 
 function findByLocator(locator: WorkflowLocator): HTMLElement | null {
+  if (locator.semantic_ref?.startsWith("@e")) {
+    const direct = document.querySelector<HTMLElement>(
+      `[${REF_ATTR}="${CSS.escape(locator.semantic_ref.slice(1))}"]`
+    );
+    if (
+      direct &&
+      isVisible(direct) &&
+      roleFor(direct) === locator.role &&
+      (!locator.accessible_name ||
+        accessibleName(direct) === locator.accessible_name)
+    ) {
+      return direct;
+    }
+  }
+
   const candidates = Array.from(
-    document.querySelectorAll<HTMLElement>('a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])')
+    document.querySelectorAll<HTMLElement>(
+      'a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])'
+    )
   ).filter(isVisible);
 
-  return (
-    candidates.find((element) => {
+  const ranked = candidates
+    .map((element) => {
       const current = locatorFor(element);
-      return (
-        current.tag === locator.tag &&
-        current.role === locator.role &&
+      let score = 0;
+
+      if (current.role === locator.role) score += 5;
+      if (current.tag === locator.tag) score += 2;
+      if (
+        locator.accessible_name &&
         current.accessible_name === locator.accessible_name
-      );
-    }) ||
-    candidates.find((element) => {
-      const current = locatorFor(element);
-      return current.role === locator.role && current.accessible_name === locator.accessible_name;
-    }) ||
-    null
-  );
+      ) {
+        score += 10;
+      }
+      if (locator.label && current.label === locator.label) {
+        score += 6;
+      }
+      if (
+        locator.input_type &&
+        current.input_type === locator.input_type
+      ) {
+        score += 2;
+      }
+
+      for (const key of [
+        "data-testid",
+        "id",
+        "name",
+        "placeholder",
+        "aria-label"
+      ]) {
+        const expected = locator.attributes?.[key];
+        if (
+          expected &&
+          current.attributes?.[key] === expected
+        ) {
+          score += key === "data-testid" || key === "id" ? 6 : 3;
+        }
+      }
+
+      return { element, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+  if (!best || best.score < 7) return null;
+
+  const second = ranked[1];
+  if (
+    second &&
+    second.score === best.score &&
+    best.score < 12
+  ) {
+    return null;
+  }
+
+  return best.element;
 }
 
 document.addEventListener(
