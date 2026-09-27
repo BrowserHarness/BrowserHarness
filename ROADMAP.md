@@ -115,18 +115,19 @@ A behavioral clean-room audit of the shipped Kimi Browser Extension 2.0.22 is re
 It is a reference architecture audit, not copied implementation. BrowserCrew keeps its own provider-neutral model layer, safety approvals, full browser-control runtime, deterministic tests, Local Bridge, and Skill evaluation policy.
 
 ### Next
-1. **Skill compiler**
-   - **Record → Skill verified** at `9a21949333de565e5a77001ce1f39da95e346657`
-   - SavedWorkflow v3 is normalized into a portable candidate Skill contract
-   - raw tab IDs are converted into logical tab refs while source IDs remain provenance
-   - recorded text values become explicit reusable string parameters
-   - navigation/tab-open/tab-activate/tab-close evidence becomes an ordered browser-context plan
-   - `boundary_step_id` is enforced as the maximum demonstrated action boundary
-   - BrowserCrew approval semantics are preserved in compiled actions
-   - provenance and deterministic candidate evaluation cases are emitted
+1. **Skill compiler — verified**
+   - Record → Skill verified at `9a21949333de565e5a77001ce1f39da95e346657`
+   - Session → Skill verified at `595af74d2a947a8ef7cc41d29c0f119cc9798dfa`
+   - SavedWorkflow v3 and BrowserTaskSessionEvidence v1 compile into portable candidate Skill contracts
+   - raw tab IDs become logical tab refs while source IDs remain provenance only
+   - recorded text becomes reusable parameters; password values and local upload paths are not retained as compiled examples
+   - workflow navigation/tab events and successful browser-session actions become ordered portable plans
+   - stale failed attempts and denied approval actions cannot advance the learned boundary
+   - `boundary_step_id` / `boundary_action_id` remain the maximum demonstrated action ceilings
+   - BrowserCrew approval semantics are preserved
+   - deterministic candidate evaluations are emitted
    - generated Skills are candidate-only and cannot auto-promote
-   - **Session → Skill is the next compiler slice**
-2. **Adaptive workflow replay**
+2. **Adaptive workflow replay — next**
    - replay recorded intent/context rather than brittle exact-tab IDs
    - remap recorded tabs to current task-session tabs
    - recover stale refs through observe/AX escalation

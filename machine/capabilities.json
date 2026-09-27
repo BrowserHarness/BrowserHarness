@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-record-to-skill-compiler-verified",
+  "status": "v0.2-record-session-skill-compiler-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -191,7 +191,9 @@
         "generated_skill_policy": "workflow evidence -> candidate -> evaluation -> active",
         "record_to_skill": "verified pure compiler",
         "registry_persistence": "not yet wired; pure compiler contract first",
-        "auto_promote": false
+        "auto_promote": false,
+        "session_to_skill": "verified pure compiler",
+        "next": "adaptive replay consumes candidate plan contracts before registry persistence/promotion"
       }
     },
     {
@@ -205,7 +207,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "Session → Skill compiler from BrowserCrew task-session evidence",
+        "next": "adaptive multi-tab workflow replay",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
@@ -223,6 +225,28 @@
           "boundary": "boundary_step_id is the maximum demonstrated action boundary",
           "approval_policy": "preserve BrowserCrew approval rules",
           "evaluations": "deterministic cases derived from source evidence",
+          "promotion": "candidate only; evaluation required; no auto-promotion"
+        },
+        "session_to_skill": {
+          "status": "verified",
+          "verified_sha": "595af74d2a947a8ef7cc41d29c0f119cc9798dfa",
+          "input": "BrowserTaskSessionEvidence v1 emitted by runBrowserTask",
+          "source_evidence": "successful browser actions only",
+          "session_identity": "real BrowserCrew task session id/title",
+          "input_inference": [
+            "type/trusted_type text -> reusable parameter",
+            "password text -> sensitive parameter without retained example",
+            "upload paths -> sensitive string[] parameter without retained example"
+          ],
+          "tab_normalization": "raw tab ids -> logical tab refs with source provenance",
+          "target_normalization": "transient element refs are evidence hints; replay must re-observe semantic targets",
+          "boundary": "boundary_action_id = last successful executed browser action",
+          "excluded_from_boundary": [
+            "stale failed actions",
+            "actions denied by approval"
+          ],
+          "approval_policy": "preserve BrowserCrew approval rules",
+          "evaluations": "deterministic cases derived from session evidence",
           "promotion": "candidate only; evaluation required; no auto-promotion"
         }
       }
