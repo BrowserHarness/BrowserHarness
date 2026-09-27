@@ -72,7 +72,8 @@ const requiredPermissions = [
   "tabs",
   "storage",
   "sidePanel",
-  "scripting"
+  "scripting",
+  "tabGroups"
 ];
 for (const permission of requiredPermissions) {
   if (!manifest.permissions?.includes(permission)) {
