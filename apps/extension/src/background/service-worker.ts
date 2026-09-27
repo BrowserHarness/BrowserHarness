@@ -41,6 +41,11 @@ import {
   shouldActivateNewTaskTab
 } from "./tab-policy";
 import {
+  extensionPageApprovalGranted,
+  isRiskyTrustedLabel,
+  type ToolExecutionOptions
+} from "./approval-grant";
+import {
   waitForTabUsable,
   type NavigationReadyResult
 } from "./navigation";
@@ -224,7 +229,8 @@ async function runTool(
   tool: string,
   input: Record<string, unknown> = {},
   sessionId?: string,
-  sessionTitle?: string
+  sessionTitle?: string,
+  options: ToolExecutionOptions = {}
 ): Promise<ToolResult> {
   let session = await requestSession(sessionId, sessionTitle);
 
@@ -594,11 +600,9 @@ async function runTool(
 
     const element = elementForAxRef(tabId, input.element_id);
     const label = element?.name || "";
-    const risky = /\b(send|submit|buy|purchase|place order|checkout|delete|remove|confirm|pay|transfer|publish|post|sign out|logout|change password|save changes)\b/i.test(
-      label
-    );
+    const risky = isRiskyTrustedLabel(label);
 
-    if (risky) {
+    if (risky && !options.approvalGranted) {
       return {
         ok: false,
         error: {
@@ -684,9 +688,8 @@ async function runTool(
         );
         if (
           focused &&
-          /\b(send|submit|buy|purchase|place order|checkout|delete|confirm|pay|transfer|publish|post|change password|save changes)\b/i.test(
-            focused.name
-          )
+          isRiskyTrustedLabel(focused.name) &&
+          !options.approvalGranted
         ) {
           return {
             ok: false,
@@ -1154,7 +1157,7 @@ startBridgeClient(handleBridgeCommand);
 chrome.runtime.onMessage.addListener(
   (
     request: ExtensionRequest,
-    _sender,
+    sender,
     sendResponse
   ) => {
     void (async () => {
@@ -1174,12 +1177,21 @@ chrome.runtime.onMessage.addListener(
         }
 
         if (request.type === "BROWSER_TOOL") {
+          const approvalGranted =
+            extensionPageApprovalGranted(
+              request.approval_granted,
+              sender,
+              chrome.runtime.id,
+              chrome.runtime.getURL("")
+            );
+
           sendResponse(
             await runTool(
               request.tool,
               request.input,
               request.session_id,
-              request.session_title
+              request.session_title,
+              { approvalGranted }
             )
           );
           return;
@@ -1237,7 +1249,7 @@ chrome.runtime.onMessage.addListener(
         }
 
         if (request.type === "WATCH_CAPTURE_STEP") {
-          const tabId = _sender.tab?.id;
+          const tabId = sender.tab?.id;
           if (typeof tabId !== "number") {
             sendResponse({
               ok: false,
