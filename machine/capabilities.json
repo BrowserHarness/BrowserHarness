@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-browser-reliability",
+  "status": "v0.2-local-bridge-foundation",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -59,6 +59,27 @@
           "chat health probe",
           "structured agent health probe"
         ]
+      }
+    },
+    {
+      "id": "local-bridge",
+      "owner": "BrowserCrew/browsercrew",
+      "runtime_contract": {
+        "transport": "loopback HTTP + WebSocket",
+        "default_address": "127.0.0.1:10087",
+        "authentication": "pairing token",
+        "protocol_version": "0.1",
+        "session_mapping": "external session id = BrowserCrew task session id",
+        "safety": "BrowserCrew approval metadata enforced before bridge click/Enter",
+        "operations": [
+          "start",
+          "status",
+          "stop",
+          "restart",
+          "logs",
+          "pair"
+        ],
+        "cdp": "separate Advanced/Bridge distribution"
       }
     },
     {
