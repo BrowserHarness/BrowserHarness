@@ -663,4 +663,194 @@ describe("Browser MVP engine scenarios", () => {
       runBrowserTask("Summarize this page", dependencies)
     ).rejects.toThrow("Protected browser page");
   });
+  it("emits structured evidence only for successful browser actions", async () => {
+    const searchElement = {
+      element_id: "bc-search",
+      semantic_ref: "@e1",
+      tag: "input",
+      role: "textbox",
+      accessible_name: "Search",
+      visible: true,
+      disabled: false
+    };
+    const h = harness({
+      observations: [
+        page(7, "Search", "Search", [searchElement]),
+        page(7, "Results", "Keyboard results", [searchElement])
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "type",
+          input: {
+            element_id: "bc-search",
+            text: "mechanical keyboard"
+          },
+          note: "Entering query"
+        },
+        {
+          kind: "final",
+          message: "Results are ready."
+        }
+      ]
+    });
+    h.dependencies.session = {
+      id: "task-search-7",
+      title: "Search products"
+    };
+
+    const result = await runBrowserTask(
+      "Search for a mechanical keyboard",
+      h.dependencies
+    );
+
+    expect(result.session_evidence).toMatchObject({
+      version: 1,
+      session_id: "task-search-7",
+      title: "Search products",
+      task: "Search for a mechanical keyboard",
+      status: "completed",
+      start: {
+        tab_id: 7,
+        url: "https://example.com/7",
+        title: "Search"
+      },
+      boundary_action_id: "action-1"
+    });
+    expect(result.session_evidence.actions).toHaveLength(1);
+    expect(result.session_evidence.actions[0]).toMatchObject({
+      id: "action-1",
+      ordinal: 1,
+      tool: "type",
+      input: {
+        element_id: "bc-search",
+        text: "mechanical keyboard"
+      },
+      target: {
+        element_id: "bc-search",
+        semantic_ref: "@e1",
+        role: "textbox",
+        accessible_name: "Search"
+      },
+      approval: {
+        required: false,
+        approved: true
+      },
+      after: {
+        tab_id: 7,
+        title: "Results"
+      }
+    });
+  });
+
+  it("does not advance session evidence for stale failed attempts", async () => {
+    let turn = 0;
+    const oldButton = {
+      element_id: "bc-old",
+      tag: "button",
+      role: "button",
+      accessible_name: "Search",
+      visible: true,
+      disabled: false
+    };
+    const newButton = {
+      ...oldButton,
+      element_id: "bc-new",
+      semantic_ref: "@e-new"
+    };
+    const h = harness({
+      observations: [
+        page(8, "Search", "Search", [oldButton]),
+        page(8, "Search", "Search", [newButton]),
+        page(8, "Results", "Results", [newButton])
+      ],
+      decisions: () => {
+        turn += 1;
+        if (turn === 1) {
+          return {
+            kind: "tool",
+            tool: "click",
+            input: { element_id: "bc-old" },
+            note: "Trying stale target"
+          };
+        }
+        if (turn === 2) {
+          return {
+            kind: "tool",
+            tool: "click",
+            input: { element_id: "bc-new" },
+            note: "Clicking refreshed target"
+          };
+        }
+        return {
+          kind: "final",
+          message: "Search completed."
+        };
+      },
+      toolResults: {
+        click: [
+          {
+            ok: false,
+            error: {
+              code: "ELEMENT_NOT_FOUND",
+              message: "Element not found"
+            }
+          },
+          { ok: true, data: {} }
+        ]
+      }
+    });
+
+    const result = await runBrowserTask("Search", h.dependencies);
+
+    expect(result.session_evidence.actions).toHaveLength(1);
+    expect(result.session_evidence.actions[0]).toMatchObject({
+      id: "action-1",
+      tool: "click",
+      input: { element_id: "bc-new" }
+    });
+    expect(result.session_evidence.boundary_action_id).toBe(
+      "action-1"
+    );
+  });
+
+  it("does not learn a consequential action when approval is denied", async () => {
+    const h = harness({
+      observations: [
+        page(9, "Checkout", "Place order", [
+          {
+            element_id: "bc-order",
+            tag: "button",
+            role: "button",
+            accessible_name: "Place order",
+            visible: true,
+            disabled: false,
+            requires_approval: true,
+            approval_reason: "Place this order"
+          }
+        ])
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "click",
+          input: { element_id: "bc-order" },
+          note: "Placing order"
+        }
+      ],
+      approval: false
+    });
+
+    const result = await runBrowserTask(
+      "Place the order",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("approval-cancelled");
+    expect(result.session_evidence.actions).toEqual([]);
+    expect(
+      result.session_evidence.boundary_action_id
+    ).toBeUndefined();
+  });
+
 });
