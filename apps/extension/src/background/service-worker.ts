@@ -204,7 +204,7 @@ async function runTool(
   if (tool === "open_tab") {
     const tab = await chrome.tabs.create({
       url: typeof input.url === "string" ? input.url : undefined,
-      active: input.active !== false
+      active: input.active === true
     });
     if (!tab?.id) {
       return {
@@ -374,15 +374,13 @@ async function runTool(
     }
 
     session = await selectSessionTab(session, found.id);
-    const activated = await chrome.tabs.update(found.id, {
-      active: true
-    });
     return {
       ok: true,
       data: {
         tab_id: found.id,
-        url: activated?.url || found.url,
-        title: activated?.title || found.title,
+        url: found.url,
+        title: found.title,
+        active: Boolean(found.active),
         borrowed: session.borrowed_tab_ids.includes(found.id)
       }
     };
@@ -522,6 +520,17 @@ async function runTool(
   }
 
   if (tool === "screenshot") {
+    if (!tab.active) {
+      return {
+        ok: false,
+        error: {
+          code: "SCREENSHOT_REQUIRES_VISIBLE_TAB",
+          message:
+            "The target task tab is in the background. BrowserCrew will not capture a different foreground tab. Use switch_tab explicitly if visual evidence is necessary."
+        }
+      };
+    }
+
     const dataUrl = await chrome.tabs.captureVisibleTab(
       tab.windowId,
       { format: "png" }
