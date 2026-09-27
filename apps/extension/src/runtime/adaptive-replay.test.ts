@@ -337,6 +337,12 @@ describe("adaptive candidate Skill replay", () => {
           call.input.tab_id === 12
       )
     ).toBe(false);
+    expect(
+      h.calls.filter((call) => call.tool === "find_tab")
+    ).toHaveLength(0);
+    expect(
+      h.calls.filter((call) => call.tool === "open_tab")
+    ).toHaveLength(1);
     expect(h.requestApproval).toHaveBeenCalledWith(
       "Add this item to the cart"
     );
