@@ -25,6 +25,7 @@ import {
   type UserPreferences
 } from "../settings/preferences";
 import { clearTaskHistory } from "../runtime/history";
+import { BridgeSettingsSection } from "./BridgeSettingsSection";
 
 export function MvpSettingsSections() {
   const [preferences, setPreferences] =
@@ -76,6 +77,7 @@ export function MvpSettingsSections() {
 
   return (
     <Stack spacing={2.5}>
+      <BridgeSettingsSection />
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Stack spacing={1.5}>
           <Typography variant="subtitle1">Browser Access</Typography>
