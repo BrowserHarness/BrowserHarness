@@ -25,6 +25,9 @@ const requiredTools = [
   "close_tab",
   "screenshot",
   "dialog",
+  "network",
+  "upload",
+  "save_pdf",
   "cdp"
 ]
 
@@ -81,6 +84,7 @@ const requiredPermissions = [
   "alarms",
   "contextMenus",
   "debugger",
+  "downloads",
   "favicon",
   "notifications",
   "sidePanel",
