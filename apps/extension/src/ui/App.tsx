@@ -42,7 +42,9 @@ import {
   inferWorkflowInputs,
   saveWorkflow,
   type RecordedWorkflowStep,
-  type SavedWorkflow
+  type SavedWorkflow,
+  type WorkflowRecordingEvent,
+  type WorkflowRecordingSummary
 } from "../runtime/workflows";
 import { SettingsView } from "./SettingsView";
 import { HistoryView } from "./HistoryView";
@@ -178,14 +180,20 @@ export function App() {
       }
       setRecording(true);
       addAssistantMessage(
-        "Recording this page. Show me the clicks and text entry you want BrowserCrew to learn. Password fields are never recorded."
+        "Recording across pages and tabs. Show BrowserCrew the workflow you want it to learn; navigation, new tabs, clicks, text entry, Enter and Tab are captured. Password fields are never recorded."
       );
       return;
     }
 
-    const result = await extensionMessage<{ steps: RecordedWorkflowStep[] }>({
-      type: "WATCH_STOP",
-      tab_id: tab.tab_id
+    const result = await extensionMessage<{
+      steps: RecordedWorkflowStep[];
+      events: WorkflowRecordingEvent[];
+      boundary_step_id?: string;
+      recording: WorkflowRecordingSummary;
+      start_url: string;
+      end_url: string;
+    }>({
+      type: "WATCH_STOP"
     });
     setRecording(false);
     if (!result.ok || !result.data) {
@@ -201,26 +209,40 @@ export function App() {
 
     const workflow: SavedWorkflow = {
       id: crypto.randomUUID(),
-      version: 2,
+      version: 3,
       name: `Workflow ${new Date().toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit"
       })}`,
       created_at: new Date().toISOString(),
-      url: tab.url || "",
-      end_url: steps.at(-1)?.url || tab.url || "",
+      url: result.data.start_url || tab.url || "",
+      end_url:
+        result.data.end_url ||
+        steps.at(-1)?.url ||
+        tab.url ||
+        "",
       inputs: inferWorkflowInputs(steps),
-      steps
+      steps,
+      events: result.data.events,
+      boundary_step_id: result.data.boundary_step_id,
+      recording: result.data.recording
     };
     await saveWorkflow(workflow);
     setLastWorkflow(workflow);
     addAssistantMessage(
-      `Saved “${workflow.name}” with ${steps.length} step${steps.length === 1 ? "" : "s"} and ${workflow.inputs?.length || 0} reusable input${workflow.inputs?.length === 1 ? "" : "s"}. You can replay it from this chat.`
+      `Saved “${workflow.name}” with ${steps.length} action step${steps.length === 1 ? "" : "s"}, ${workflow.events?.length || 0} browser-context event${workflow.events?.length === 1 ? "" : "s"}, and ${workflow.inputs?.length || 0} reusable input${workflow.inputs?.length === 1 ? "" : "s"} across ${workflow.recording?.tab_count || 1} tab${workflow.recording?.tab_count === 1 ? "" : "s"}.${(workflow.recording?.dropped_steps || workflow.recording?.dropped_events) ? " Recording limits dropped some excess evidence." : ""}`
     );
   };
 
   const replayWorkflow = async (workflow: SavedWorkflow) => {
     if (!tab?.tab_id) return;
+
+    if ((workflow.recording?.tab_count || 1) > 1) {
+      addAssistantMessage(
+        `“${workflow.name}” is a multi-tab Watch Me v2 recording. Its full browser-context evidence is preserved for adaptive replay / Skill compilation; the legacy exact-step replay button is intentionally limited to single-tab workflows.`
+      );
+      return;
+    }
     const recordedHost = safeHostname(workflow.url);
     const currentHost = safeHostname(tab.url);
     if (recordedHost && currentHost && recordedHost !== currentHost) {
