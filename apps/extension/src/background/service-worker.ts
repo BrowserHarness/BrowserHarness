@@ -11,6 +11,20 @@ import {
 import { originPatternForUrl } from "../settings/browser-access";
 import { readPage } from "./read-page";
 import {
+  cdpCommand,
+  getJavaScriptDialog,
+  handleJavaScriptDialog
+} from "./cdp-manager";
+import {
+  captureAxSnapshot,
+  elementForAxRef
+} from "./cdp-semantic";
+import {
+  trustedClick,
+  trustedKey,
+  trustedType
+} from "./cdp-input";
+import {
   screenshotVisibilityError,
   shouldActivateNewTaskTab
 } from "./tab-policy";
@@ -523,6 +537,264 @@ async function runTool(
     }
   }
 
+  if (tool === "ax_snapshot") {
+    try {
+      const maxElements = Math.min(
+        Math.max(Number(input.max_elements ?? 300), 25),
+        1000
+      );
+      return {
+        ok: true,
+        data: await captureAxSnapshot(tabId, maxElements)
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "AX_SNAPSHOT_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Accessibility snapshot failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "trusted_click") {
+    if (typeof input.element_id !== "string") {
+      return {
+        ok: false,
+        error: {
+          code: "ELEMENT_NOT_FOUND",
+          message: "trusted_click requires element_id"
+        }
+      };
+    }
+
+    const element = elementForAxRef(tabId, input.element_id);
+    const label = element?.name || "";
+    const risky = /\b(send|submit|buy|purchase|place order|checkout|delete|remove|confirm|pay|transfer|publish|post|sign out|logout|change password|save changes)\b/i.test(
+      label
+    );
+
+    if (risky) {
+      return {
+        ok: false,
+        error: {
+          code: "APPROVAL_REQUIRED",
+          message: `Trusted click “${label || input.element_id}” requires explicit approval.`
+        }
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        data: await trustedClick(tabId, input.element_id)
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "TRUSTED_CLICK_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Trusted click failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "trusted_type") {
+    if (
+      typeof input.element_id !== "string" ||
+      typeof input.text !== "string"
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "ELEMENT_NOT_FOUND",
+          message:
+            "trusted_type requires element_id and text"
+        }
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        data: await trustedType(
+          tabId,
+          input.element_id,
+          input.text
+        )
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "TRUSTED_TYPE_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Trusted text input failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "trusted_key") {
+    if (typeof input.key !== "string" || !input.key) {
+      return {
+        ok: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "trusted_key requires key"
+        }
+      };
+    }
+
+    if (input.key === "Enter") {
+      try {
+        const snapshot = await captureAxSnapshot(tabId, 300);
+        const focused = snapshot.elements.find(
+          (element) => element.focused
+        );
+        if (
+          focused &&
+          /\b(send|submit|buy|purchase|place order|checkout|delete|confirm|pay|transfer|publish|post|change password|save changes)\b/i.test(
+            focused.name
+          )
+        ) {
+          return {
+            ok: false,
+            error: {
+              code: "APPROVAL_REQUIRED",
+              message: `Trusted Enter in “${focused.name || focused.role}” requires explicit approval.`
+            }
+          };
+        }
+      } catch {
+        // If AX metadata is unavailable, continue; browser-engine approval
+        // still applies to ordinary semantic controls.
+      }
+    }
+
+    try {
+      return {
+        ok: true,
+        data: await trustedKey(tabId, input.key)
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "TRUSTED_KEY_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Trusted key input failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "dialog") {
+    const action =
+      typeof input.action === "string"
+        ? input.action
+        : "status";
+
+    if (action === "status") {
+      return {
+        ok: true,
+        data: {
+          open: Boolean(getJavaScriptDialog(tabId)),
+          dialog: getJavaScriptDialog(tabId)
+        }
+      };
+    }
+
+    if (action !== "accept" && action !== "dismiss") {
+      return {
+        ok: false,
+        error: {
+          code: "DIALOG_ACTION_INVALID",
+          message:
+            "dialog action must be status, accept, or dismiss"
+        }
+      };
+    }
+
+    try {
+      await handleJavaScriptDialog(
+        tabId,
+        action === "accept",
+        typeof input.prompt_text === "string"
+          ? input.prompt_text
+          : undefined
+      );
+      return {
+        ok: true,
+        data: { action }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "DIALOG_ACTION_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Dialog action failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "cdp") {
+    if (typeof input.method !== "string" || !input.method.trim()) {
+      return {
+        ok: false,
+        error: {
+          code: "CDP_METHOD_REQUIRED",
+          message: "cdp requires a DevTools protocol method"
+        }
+      };
+    }
+
+    const params =
+      input.params &&
+      typeof input.params === "object" &&
+      !Array.isArray(input.params)
+        ? (input.params as Record<string, unknown>)
+        : {};
+
+    try {
+      return {
+        ok: true,
+        data: await cdpCommand(
+          tabId,
+          input.method.trim(),
+          params
+        )
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "CDP_COMMAND_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "CDP command failed"
+        }
+      };
+    }
+  }
+
   if (tool === "screenshot") {
     const visibilityError = screenshotVisibilityError(tab);
     if (visibilityError) {
@@ -571,6 +843,12 @@ async function runTool(
 const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "observe_page",
   "read_page",
+  "ax_snapshot",
+  "trusted_click",
+  "trusted_type",
+  "trusted_key",
+  "dialog",
+  "cdp",
   "navigate",
   "click",
   "type",
