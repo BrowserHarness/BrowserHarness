@@ -72,6 +72,11 @@ Borrowed tabs cannot be closed by session-owned cleanup.
 ## Semantic targets
 Normal page observations expose stable semantic refs such as `@e12`. External agents should use those refs rather than CSS classes.
 
+## Full-page reading
+Use `read_page` only when the compact `observe_page` view is insufficient for research or extraction. It scans with hard character/screen/time budgets, restores the original scroll position, returns `next_start` for bounded continuation, and reports stall/endless-feed signals rather than pretending an infinite page is complete.
+
+The default extraction window is intentionally smaller than many browser agents (12k chars) to reduce provider token/rate-limit pressure. A top-frame read can also return readable frame IDs/handles for separate frame reads.
+
 ## Core vs Advanced Bridge
 The core BrowserCrew extension deliberately does not request Chrome's `debugger` permission. Chrome does not allow that permission to be optional.
 
@@ -79,6 +84,7 @@ Therefore raw CDP/trusted-input support will live in a separately disclosed Brow
 
 ## Current tool surface
 - observe_page
+- read_page
 - navigate
 - click
 - type
