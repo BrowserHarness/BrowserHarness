@@ -14,6 +14,7 @@ const removeTabs = vi.fn();
 beforeEach(() => {
   sessionStore = {};
   removeTabs.mockReset();
+  removeTabs.mockResolvedValue(undefined);
   Object.defineProperty(globalThis, "chrome", {
     configurable: true,
     value: {
