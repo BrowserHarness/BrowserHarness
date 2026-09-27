@@ -9,6 +9,7 @@ import {
   type BridgeCommand
 } from "./bridge-client";
 import { originPatternForUrl } from "../settings/browser-access";
+import { readPage } from "./read-page";
 import {
   waitForTabUsable,
   type NavigationReadyResult
@@ -500,6 +501,26 @@ async function runTool(
     }
   }
 
+  if (tool === "read_page") {
+    try {
+      return {
+        ok: true,
+        data: await readPage(tabId, input)
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "READ_PAGE_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "BrowserCrew could not read this page"
+        }
+      };
+    }
+  }
+
   if (tool === "screenshot") {
     const dataUrl = await chrome.tabs.captureVisibleTab(
       tab.windowId,
@@ -539,6 +560,7 @@ async function runTool(
 
 const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "observe_page",
+  "read_page",
   "navigate",
   "click",
   "type",
