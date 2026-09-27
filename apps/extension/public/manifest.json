@@ -8,7 +8,8 @@
     "tabs",
     "storage",
     "sidePanel",
-    "scripting"
+    "scripting",
+    "tabGroups"
   ],
   "host_permissions": [
     "https://api.openai.com/*",
