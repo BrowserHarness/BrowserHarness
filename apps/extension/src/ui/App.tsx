@@ -438,6 +438,10 @@ export function App() {
       const result = await runBrowserTask(
         task,
         {
+          session: {
+            id: taskSessionId,
+            title: taskSessionTitle
+          },
           decide: async ({
             task: browserTask,
             observation,
