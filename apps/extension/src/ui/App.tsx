@@ -279,7 +279,7 @@ export function App() {
               ? `Replaying text entry: ${step.locator.accessible_name || step.locator.role}`
               : `Replaying key: ${step.key}${
                   step.locator
-                    ? ` in ${step.locator.accessible_name || step.locator.role}`
+                    ? ` in ${step.locator?.accessible_name || step.locator?.role || "the recorded field"}`
                     : ""
                 }`
         );
