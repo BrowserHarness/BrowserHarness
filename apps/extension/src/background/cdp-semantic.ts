@@ -36,6 +36,7 @@ export interface AxSnapshot {
 }
 
 const refsByTab = new Map<number, Map<string, number>>();
+const elementsByTab = new Map<number, Map<string, AxSemanticElement>>();
 
 const INTERACTIVE_ROLES = new Set([
   "button",
@@ -108,6 +109,10 @@ export async function captureAxSnapshot(
   }
 
   refsByTab.set(tabId, refs);
+  elementsByTab.set(
+    tabId,
+    new Map(elements.map((element) => [element.element_id, element]))
+  );
 
   return {
     text: elements
@@ -140,6 +145,14 @@ export function backendNodeForRef(
   return backendNodeId;
 }
 
+export function elementForAxRef(
+  tabId: number,
+  ref: string
+): AxSemanticElement | null {
+  return elementsByTab.get(tabId)?.get(ref) || null;
+}
+
 export function clearAxRefs(tabId: number): void {
   refsByTab.delete(tabId);
+  elementsByTab.delete(tabId);
 }
