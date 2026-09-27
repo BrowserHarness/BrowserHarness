@@ -77,8 +77,21 @@ Goal: make provider/model behavior predictable before expanding product scope.
 - Stronger framework-controlled input fills using native value setters
 - Stronger contenteditable/rich-editor insertion path
 
+### Verified Local Bridge foundation
+- Loopback-only BrowserCrew Bridge daemon workspace
+- Pairing-token authentication
+- `GET /status` and authenticated `POST /command`
+- MV3 WebSocket client with protocol/version handshake
+- 20-second heartbeat + reconnect path
+- Bridge session IDs map directly to BrowserCrew task sessions
+- External bridge commands use the same semantic refs and browser tools
+- Risky bridge click/Enter actions return `APPROVAL_REQUIRED`
+- Settings UI for address/token/connection state
+- CLI operations: `start`, `status`, `stop`, `restart`, `logs`, `pair`
+- Machine-readable and human-readable Bridge protocol v0.1
+
 ### Next
-- BrowserCrew Local Bridge protocol for external agents
+- External-agent adapters/skills for Hermes, Codex, Claude Code and other local agents
 - Companion/advanced CDP distribution for trusted-input escape-hatch cases
 - External-agent session API compatible with BrowserCrew task ownership
 - Workflow variables and branches
