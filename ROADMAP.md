@@ -116,12 +116,33 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - reusable input/variable inference
    - candidate evaluation before promotion
 3. Cross-runtime evaluation of `SK-BROWSER-001`
-4. Companion/Advanced CDP distribution for trusted mouse/key/text, focus emulation, and native dialog handling
-5. Network/upload/PDF only after permission and safety contracts are explicit
+4. **CDP parity layer in the primary BrowserCrew build**
+   - attach/detach manager
+   - Accessibility.getFullAXTree + backend-node semantic refs
+   - trusted mouse/key/text input
+   - focus emulation
+   - native dialog state/accept/dismiss
+   - raw CDP escape hatch
+5. **Advanced browser tools**
+   - network capture/details
+   - file upload
+   - print/save PDF
 6. Site → Skill after observation/recording/evaluation contracts stabilize
 
-### Permission rule
-The core extension remains least-privilege. Chrome does not allow the `debugger` permission to be optional, so raw CDP will not be added to the core package merely as an optional feature. Trusted-CDP control belongs in a separately disclosed Advanced/Bridge distribution.
+### Browser capability rule
+BrowserCrew is an autonomous browser agent. Functionality and reliability take priority over minimizing the permission envelope.
+
+The primary BrowserCrew build now intentionally targets the proven high-capability browser-agent surface:
+- debugger / Chrome DevTools Protocol
+- <all_urls>
+- webNavigation
+- webRequest
+- unlimitedStorage
+- windows / tabs / tabGroups
+- scripting
+- alarms / notifications / context menus
+
+The permissions must map to real BrowserCrew capabilities and remain covered by automated tests, but they are no longer deferred into a separate reduced-capability edition.
 
 ## v0.3 — Memory + MCP
 - Working/episodic/semantic/procedural memory
