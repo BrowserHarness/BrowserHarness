@@ -2,6 +2,7 @@ import type { RecordedWorkflowStep } from "./workflows";
 
 export type ToolName =
   | "observe_page"
+  | "read_page"
   | "navigate"
   | "click"
   | "type"
