@@ -35,10 +35,8 @@ import {
   agentDecisionWithFallback
 } from "../runtime/model-router";
 import { runBrowserTask } from "../runtime/browser-engine";
-import {
-  replaySavedWorkflowAdaptive,
-  type AdaptiveReplayDependencies
-} from "../runtime/workflow-adaptive-replay";
+import { replaySavedWorkflowAdaptive } from "../runtime/workflow-adaptive-replay";
+import type { AdaptiveReplayDependencies } from "../runtime/adaptive-replay";
 import { classifyTaskIntent } from "../runtime/intent";
 import type { PageObservation, ToolResult } from "../runtime/protocol";
 import {
