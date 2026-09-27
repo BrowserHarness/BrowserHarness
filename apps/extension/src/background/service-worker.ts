@@ -218,6 +218,140 @@ async function runTool(
     };
   }
 
+  if (tool === "list_tabs") {
+    if (!session) {
+      return {
+        ok: false,
+        error: {
+          code: "SESSION_REQUIRED",
+          message: "list_tabs requires an active BrowserCrew task session"
+        }
+      };
+    }
+
+    const ids = [
+      ...new Set([
+        ...session.borrowed_tab_ids,
+        ...session.owned_tab_ids
+      ])
+    ];
+    const tabs = (
+      await Promise.all(
+        ids.map((id) => chrome.tabs.get(id).catch(() => null))
+      )
+    )
+      .filter((tab): tab is chrome.tabs.Tab => Boolean(tab?.id))
+      .map((tab) => ({
+        tab_id: tab.id,
+        url: tab.url,
+        title: tab.title,
+        active: Boolean(tab.active),
+        owned: session!.owned_tab_ids.includes(tab.id!),
+        borrowed: session!.borrowed_tab_ids.includes(tab.id!),
+        group_id: tab.groupId
+      }));
+
+    return {
+      ok: true,
+      data: {
+        session_id: session.id,
+        title: session.title,
+        current_tab_id: session.current_tab_id,
+        tabs
+      }
+    };
+  }
+
+  if (tool === "find_tab") {
+    if (!session) {
+      return {
+        ok: false,
+        error: {
+          code: "SESSION_REQUIRED",
+          message: "find_tab requires an active BrowserCrew task session"
+        }
+      };
+    }
+
+    if (input.active === true) {
+      const tab = await activeTab();
+      if (!tab.id) {
+        return {
+          ok: false,
+          error: {
+            code: "TAB_NOT_FOUND",
+            message: "Chrome did not return the active tab"
+          }
+        };
+      }
+      session = await borrowTab(session, tab.id);
+      return {
+        ok: true,
+        data: {
+          tab_id: tab.id,
+          url: tab.url,
+          title: tab.title,
+          borrowed: true
+        }
+      };
+    }
+
+    if (typeof input.url !== "string") {
+      return {
+        ok: false,
+        error: {
+          code: "TAB_NOT_FOUND",
+          message: "find_tab requires an exact url or active:true"
+        }
+      };
+    }
+
+    let requestedUrl = input.url;
+    try {
+      requestedUrl = new URL(input.url).href;
+    } catch {
+      // Keep the caller value for exact comparison/error reporting.
+    }
+
+    const ids = [
+      ...new Set([
+        ...session.borrowed_tab_ids,
+        ...session.owned_tab_ids
+      ])
+    ];
+    const candidates = await Promise.all(
+      ids.map((id) => chrome.tabs.get(id).catch(() => null))
+    );
+    const found = candidates.find(
+      (tab) => tab?.id && tab.url === requestedUrl
+    );
+
+    if (!found?.id) {
+      return {
+        ok: false,
+        error: {
+          code: "TAB_NOT_FOUND",
+          message:
+            "No tab with that exact URL belongs to this BrowserCrew task session"
+        }
+      };
+    }
+
+    session = await selectSessionTab(session, found.id);
+    const activated = await chrome.tabs.update(found.id, {
+      active: true
+    });
+    return {
+      ok: true,
+      data: {
+        tab_id: found.id,
+        url: activated?.url || found.url,
+        title: activated?.title || found.title,
+        borrowed: session.borrowed_tab_ids.includes(found.id)
+      }
+    };
+  }
+
   if (tool === "switch_tab") {
     if (typeof input.tab_id !== "number") {
       return {
