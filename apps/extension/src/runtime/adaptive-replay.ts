@@ -146,7 +146,11 @@ function samePageIdentity(left: string, right: string): boolean {
   try {
     const a = new URL(left);
     const b = new URL(right);
-    return a.origin === b.origin && a.pathname === b.pathname;
+    return (
+      a.origin === b.origin &&
+      a.pathname === b.pathname &&
+      a.search === b.search
+    );
   } catch {
     return left === right;
   }
@@ -469,13 +473,22 @@ export async function replayCandidateSkill(
     }
 
     if (entry.kind === "tab_opened") {
-      await ensureMappedTab(
-        tabMap,
-        ownedRefs,
-        entry.tab_ref,
-        entry.url,
-        dependencies
-      );
+      if (!tabMap.has(entry.tab_ref)) {
+        const opened = await requireTool(
+          dependencies,
+          "open_tab",
+          {
+            ...(entry.url ? { url: entry.url } : {}),
+            active: false
+          }
+        );
+        const tabId = dataTabId(opened);
+        if (typeof tabId !== "number") {
+          throw new Error("ADAPTIVE_REPLAY_NEW_TAB_ID_REQUIRED");
+        }
+        tabMap.set(entry.tab_ref, tabId);
+        ownedRefs.add(entry.tab_ref);
+      }
       completed += 1;
       continue;
     }
