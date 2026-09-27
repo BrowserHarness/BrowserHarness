@@ -127,11 +127,19 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - BrowserCrew approval semantics are preserved
    - deterministic candidate evaluations are emitted
    - generated Skills are candidate-only and cannot auto-promote
-2. **Adaptive workflow replay — next**
-   - replay recorded intent/context rather than brittle exact-tab IDs
-   - remap recorded tabs to current task-session tabs
-   - recover stale refs through observe/AX escalation
-3. Cross-runtime evaluation of `SK-BROWSER-001` v0.3.0
+2. **Watch Me v3 adaptive workflow replay — verified**
+   - verified UI-integrated head: `0ad7117761a3f0d65987a6919e4eb3555f595678`
+   - SavedWorkflow v3 flows through Record → Skill compilation before execution
+   - logical tab refs are remapped into a fresh BrowserCrew task session; recorded source tab IDs are never executed
+   - recorded `tab_opened` evidence creates a distinct task-owned background tab instead of collapsing onto an existing tab
+   - targets are resolved from fresh `observe_page` semantics with fresh AX fallback; ambiguous equal-best matches are rejected rather than guessed
+   - recorded element/semantic refs are evidence hints only and are never sent as live selectors
+   - reusable parameters support runtime overrides and recorded defaults
+   - current-page and recorded approval metadata remain in force
+   - replay stops at the demonstrated boundary and re-observes after actions/context changes
+   - v3 Replay in Chat uses adaptive execution; legacy v2 exact single-tab replay remains available
+   - Session-derived candidate Skills are compiled but do not yet have a user-facing runner
+3. **Cross-runtime evaluation of `SK-BROWSER-001` v0.3.0 — next**
 4. Trusted-click hardening
    - occlusion/hit-test verification
    - explicit CDP input-delivery verification

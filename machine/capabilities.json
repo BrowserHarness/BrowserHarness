@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-record-session-skill-compiler-verified",
+  "status": "v0.2-watch-me-v3-adaptive-replay-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -207,7 +207,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "adaptive multi-tab workflow replay",
+        "next": "cross-runtime evaluation of SK-BROWSER-001 v0.3.0; then trusted-input approval hardening",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
@@ -248,6 +248,35 @@
           "approval_policy": "preserve BrowserCrew approval rules",
           "evaluations": "deterministic cases derived from session evidence",
           "promotion": "candidate only; evaluation required; no auto-promotion"
+        },
+        "adaptive_replay": {
+          "status": "verified",
+          "verified_sha": "0ad7117761a3f0d65987a6919e4eb3555f595678",
+          "ci_run_id": 36342347225,
+          "source": "SavedWorkflow v3 -> Record-to-Skill CandidateSkill",
+          "ui": "Watch Me v3 Replay uses adaptive executor; legacy v2 retains exact single-tab replay",
+          "task_session": "fresh BrowserCrew task-session identity per replay",
+          "tab_mapping": [
+            "logical tab refs -> live task-session tabs",
+            "recorded source tab ids are never executed",
+            "tab_opened always creates a distinct owned background tab",
+            "only replay-owned tabs are eligible for adaptive close"
+          ],
+          "target_resolution": [
+            "fresh observe_page semantic matching",
+            "fresh ax_snapshot fallback",
+            "ambiguous equal-best targets are rejected",
+            "recorded element/semantic refs are evidence hints only"
+          ],
+          "parameters": "runtime overrides supported; recorded defaults used when no override is supplied",
+          "approvals": "recorded and current DOM approval metadata preserved",
+          "boundary": "execution stops at maximum demonstrated plan index / boundary_step_id",
+          "verification": "wait + fresh observation after actions and context changes",
+          "known_limits": [
+            "SessionCandidateSkill has no user-facing adaptive runner yet",
+            "newly risky AX-only targets can still be rejected by trusted-input safety after UI approval; trusted-input approval proof is not yet implemented",
+            "Chat replay currently uses recorded parameter defaults; parameter-edit UX is not yet exposed"
+          ]
         }
       }
     },
