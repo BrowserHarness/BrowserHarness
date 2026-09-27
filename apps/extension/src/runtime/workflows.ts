@@ -104,12 +104,12 @@ export function inferWorkflowInputs(
 export function describeWorkflowStep(
   step: RecordedWorkflowStep
 ): string {
+  const locator = step.locator;
   const target =
-    "locator" in step
-      ? step.locator.accessible_name ||
-        step.locator.label ||
-        step.locator.role
-      : "";
+    locator?.accessible_name ||
+    locator?.label ||
+    locator?.role ||
+    "";
 
   if (step.action === "click") {
     return `Click ${target || "the recorded control"}`;
