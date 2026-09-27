@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "owner": "BrowserCrew/browsercrew",
-  "version": "0.1",
+  "version": "0.2",
   "tools": [
     {
       "id": "observe_page",
@@ -42,6 +42,16 @@
       "id": "open_tab",
       "mutation": true,
       "approval": "policy"
+    },
+    {
+      "id": "find_tab",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "list_tabs",
+      "mutation": false,
+      "approval": "never"
     },
     {
       "id": "switch_tab",
