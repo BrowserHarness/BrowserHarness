@@ -15,6 +15,7 @@ export type ToolName =
 
 export interface InteractiveElement {
   element_id: string;
+  semantic_ref?: string;
   tag: string;
   role: string;
   accessible_name: string;
@@ -31,6 +32,7 @@ export interface PageObservation {
   url: string;
   title: string;
   visible_text: string;
+  snapshot?: string;
   elements: InteractiveElement[];
   adapter?: "google-docs" | "generic-web";
 }
