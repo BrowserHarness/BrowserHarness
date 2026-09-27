@@ -63,11 +63,32 @@ Goal: make provider/model behavior predictable before expanding product scope.
 - Automatic model benchmarking/ranking
 - More than one fallback hop
 
-## v0.2 — Better workflows + Skills
+## v0.2 — Browser Reliability + Bridge Foundation
+**Status:** active after the user explicitly reopened post-MVP development before manual acceptance.
+
+### Verified reliability work
+- One browser task = one task session
+- User starting tab is borrowed, not owned
+- BrowserCrew-created tabs are task-owned and grouped
+- Session cleanup can only close owned tabs
+- Session-scoped `list_tabs` and `find_tab`
+- Stable semantic `@e` element references
+- Compact accessibility-style page snapshots
+- Stronger framework-controlled input fills using native value setters
+- Stronger contenteditable/rich-editor insertion path
+
+### Next
+- BrowserCrew Local Bridge protocol for external agents
+- Companion/advanced CDP distribution for trusted-input escape-hatch cases
+- External-agent session API compatible with BrowserCrew task ownership
 - Workflow variables and branches
 - Reusable Skill runtime
-- More provider adapters and local runtimes
+- Record → Skill, Session → Skill, Site → Skill
+- More provider adapters/local runtimes
 - Stronger recovery/evaluations
+
+### Permission rule
+The core extension remains least-privilege. Chrome does not allow the `debugger` permission to be optional, so raw CDP will not be added to the core package merely as an optional feature. Trusted-CDP control belongs in a separately disclosed Advanced/Bridge distribution.
 
 ## v0.3 — Memory + MCP
 - Working/episodic/semantic/procedural memory
