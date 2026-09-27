@@ -1,46 +1,75 @@
-# Chrome Web Store Release Baseline — BrowserCrew v0.1
+# Chrome Web Store Release Baseline — BrowserCrew
 
 ## Listing
 **Name:** BrowserCrew
 
-**Short description:** AI agents that can read and work in your browser with visible activity, approvals, and user-selected AI models.
+**Short description:** A full browser AI agent with user-selected models, trusted browser control, local-agent Bridge, reusable workflows, and visible activity.
 
 ## Core value
-BrowserCrew lets users connect their own supported AI provider, give the current browser context a goal, and let one agent observe, navigate, type, click, work across tabs, and verify actions.
+BrowserCrew is designed to operate the real browser, not just chat about webpages. It can observe, navigate, type, click, work across tabs/windows, use accessibility-tree/CDP targeting, inspect network activity, upload files supplied by the user/agent runtime, export pages as PDF, and verify actions.
 
 ## Permission justification
 
-### activeTab
-Allows BrowserCrew to work with the tab on which the user invokes the extension without requesting blanket website access at install time.
+### <all_urls>
+BrowserCrew is an autonomous cross-site browser agent. Tasks can navigate across arbitrary websites and user sessions without stopping for per-origin permission grants.
 
-### tabs
-Required to identify, open, switch, and close tabs for single-agent multi-tab tasks.
+### debugger
+Powers Chrome DevTools Protocol capabilities used by BrowserCrew for:
+- Accessibility.getFullAXTree semantic targeting;
+- backend DOM node resolution;
+- trusted mouse/keyboard/text input;
+- background-tab focus emulation;
+- native JavaScript dialog handling;
+- network response-body inspection;
+- file-input injection;
+- print-to-PDF;
+- raw CDP escape-hatch operations.
 
-### storage
-Stores local provider configuration, model health, task history preferences, recorded workflows, and UI preferences.
+### webNavigation
+Provides reliable navigation lifecycle information for cross-page automation and Watch Me recording.
 
-### sidePanel
-Provides BrowserCrew's primary chat-first Chrome side panel.
+### webRequest
+Supports browser/network observability alongside CDP network inspection.
+
+### unlimitedStorage
+Supports local task/workflow/recording/evidence storage without small extension quotas becoming a reliability limiter.
+
+### downloads
+Writes BrowserCrew-generated PDFs to Chrome downloads.
+
+### tabs / windows / tabGroups
+Required for session-owned multi-tab and multi-window browser tasks and task grouping.
 
 ### scripting
-Injects the BrowserCrew content runtime into user-authorized normal web pages.
+Injects BrowserCrew's runtime into normal web documents when DOM-level observation or interaction is appropriate.
 
-### Known provider host permissions
-Required for direct user-configured AI API requests to OpenAI, Anthropic, NVIDIA hosted NIM, and Groq.
+### activeTab
+Supports user-invoked current-tab attachment and browser context.
 
-### optional website host permissions
-`http://*/*` and `https://*/*` are optional. They are requested only when the user enables all-sites access for cross-site/multi-tab browser automation or grants a custom compatible AI endpoint.
+### storage
+Stores local provider configuration, model health, task/session state, workflows, preferences, Bridge settings, and history.
 
-## Data-use declaration baseline
-- No BrowserCrew cloud analytics in v0.1.
-- No sale of user data.
-- Provider API requests are sent directly to the provider configured by the user.
-- Page content is sent only when required for a user-requested browser-agent task.
-- Screenshots are sent only when a vision-capable model requests visual evidence.
-- Provider credentials remain in Chrome extension local storage.
+### sidePanel
+Provides BrowserCrew's chat-first interface.
 
-## Store assets still replaceable
-The MVP package may use a temporary generated extension icon. Final polished store artwork can replace it without changing runtime behavior.
+### alarms
+Supports resilient extension/agent runtime housekeeping.
+
+### contextMenus
+Supports BrowserCrew actions launched from browser context.
+
+### notifications
+Supports user-visible browser-agent notifications.
+
+### favicon
+Supports tab/site visual context.
+
+## Data-use baseline
+- BrowserCrew currently has no BrowserCrew-hosted cloud analytics requirement for browser execution.
+- Provider API requests are sent directly to providers configured by the user.
+- Page/network/browser evidence is processed only for user-requested agent work.
+- Provider credentials remain in Chrome extension-local storage.
+- Local Bridge binds to loopback and uses a pairing token.
 
 ## Release gate
-Do not publish publicly until the automated MVP gate passes and the final real-Chrome manual acceptance pass is completed.
+Public release still requires automated CI/evaluation gates plus the final real-Chrome acceptance pass.
