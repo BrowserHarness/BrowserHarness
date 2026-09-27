@@ -7,6 +7,7 @@ const ROOT = resolve(SCRIPT_DIR, "..");
 
 const requiredTools = [
   "observe_page",
+  "read_page",
   "navigate",
   "click",
   "type",
