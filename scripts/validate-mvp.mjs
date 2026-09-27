@@ -14,6 +14,8 @@ const requiredTools = [
   "scroll",
   "wait",
   "open_tab",
+  "find_tab",
+  "list_tabs",
   "switch_tab",
   "close_tab",
   "screenshot"
