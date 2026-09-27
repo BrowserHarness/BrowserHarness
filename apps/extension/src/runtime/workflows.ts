@@ -20,6 +20,7 @@ export interface RecordedStepContext {
   scroll_x?: number;
   scroll_y?: number;
   description?: string;
+  tab_id?: number;
 }
 
 export type RecordedWorkflowStep =
@@ -39,6 +40,49 @@ export type RecordedWorkflowStep =
       locator?: WorkflowLocator;
     });
 
+export type WorkflowRecordingEvent =
+  | {
+      id: string;
+      type: "navigation";
+      recorded_at: string;
+      tab_id: number;
+      url: string;
+      transition_type?: string;
+      transition_qualifiers?: string[];
+    }
+  | {
+      id: string;
+      type: "tab_opened";
+      recorded_at: string;
+      tab_id: number;
+      opener_tab_id?: number;
+      url?: string;
+      title?: string;
+    }
+  | {
+      id: string;
+      type: "tab_activated";
+      recorded_at: string;
+      tab_id: number;
+      window_id: number;
+      url?: string;
+      title?: string;
+    }
+  | {
+      id: string;
+      type: "tab_closed";
+      recorded_at: string;
+      tab_id: number;
+    };
+
+export interface WorkflowRecordingSummary {
+  tab_count: number;
+  event_count: number;
+  dropped_steps: number;
+  dropped_events: number;
+  approximate_bytes: number;
+}
+
 export interface WorkflowInput {
   name: string;
   label: string;
@@ -48,13 +92,16 @@ export interface WorkflowInput {
 
 export interface SavedWorkflow {
   id: string;
-  version?: 2;
+  version?: 2 | 3;
   name: string;
   created_at: string;
   url: string;
   end_url?: string;
   inputs?: WorkflowInput[];
   steps: RecordedWorkflowStep[];
+  events?: WorkflowRecordingEvent[];
+  boundary_step_id?: string;
+  recording?: WorkflowRecordingSummary;
 }
 
 const KEY = "browsercrew.workflows";
