@@ -1,4 +1,13 @@
-import type { ExtensionRequest, ToolResult } from "../runtime/protocol";
+import type {
+  ExtensionRequest,
+  PageObservation,
+  ToolName,
+  ToolResult
+} from "../runtime/protocol";
+import {
+  startBridgeClient,
+  type BridgeCommand
+} from "./bridge-client";
 import { originPatternForUrl } from "../settings/browser-access";
 import {
   borrowTab,
@@ -487,6 +496,92 @@ async function runTool(
     }
   };
 }
+
+const BRIDGE_TOOL_NAMES = new Set<ToolName>([
+  "observe_page",
+  "navigate",
+  "click",
+  "type",
+  "press_key",
+  "scroll",
+  "wait",
+  "open_tab",
+  "find_tab",
+  "list_tabs",
+  "switch_tab",
+  "close_tab",
+  "screenshot"
+]);
+
+async function handleBridgeCommand(
+  command: BridgeCommand
+): Promise<ToolResult> {
+  if (!BRIDGE_TOOL_NAMES.has(command.action as ToolName)) {
+    return {
+      ok: false,
+      error: {
+        code: "UNKNOWN_BRIDGE_ACTION",
+        message: `Unsupported BrowserCrew Bridge action: ${command.action}`
+      }
+    };
+  }
+
+  const tool = command.action as ToolName;
+
+  if (
+    tool === "click" ||
+    (tool === "press_key" &&
+      String(command.args.key || "") === "Enter")
+  ) {
+    const observed = await runTool(
+      "observe_page",
+      {},
+      command.session,
+      command.title
+    );
+
+    if (!observed.ok || !observed.data) {
+      return observed;
+    }
+
+    const observation = observed.data as PageObservation;
+    const elementId = command.args.element_id;
+    const element =
+      typeof elementId === "string"
+        ? observation.elements.find(
+            (candidate) =>
+              candidate.element_id === elementId ||
+              candidate.semantic_ref === elementId
+          )
+        : undefined;
+
+    const requiresApproval =
+      tool === "click"
+        ? element?.requires_approval
+        : element?.enter_requires_approval;
+
+    if (requiresApproval) {
+      return {
+        ok: false,
+        error: {
+          code: "APPROVAL_REQUIRED",
+          message:
+            element?.approval_reason ||
+            "This browser action requires explicit user approval in BrowserCrew."
+        }
+      };
+    }
+  }
+
+  return runTool(
+    tool,
+    command.args,
+    command.session,
+    command.title
+  );
+}
+
+startBridgeClient(handleBridgeCommand);
 
 chrome.runtime.onMessage.addListener(
   (
