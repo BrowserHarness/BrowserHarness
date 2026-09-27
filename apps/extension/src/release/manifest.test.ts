@@ -25,7 +25,8 @@ describe("MV3 release manifest", () => {
         "tabs",
         "storage",
         "sidePanel",
-        "scripting"
+        "scripting",
+        "tabGroups"
       ])
     );
   });
