@@ -38,6 +38,8 @@ import { runBrowserTask } from "../runtime/browser-engine";
 import { classifyTaskIntent } from "../runtime/intent";
 import type { PageObservation, ToolResult } from "../runtime/protocol";
 import {
+  finalizeRecordedSteps,
+  inferWorkflowInputs,
   saveWorkflow,
   type RecordedWorkflowStep,
   type SavedWorkflow
@@ -191,7 +193,7 @@ export function App() {
       return;
     }
 
-    const steps = result.data.steps;
+    const steps = finalizeRecordedSteps(result.data.steps);
     if (steps.length === 0) {
       addAssistantMessage("Recording stopped. I didn't capture any reusable actions.");
       return;
@@ -199,15 +201,21 @@ export function App() {
 
     const workflow: SavedWorkflow = {
       id: crypto.randomUUID(),
-      name: `Workflow ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      version: 2,
+      name: `Workflow ${new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+      })}`,
       created_at: new Date().toISOString(),
       url: tab.url || "",
+      end_url: steps.at(-1)?.url || tab.url || "",
+      inputs: inferWorkflowInputs(steps),
       steps
     };
     await saveWorkflow(workflow);
     setLastWorkflow(workflow);
     addAssistantMessage(
-      `Saved “${workflow.name}” with ${steps.length} step${steps.length === 1 ? "" : "s"}. You can replay it from this chat.`
+      `Saved “${workflow.name}” with ${steps.length} step${steps.length === 1 ? "" : "s"} and ${workflow.inputs?.length || 0} reusable input${workflow.inputs?.length === 1 ? "" : "s"}. You can replay it from this chat.`
     );
   };
 
@@ -240,7 +248,26 @@ export function App() {
           );
           setApproval(null);
           if (!approved) {
-            addAssistantMessage("Workflow replay stopped before that action.");
+            addAssistantMessage(
+              "Workflow replay stopped before that action."
+            );
+            return;
+          }
+        }
+
+        if (
+          step.action === "key" &&
+          step.key.toLowerCase() === "enter" &&
+          step.locator?.enter_requires_approval
+        ) {
+          const approved = await requestApproval(
+            `Replay Enter in “${step.locator.accessible_name || step.locator.role}” on ${currentHost || "this page"}; this may submit a form`
+          );
+          setApproval(null);
+          if (!approved) {
+            addAssistantMessage(
+              "Workflow replay stopped before that submission."
+            );
             return;
           }
         }
@@ -248,7 +275,13 @@ export function App() {
         const activity = addActivity(
           step.action === "click"
             ? `Replaying click: ${step.locator.accessible_name || step.locator.role}`
-            : `Replaying text entry: ${step.locator.accessible_name || step.locator.role}`
+            : step.action === "type"
+              ? `Replaying text entry: ${step.locator.accessible_name || step.locator.role}`
+              : `Replaying key: ${step.key}${
+                  step.locator
+                    ? ` in ${step.locator.accessible_name || step.locator.role}`
+                    : ""
+                }`
         );
 
         const result = await extensionMessage({
