@@ -804,15 +804,16 @@ function execute(action: Extract<ContentRequest, { type: "EXECUTE_CONTENT_ACTION
 
 function replayStep(step: RecordedWorkflowStep) {
   if (step.action === "key") {
-    const element = step.locator
-      ? findByLocator(step.locator)
+    const locator = step.locator;
+    const element = locator
+      ? findByLocator(locator)
       : document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
 
-    if (step.locator && !element) {
+    if (locator && !element) {
       throw new Error(
-        `Recorded element not found: ${step.locator.accessible_name || step.locator.role}`
+        `Recorded element not found: ${locator.accessible_name || locator.role}`
       );
     }
 
@@ -832,23 +833,31 @@ function replayStep(step: RecordedWorkflowStep) {
     return { action: "key", key: step.key };
   }
 
+  if (step.action === "click") {
+    const element = findByLocator(step.locator);
+    if (!element) {
+      throw new Error(
+        `Recorded element not found: ${step.locator.accessible_name || step.locator.role}`
+      );
+    }
+    element.scrollIntoView({
+      block: "center",
+      inline: "nearest"
+    });
+    element.click();
+    return { action: "click" };
+  }
+
   const element = findByLocator(step.locator);
   if (!element) {
     throw new Error(
       `Recorded element not found: ${step.locator.accessible_name || step.locator.role}`
     );
   }
-
   element.scrollIntoView({
     block: "center",
     inline: "nearest"
   });
-
-  if (step.action === "click") {
-    element.click();
-    return { action: "click" };
-  }
-
   return writeText(element, step.text, true);
 }
 
