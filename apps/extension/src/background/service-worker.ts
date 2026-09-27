@@ -25,6 +25,13 @@ import {
   trustedType
 } from "./cdp-input";
 import {
+  listNetworkRecords,
+  networkCaptureActive,
+  networkRecordDetail,
+  startNetworkCapture,
+  stopNetworkCapture
+} from "./network-capture";
+import {
   screenshotVisibilityError,
   shouldActivateNewTaskTab
 } from "./tab-policy";
@@ -754,6 +761,90 @@ async function runTool(
     }
   }
 
+  if (tool === "network") {
+    const action =
+      typeof input.action === "string"
+        ? input.action
+        : "list";
+
+    try {
+      if (action === "start") {
+        await startNetworkCapture(
+          tabId,
+          Number(input.max_entries ?? 500)
+        );
+        return {
+          ok: true,
+          data: {
+            active: true,
+            tab_id: tabId
+          }
+        };
+      }
+
+      if (action === "list") {
+        return {
+          ok: true,
+          data: {
+            active: networkCaptureActive(tabId),
+            requests: listNetworkRecords(
+              tabId,
+              Number(input.limit ?? 100)
+            )
+          }
+        };
+      }
+
+      if (action === "detail") {
+        if (typeof input.request_id !== "string") {
+          return {
+            ok: false,
+            error: {
+              code: "NETWORK_REQUEST_ID_REQUIRED",
+              message:
+                "network detail requires request_id"
+            }
+          };
+        }
+        return {
+          ok: true,
+          data: await networkRecordDetail(
+            tabId,
+            input.request_id,
+            input.include_body !== false
+          )
+        };
+      }
+
+      if (action === "stop") {
+        return {
+          ok: true,
+          data: await stopNetworkCapture(tabId)
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: "NETWORK_ACTION_INVALID",
+          message:
+            "network action must be start, list, detail, or stop"
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "NETWORK_CAPTURE_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Network capture failed"
+        }
+      };
+    }
+  }
+
   if (tool === "cdp") {
     if (typeof input.method !== "string" || !input.method.trim()) {
       return {
@@ -848,6 +939,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "trusted_type",
   "trusted_key",
   "dialog",
+  "network",
   "cdp",
   "navigate",
   "click",
