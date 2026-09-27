@@ -74,8 +74,14 @@ Goal: make provider/model behavior predictable before expanding product scope.
 - Session-scoped `list_tabs` and `find_tab`
 - Stable semantic `@e` element references
 - Compact accessibility-style page snapshots
+- Serialized task-session mutations prevent concurrent tab-state loss
+- Navigation waits for a usable document and captures final redirected URL
+- Dedicated bounded `read_page` with scroll restoration, continuation, frame metadata, stall/endless-feed signals, and token-efficient defaults
 - Stronger framework-controlled input fills using native value setters
 - Stronger contenteditable/rich-editor insertion path
+- Watch Me v2: richer target metadata, input debouncing, key steps, inferred workflow inputs, resilient locator matching, reinjection-safe content runtime
+- Task tabs stay backgrounded by default; `find_tab` does not steal foreground focus
+- Screenshot refuses to capture a different foreground tab when the task target is backgrounded
 
 ### Verified Local Bridge foundation
 - Loopback-only BrowserCrew Bridge daemon workspace
@@ -90,15 +96,29 @@ Goal: make provider/model behavior predictable before expanding product scope.
 - CLI operations: `start`, `status`, `stop`, `restart`, `logs`, `pair`
 - Machine-readable and human-readable Bridge protocol v0.1
 
+### Source-audit reference
+A behavioral clean-room audit of the shipped Kimi Browser Extension 2.0.22 is recorded at:
+`docs/research/KIMI-EXTENSION-REFERENCE-AUDIT.md`
+
+It is a reference architecture audit, not copied implementation. BrowserCrew keeps its own provider-neutral model layer, safety approvals, least-privilege Core package, deterministic tests, and Skill evaluation policy.
+
 ### Next
-- External-agent adapters/skills for Hermes, Codex, Claude Code and other local agents
-- Companion/advanced CDP distribution for trusted-input escape-hatch cases
-- External-agent session API compatible with BrowserCrew task ownership
-- Workflow variables and branches
-- Reusable Skill runtime
-- Record → Skill, Session → Skill, Site → Skill
-- More provider adapters/local runtimes
-- Stronger recovery/evaluations
+1. **Watch Me v2 cross-page / multi-tab recording**
+   - background-owned recording session
+   - incremental step collection across navigations
+   - tab creation/navigation/activation evidence
+   - re-arm recording after page navigation
+   - bounded evidence/storage budget
+   - preserve the last recorded step as the workflow boundary
+2. **Skill compiler**
+   - Record → Skill
+   - Session → Skill
+   - reusable input/variable inference
+   - candidate evaluation before promotion
+3. Cross-runtime evaluation of `SK-BROWSER-001`
+4. Companion/Advanced CDP distribution for trusted mouse/key/text, focus emulation, and native dialog handling
+5. Network/upload/PDF only after permission and safety contracts are explicit
+6. Site → Skill after observation/recording/evaluation contracts stabilize
 
 ### Permission rule
 The core extension remains least-privilege. Chrome does not allow the `debugger` permission to be optional, so raw CDP will not be added to the core package merely as an optional feature. Trusted-CDP control belongs in a separately disclosed Advanced/Bridge distribution.
