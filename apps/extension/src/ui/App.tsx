@@ -38,7 +38,7 @@ import { runBrowserTask } from "../runtime/browser-engine";
 import { replaySavedWorkflowAdaptive } from "../runtime/workflow-adaptive-replay";
 import type { AdaptiveReplayDependencies } from "../runtime/adaptive-replay";
 import { classifyTaskIntent } from "../runtime/intent";
-import type { PageObservation, ToolResult } from "../runtime/protocol";
+import type { PageObservation, ToolName, ToolResult } from "../runtime/protocol";
 import {
   finalizeRecordedSteps,
   inferWorkflowInputs,
@@ -266,7 +266,7 @@ export function App() {
       try {
         const dependencies: AdaptiveReplayDependencies = {
           tool: <T = unknown>(
-            tool,
+            tool: ToolName,
             input: Record<string, unknown> = {}
           ) =>
             extensionMessage<T>({
