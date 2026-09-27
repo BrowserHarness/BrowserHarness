@@ -30,6 +30,8 @@ const TOOL_NAMES = new Set<ToolName>([
   "scroll",
   "wait",
   "open_tab",
+  "find_tab",
+  "list_tabs",
   "switch_tab",
   "close_tab",
   "screenshot"
@@ -42,12 +44,13 @@ Do not claim an action succeeded unless tool evidence shows it.
 Return exactly one JSON object and no markdown.
 
 To use a tool:
-{"kind":"tool","tool":"observe_page|navigate|click|type|press_key|scroll|wait|open_tab|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
+{"kind":"tool","tool":"observe_page|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
 
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
 
-Prefer semantic element_id values from the current observation. Never invent an element_id.\nUse screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
+Prefer semantic @e element_id values from the current observation. Never invent an element_id.
+Use list_tabs to inspect tabs belonging to this task session. Use find_tab with the exact observed URL to return to a session tab; use active:true only when the user's goal explicitly refers to the tab they are currently viewing.\nUse screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
 Do not request send, submit, publish, purchase, delete, payment, or account/security-changing actions unless necessary for the user's explicit goal; BrowserCrew applies approval policy separately.`;
 
 const CHAT_SYSTEM =
