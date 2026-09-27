@@ -30,6 +30,8 @@ const TOOL_NAMES = new Set<ToolName>([
   "trusted_key",
   "dialog",
   "network",
+  "upload",
+  "save_pdf",
   "cdp",
   "navigate",
   "click",
@@ -52,7 +54,7 @@ Do not claim an action succeeded unless tool evidence shows it.
 Return exactly one JSON object and no markdown.
 
 To use a tool:
-{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|trusted_click|trusted_type|trusted_key|dialog|network|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
+{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|trusted_click|trusted_type|trusted_key|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
 
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
@@ -66,7 +68,9 @@ Escalate browser control in layers:
 3. trusted_click / trusted_type / trusted_key for sites that reject synthetic DOM input;
 4. dialog for native alert/confirm/prompt state;
 5. network with action start/list/detail/stop when API/network evidence is more reliable than visual guessing;
-6. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
+6. upload after ax_snapshot when the task explicitly requires selecting local file paths supplied by the user/agent runtime;
+7. save_pdf to export the current page through Chrome's print-to-PDF path;
+8. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
 After ax_snapshot, use only the returned @e refs for trusted_* actions. Never invent a CDP ref.
 Use screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. Core BrowserCrew can capture only the tab currently visible in its window; if a task tab is backgrounded, screenshot returns SCREENSHOT_REQUIRES_VISIBLE_TAB rather than capturing the wrong tab. Do not switch tabs merely for decoration. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
 Do not request send, submit, publish, purchase, delete, payment, or account/security-changing actions unless necessary for the user's explicit goal; BrowserCrew applies approval policy separately.`;
