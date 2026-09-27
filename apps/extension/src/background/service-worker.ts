@@ -25,6 +25,10 @@ import {
   trustedType
 } from "./cdp-input";
 import {
+  savePageAsPdf,
+  uploadFiles
+} from "./file-tools";
+import {
   listNetworkRecords,
   networkCaptureActive,
   networkRecordDetail,
@@ -845,6 +849,78 @@ async function runTool(
     }
   }
 
+  if (tool === "upload") {
+    if (
+      typeof input.element_id !== "string" ||
+      !Array.isArray(input.files) ||
+      input.files.some((file) => typeof file !== "string")
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "UPLOAD_INPUT_INVALID",
+          message:
+            "upload requires element_id and files:string[]"
+        }
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        data: await uploadFiles(
+          tabId,
+          input.element_id,
+          input.files as string[]
+        )
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "UPLOAD_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "File upload failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "save_pdf") {
+    try {
+      return {
+        ok: true,
+        data: await savePageAsPdf(tabId, {
+          filename:
+            typeof input.filename === "string"
+              ? input.filename
+              : undefined,
+          landscape: Boolean(input.landscape),
+          print_background:
+            input.print_background !== false,
+          scale:
+            typeof input.scale === "number"
+              ? input.scale
+              : undefined,
+          save_as: input.save_as === true
+        })
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "PDF_EXPORT_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "PDF export failed"
+        }
+      };
+    }
+  }
+
   if (tool === "cdp") {
     if (typeof input.method !== "string" || !input.method.trim()) {
       return {
@@ -940,6 +1016,8 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "trusted_key",
   "dialog",
   "network",
+  "upload",
+  "save_pdf",
   "cdp",
   "navigate",
   "click",
