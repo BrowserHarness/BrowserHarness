@@ -45,15 +45,13 @@ import {
   type NavigationReadyResult
 } from "./navigation";
 import {
-  appendWatchEvent,
   appendWatchStep,
   getWatchRecording,
-  markWatchTabClosed,
   startWatchRecording,
   stopWatchRecording,
-  trackWatchTab,
   watchRecordingSummary
 } from "./watch-recording";
+import { createWatchBrowserEventHandlers } from "./watch-browser-events";
 import {
   borrowTab,
   closeTaskSession,
@@ -1131,97 +1129,25 @@ async function disarmWatchTab(
   return data.final_step || null;
 }
 
-chrome.webNavigation.onCommitted.addListener((details) => {
-  if (details.frameId !== 0) return;
-
-  void (async () => {
-    const session = await getWatchRecording();
-    if (!session || !session.tab_ids.includes(details.tabId)) {
-      return;
-    }
-
-    await appendWatchEvent({
-      type: "navigation",
-      tab_id: details.tabId,
-      url: details.url,
-      transition_type: details.transitionType,
-      transition_qualifiers: details.transitionQualifiers
-    });
-  })();
+const watchBrowserEvents = createWatchBrowserEventHandlers({
+  armWatchTab
 });
 
-chrome.webNavigation.onCompleted.addListener((details) => {
-  if (details.frameId !== 0) return;
-
-  void (async () => {
-    const session = await getWatchRecording();
-    if (!session || !session.tab_ids.includes(details.tabId)) {
-      return;
-    }
-
-    await armWatchTab(details.tabId).catch(() => undefined);
-  })();
-});
-
-chrome.tabs.onCreated.addListener((tab) => {
-  if (typeof tab.id !== "number") return;
-
-  void (async () => {
-    const session = await getWatchRecording();
-    if (!session) return;
-
-    const belongs =
-      typeof tab.openerTabId === "number" &&
-      session.tab_ids.includes(tab.openerTabId);
-
-    if (!belongs) return;
-
-    await trackWatchTab(tab.id!);
-    await appendWatchEvent({
-      type: "tab_opened",
-      tab_id: tab.id!,
-      opener_tab_id: tab.openerTabId,
-      url: tab.url,
-      title: tab.title
-    });
-  })();
-});
-
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  void (async () => {
-    const session = await getWatchRecording();
-    if (!session || !session.tab_ids.includes(activeInfo.tabId)) {
-      return;
-    }
-
-    const tab = await chrome.tabs
-      .get(activeInfo.tabId)
-      .catch(() => null);
-
-    await appendWatchEvent({
-      type: "tab_activated",
-      tab_id: activeInfo.tabId,
-      window_id: activeInfo.windowId,
-      url: tab?.url,
-      title: tab?.title
-    });
-  })();
-});
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  void (async () => {
-    const session = await getWatchRecording();
-    if (!session || !session.tab_ids.includes(tabId)) {
-      return;
-    }
-
-    await appendWatchEvent({
-      type: "tab_closed",
-      tab_id: tabId
-    });
-    await markWatchTabClosed(tabId);
-  })();
-});
+chrome.webNavigation.onCommitted.addListener(
+  watchBrowserEvents.onCommitted
+);
+chrome.webNavigation.onCompleted.addListener(
+  watchBrowserEvents.onCompleted
+);
+chrome.tabs.onCreated.addListener(
+  watchBrowserEvents.onCreated
+);
+chrome.tabs.onActivated.addListener(
+  watchBrowserEvents.onActivated
+);
+chrome.tabs.onRemoved.addListener(
+  watchBrowserEvents.onRemoved
+);
 
 startBridgeClient(handleBridgeCommand);
 
