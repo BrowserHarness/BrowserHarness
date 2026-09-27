@@ -149,9 +149,10 @@ describe("Watch Me browser event handlers", () => {
     );
   });
 
-  it("records activation only for tabs already in the recording", async () => {
+  it("records tracked activation and adopts a newly selected tab", async () => {
+    const armWatchTab = vi.fn(async () => undefined);
     const handlers = createWatchBrowserEventHandlers({
-      armWatchTab: vi.fn()
+      armWatchTab
     });
 
     handlers.onActivated({
@@ -168,8 +169,11 @@ describe("Watch Me browser event handlers", () => {
         url: "https://example.com/tab-8"
       })
     );
+    expect(mocks.trackWatchTab).not.toHaveBeenCalledWith(8);
 
     mocks.appendWatchEvent.mockClear();
+    mocks.trackWatchTab.mockClear();
+    armWatchTab.mockClear();
 
     handlers.onActivated({
       tabId: 99,
@@ -177,7 +181,16 @@ describe("Watch Me browser event handlers", () => {
     });
     await tick();
 
-    expect(mocks.appendWatchEvent).not.toHaveBeenCalled();
+    expect(mocks.trackWatchTab).toHaveBeenCalledWith(99);
+    expect(mocks.appendWatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tab_activated",
+        tab_id: 99,
+        window_id: 3,
+        url: "https://example.com/tab-99"
+      })
+    );
+    expect(armWatchTab).toHaveBeenCalledWith(99);
   });
 
   it("records tracked tab closure and updates recording state", async () => {
