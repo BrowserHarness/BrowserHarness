@@ -103,8 +103,8 @@ if (!manifest.host_permissions?.includes("<all_urls>")) {
   fail("full browser-agent host access <all_urls> is missing");
 }
 
-`);
-  }
+if (manifest.content_scripts) {
+  fail("runtime injection should remain dynamic rather than static");
 }
 
 const registry = JSON.parse(
