@@ -170,11 +170,23 @@ export async function appendWatchStep(
   return { accepted, session };
 }
 
+type WatchRecordingEventInput<T> =
+  T extends WorkflowRecordingEvent
+    ? Omit<T, "id" | "recorded_at"> & {
+        id?: string;
+        recorded_at?: string;
+      }
+    : never;
+
+type AnyWatchRecordingEventInput =
+  WorkflowRecordingEvent extends infer Event
+    ? Event extends WorkflowRecordingEvent
+      ? WatchRecordingEventInput<Event>
+      : never
+    : never;
+
 export async function appendWatchEvent(
-  event: Omit<WorkflowRecordingEvent, "id" | "recorded_at"> & {
-    id?: string;
-    recorded_at?: string;
-  }
+  event: AnyWatchRecordingEventInput
 ): Promise<WatchRecordingSession | null> {
   return mutate((current) => {
     let next = withTab(current, event.tab_id);
