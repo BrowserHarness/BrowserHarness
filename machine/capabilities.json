@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-source-audited-browser-reliability",
+  "status": "v0.2-full-browser-agent-parity",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -20,7 +20,7 @@
           "beforeinput/input/change event sequence",
           "contenteditable insertion fallback"
         ],
-        "cdp_strategy": "separate Advanced/Bridge distribution; not core optional permission",
+        "cdp_strategy": "primary BrowserCrew capability",
         "session_storage": "serialized read-modify-write mutations",
         "navigation": "bounded usable-document wait with final redirected URL",
         "page_reading": {
@@ -59,7 +59,47 @@
           "resilient_locator_matching": true,
           "cross_page_recording": "next milestone"
         },
-        "reference_audit": "docs/research/KIMI-EXTENSION-REFERENCE-AUDIT.md"
+        "reference_audit": "docs/research/KIMI-EXTENSION-REFERENCE-AUDIT.md",
+        "permission_envelope": {
+          "host_access": "<all_urls>",
+          "permissions": [
+            "debugger",
+            "webNavigation",
+            "webRequest",
+            "unlimitedStorage",
+            "downloads",
+            "tabs",
+            "windows",
+            "tabGroups",
+            "scripting"
+          ]
+        },
+        "cdp": {
+          "accessibility_tree": "Accessibility.getFullAXTree",
+          "semantic_refs": "backend DOM node mapped @e refs",
+          "trusted_input": [
+            "Input.dispatchMouseEvent",
+            "Input.insertText",
+            "Input.dispatchKeyEvent"
+          ],
+          "focus_emulation": "Emulation.setFocusEmulationEnabled",
+          "native_dialogs": "Page.javascriptDialogOpening + Page.handleJavaScriptDialog",
+          "raw_escape_hatch": "cdp tool"
+        },
+        "network": {
+          "tool": "network",
+          "actions": [
+            "start",
+            "list",
+            "detail",
+            "stop"
+          ],
+          "response_body": "Network.getResponseBody"
+        },
+        "files": {
+          "upload": "DOM.setFileInputFiles",
+          "pdf": "Page.printToPDF + chrome.downloads"
+        }
       }
     },
     {
@@ -118,7 +158,8 @@
           "logs",
           "pair"
         ],
-        "cdp": "separate Advanced/Bridge distribution"
+        "cdp": "available through primary BrowserCrew runtime",
+        "tools": 23
       }
     },
     {
