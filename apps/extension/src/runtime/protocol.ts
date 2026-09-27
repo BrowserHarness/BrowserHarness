@@ -59,8 +59,16 @@ export type BrowserToolRequest = {
 
 export type WatchRequest =
   | { type: "WATCH_START"; tab_id?: number }
-  | { type: "WATCH_STOP"; tab_id?: number }
-  | { type: "WATCH_REPLAY_STEP"; tab_id?: number; step: RecordedWorkflowStep };
+  | { type: "WATCH_STOP" }
+  | {
+      type: "WATCH_CAPTURE_STEP";
+      step: RecordedWorkflowStep;
+    }
+  | {
+      type: "WATCH_REPLAY_STEP";
+      tab_id?: number;
+      step: RecordedWorkflowStep;
+    };
 
 export type ExtensionRequest =
   | { type: "GET_CURRENT_TAB" }
