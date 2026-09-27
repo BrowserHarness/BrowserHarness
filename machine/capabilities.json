@@ -1,10 +1,27 @@
 {
   "schema_version": 1,
-  "status": "v0.1.1-model-runtime",
+  "status": "v0.2-browser-reliability",
   "capability_domains": [
     {
       "id": "browser-harness",
-      "owner": "BrowserCrew/browsercrew"
+      "owner": "BrowserCrew/browsercrew",
+      "runtime_contract": {
+        "task_sessions": "one browser task = one session",
+        "starting_tab": "borrowed user tab",
+        "created_tabs": "owned by task session and grouped",
+        "unrelated_tab_access": "blocked by default",
+        "semantic_targets": "stable @e refs plus compact accessibility snapshot",
+        "tab_discovery": [
+          "list_tabs",
+          "find_tab"
+        ],
+        "text_entry": [
+          "native value setter for framework-controlled form controls",
+          "beforeinput/input/change event sequence",
+          "contenteditable insertion fallback"
+        ],
+        "cdp_strategy": "separate Advanced/Bridge distribution; not core optional permission"
+      }
     },
     {
       "id": "model-routing",
