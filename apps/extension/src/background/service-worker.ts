@@ -9,7 +9,10 @@ import {
   type BridgeCommand
 } from "./bridge-client";
 import { originPatternForUrl } from "../settings/browser-access";
-import { waitForTabUsable } from "./navigation";
+import {
+  waitForTabUsable,
+  type NavigationReadyResult
+} from "./navigation";
 import {
   borrowTab,
   closeTaskSession,
@@ -217,7 +220,7 @@ async function runTool(
       session = await groupOwnedTab(session, tab.id);
     }
 
-    let ready = {
+    let ready: NavigationReadyResult = {
       tab_id: tab.id,
       url: tab.url,
       title: tab.title,
