@@ -8,6 +8,7 @@ export type ToolName =
   | "trusted_type"
   | "trusted_key"
   | "dialog"
+  | "network"
   | "cdp"
   | "navigate"
   | "click"
