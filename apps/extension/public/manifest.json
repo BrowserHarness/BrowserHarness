@@ -5,21 +5,23 @@
   "description": "AI agents that can work in your browser.",
   "permissions": [
     "activeTab",
-    "tabs",
-    "storage",
+    "alarms",
+    "contextMenus",
+    "debugger",
+    "favicon",
+    "notifications",
     "sidePanel",
     "scripting",
-    "tabGroups"
+    "storage",
+    "tabGroups",
+    "tabs",
+    "unlimitedStorage",
+    "webNavigation",
+    "webRequest",
+    "windows"
   ],
   "host_permissions": [
-    "https://api.openai.com/*",
-    "https://api.anthropic.com/*",
-    "https://integrate.api.nvidia.com/*",
-    "https://api.groq.com/*"
-  ],
-  "optional_host_permissions": [
-    "http://*/*",
-    "https://*/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "assets/service-worker.js",
