@@ -23,7 +23,9 @@ type ContentRequest =
   | { type: "WATCH_REPLAY_STEP"; step: RecordedWorkflowStep };
 
 const ID_ATTR = "data-browsercrew-id";
+const REF_ATTR = "data-browsercrew-ref";
 let idCounter = 0;
+let refCounter = 0;
 let recording = false;
 let recordedSteps: RecordedWorkflowStep[] = [];
 
@@ -50,6 +52,49 @@ function ensureId(element: HTMLElement): string {
   const id = `bc-${++idCounter}`;
   element.setAttribute(ID_ATTR, id);
   return id;
+}
+
+function ensureSemanticRef(element: HTMLElement): string {
+  const existing = element.getAttribute(REF_ATTR);
+  if (existing) return `@${existing}`;
+
+  let candidate = "";
+  do {
+    candidate = `e${++refCounter}`;
+  } while (
+    document.querySelector(
+      `[${REF_ATTR}="${CSS.escape(candidate)}"]`
+    )
+  );
+
+  element.setAttribute(REF_ATTR, candidate);
+  return `@${candidate}`;
+}
+
+function semanticSnapshot(
+  elements: Array<{
+    element_id: string;
+    role: string;
+    accessible_name: string;
+    tag: string;
+    disabled: boolean;
+    requires_approval?: boolean;
+  }>
+): string {
+  return elements
+    .map((element) => {
+      const name = element.accessible_name
+        ? ` "${element.accessible_name.replace(/\s+/g, " ").trim()}"`
+        : "";
+      const flags = [
+        element.disabled ? "disabled" : "",
+        element.requires_approval ? "approval-required" : ""
+      ]
+        .filter(Boolean)
+        .join(",");
+      return `${element.element_id} ${element.role}${name} <${element.tag}>${flags ? ` [${flags}]` : ""}`;
+    })
+    .join("\n");
 }
 
 function roleFor(element: HTMLElement): string {
@@ -193,8 +238,12 @@ function observe(tabId: number) {
   const elements = Array.from(document.querySelectorAll<HTMLElement>(selector))
     .filter(isVisible)
     .slice(0, MAX_INTERACTIVE_ELEMENTS)
-    .map((element) => ({
-      element_id: ensureId(element),
+    .map((element) => {
+      const semanticRef = ensureSemanticRef(element);
+      ensureId(element);
+      return {
+      element_id: semanticRef,
+      semantic_ref: semanticRef,
       tag: element.tagName.toLowerCase(),
       role: roleFor(element),
       accessible_name: accessibleName(element),
@@ -207,7 +256,8 @@ function observe(tabId: number) {
         "disabled" in element &&
         Boolean((element as HTMLButtonElement | HTMLInputElement).disabled),
       ...riskForElement(element)
-    }));
+    };
+    });
 
   const googleDocsEditor = googleDocsEditorTarget();
   if (
@@ -216,6 +266,7 @@ function observe(tabId: number) {
   ) {
     elements.unshift({
       element_id: GOOGLE_DOCS_EDITOR_ID,
+      semantic_ref: GOOGLE_DOCS_EDITOR_ID,
       tag: "google-docs-editor",
       role: "textbox",
       accessible_name: "Document content",
@@ -233,6 +284,7 @@ function observe(tabId: number) {
     url: location.href,
     title: document.title,
     visible_text: compactVisibleText(document.body?.innerText || ""),
+    snapshot: semanticSnapshot(elements),
     elements,
     adapter: adapterForUrl(location.href)
   };
@@ -245,7 +297,15 @@ function getElement(id: unknown): HTMLElement {
     if (!editor) throw new Error("Google Docs editor target not found");
     return editor;
   }
-  const element = document.querySelector<HTMLElement>(`[${ID_ATTR}="${CSS.escape(id)}"]`);
+
+  const element = id.startsWith("@e")
+    ? document.querySelector<HTMLElement>(
+        `[${REF_ATTR}="${CSS.escape(id.slice(1))}"]`
+      )
+    : document.querySelector<HTMLElement>(
+        `[${ID_ATTR}="${CSS.escape(id)}"]`
+      );
+
   if (!element) throw new Error("Element not found");
   return element;
 }
