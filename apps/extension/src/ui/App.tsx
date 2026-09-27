@@ -35,6 +35,10 @@ import {
   agentDecisionWithFallback
 } from "../runtime/model-router";
 import { runBrowserTask } from "../runtime/browser-engine";
+import {
+  replaySavedWorkflowAdaptive,
+  type AdaptiveReplayDependencies
+} from "../runtime/workflow-adaptive-replay";
 import { classifyTaskIntent } from "../runtime/intent";
 import type { PageObservation, ToolResult } from "../runtime/protocol";
 import {
@@ -246,6 +250,75 @@ export function App() {
 
   const replayWorkflow = async (workflow: SavedWorkflow) => {
     if (!tab?.tab_id) return;
+
+    if (workflow.version === 3) {
+      setRunning(true);
+      cancelled.current = false;
+      setActivities([]);
+
+      const activity = addActivity(
+        `Adaptive replay: ${workflow.name}`
+      );
+      const taskSessionId = crypto.randomUUID();
+      const taskSessionTitle =
+        workflow.name.length > 48
+          ? `${workflow.name.slice(0, 45)}…`
+          : workflow.name;
+
+      try {
+        const dependencies: AdaptiveReplayDependencies = {
+          tool: <T = unknown>(
+            tool,
+            input: Record<string, unknown> = {}
+          ) =>
+            extensionMessage<T>({
+              type: "BROWSER_TOOL",
+              tool,
+              input,
+              session_id: taskSessionId,
+              session_title: taskSessionTitle
+            }),
+          requestApproval: async (description) => {
+            const approved = await requestApproval(description);
+            setApproval(null);
+            return approved;
+          },
+          isCancelled: () => cancelled.current
+        };
+
+        const result = await replaySavedWorkflowAdaptive(
+          workflow,
+          dependencies
+        );
+
+        if (result.status === "completed") {
+          finishActivity(activity, "done");
+          addAssistantMessage(
+            `Finished adaptive replaying “${workflow.name}” through the demonstrated boundary.`
+          );
+        } else if (result.status === "approval-cancelled") {
+          finishActivity(activity, "done");
+          addAssistantMessage(
+            "Workflow replay stopped before the unapproved action."
+          );
+        } else {
+          finishActivity(activity, "done");
+          addAssistantMessage("Workflow replay stopped.");
+        }
+      } catch (error) {
+        finishActivity(activity, "error");
+        addAssistantMessage(
+          error instanceof Error
+            ? error.message
+            : "Adaptive workflow replay failed."
+        );
+      } finally {
+        setApproval(null);
+        setRunning(false);
+        cancelled.current = false;
+      }
+      return;
+    }
 
     if ((workflow.recording?.tab_count || 1) > 1) {
       addAssistantMessage(
