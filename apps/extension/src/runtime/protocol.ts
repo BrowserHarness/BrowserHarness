@@ -39,6 +39,8 @@ export type BrowserToolRequest = {
   type: "BROWSER_TOOL";
   tool: ToolName;
   input?: Record<string, unknown>;
+  session_id?: string;
+  session_title?: string;
 };
 
 export type WatchRequest =
