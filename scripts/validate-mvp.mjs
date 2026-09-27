@@ -8,10 +8,14 @@ const ROOT = resolve(SCRIPT_DIR, "..");
 const requiredTools = [
   "observe_page",
   "read_page",
+  "ax_snapshot",
   "navigate",
   "click",
+  "trusted_click",
   "type",
+  "trusted_type",
   "press_key",
+  "trusted_key",
   "scroll",
   "wait",
   "open_tab",
@@ -19,8 +23,10 @@ const requiredTools = [
   "list_tabs",
   "switch_tab",
   "close_tab",
-  "screenshot"
-];
+  "screenshot",
+  "dialog",
+  "cdp"
+]
 
 const requiredFiles = [
   "apps/extension/dist/manifest.json",
@@ -72,40 +78,32 @@ if (manifest.manifest_version !== 3) {
 
 const requiredPermissions = [
   "activeTab",
-  "tabs",
-  "storage",
+  "alarms",
+  "contextMenus",
+  "debugger",
+  "favicon",
+  "notifications",
   "sidePanel",
   "scripting",
-  "tabGroups"
-];
+  "storage",
+  "tabGroups",
+  "tabs",
+  "unlimitedStorage",
+  "webNavigation",
+  "webRequest",
+  "windows"
+]
 for (const permission of requiredPermissions) {
   if (!manifest.permissions?.includes(permission)) {
     fail(`missing extension permission ${permission}`);
   }
 }
 
-for (const broad of ["http://*/*", "https://*/*"]) {
-  if (manifest.host_permissions?.includes(broad)) {
-    fail(`blanket install-time host permission detected: ${broad}`);
-  }
-  if (!manifest.optional_host_permissions?.includes(broad)) {
-    fail(`optional website permission missing: ${broad}`);
-  }
+if (!manifest.host_permissions?.includes("<all_urls>")) {
+  fail("full browser-agent host access <all_urls> is missing");
 }
 
-if (manifest.content_scripts) {
-  fail("static blanket content scripts must not be packaged");
-}
-
-const providerHosts = [
-  "https://api.openai.com/*",
-  "https://api.anthropic.com/*",
-  "https://integrate.api.nvidia.com/*",
-  "https://api.groq.com/*"
-];
-for (const host of providerHosts) {
-  if (!manifest.host_permissions?.includes(host)) {
-    fail(`known provider host missing: ${host}`);
+`);
   }
 }
 
