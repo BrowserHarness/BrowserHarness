@@ -35,6 +35,15 @@ export function normalizeBridgeAddress(value: string): string {
   return parsed.toString();
 }
 
+export function bridgePermissionUrl(address: string): string {
+  const parsed = new URL(normalizeBridgeAddress(address));
+  parsed.protocol = "http:";
+  parsed.pathname = "/";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+
 export async function loadBridgeSettings(): Promise<BridgeSettings> {
   const stored = await chrome.storage.local.get(SETTINGS_KEY);
   return {
