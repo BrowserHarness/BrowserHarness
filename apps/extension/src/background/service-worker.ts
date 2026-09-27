@@ -9,6 +9,7 @@ import {
   type BridgeCommand
 } from "./bridge-client";
 import { originPatternForUrl } from "../settings/browser-access";
+import { waitForTabUsable } from "./navigation";
 import {
   borrowTab,
   closeTaskSession,
@@ -216,11 +217,33 @@ async function runTool(
       session = await groupOwnedTab(session, tab.id);
     }
 
+    let ready = {
+      tab_id: tab.id,
+      url: tab.url,
+      title: tab.title,
+      status: tab.status
+    };
+    if (typeof input.url === "string") {
+      try {
+        ready = await waitForTabUsable(tab.id);
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "NAVIGATION_TIMEOUT",
+            message:
+              error instanceof Error
+                ? error.message
+                : "New tab did not become usable"
+          }
+        };
+      }
+    }
+
     return {
       ok: true,
       data: {
-        tab_id: tab.id,
-        url: tab.url,
+        ...ready,
         session_id: session?.id,
         owned: Boolean(session)
       }
@@ -450,14 +473,28 @@ async function runTool(
         }
       };
     }
-    return {
-      ok: true,
-      data: {
-        tab_id: updated.id,
-        url: input.url,
-        session_id: session?.id
-      }
-    };
+    try {
+      const ready = await waitForTabUsable(updated.id);
+      return {
+        ok: true,
+        data: {
+          ...ready,
+          requested_url: input.url,
+          session_id: session?.id
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "NAVIGATION_TIMEOUT",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Page did not become usable after navigation"
+        }
+      };
+    }
   }
 
   if (tool === "screenshot") {
