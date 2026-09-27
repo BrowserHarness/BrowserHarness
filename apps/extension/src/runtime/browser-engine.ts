@@ -9,6 +9,14 @@ import {
   TabEvidenceStore,
   type TabEvidence
 } from "./tab-evidence";
+import {
+  copySessionInput,
+  pageContext,
+  targetEvidence,
+  type BrowserSessionActionEvidence,
+  type BrowserTaskSessionEvidence,
+  type BrowserTaskSessionIdentity
+} from "./session-evidence";
 
 export interface BrowserDecisionContext {
   task: string;
@@ -25,6 +33,7 @@ export interface BrowserDecisionResult {
 }
 
 export interface BrowserEngineDependencies {
+  session?: BrowserTaskSessionIdentity;
   decide(
     context: BrowserDecisionContext
   ): Promise<BrowserDecisionResult>;
@@ -52,6 +61,7 @@ export interface BrowserEngineResult {
   message: string;
   steps: number;
   evidence: TabEvidence[];
+  session_evidence: BrowserTaskSessionEvidence;
 }
 
 const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
@@ -118,14 +128,51 @@ export async function runBrowserTask(
   let screenshotDataUrl: string | undefined;
   evidenceStore.record(observation);
 
+  const sessionIdentity = dependencies.session || {
+    id: "browser-task",
+    title: task.length > 48 ? `${task.slice(0, 45)}…` : task
+  };
+  const sessionStartedAt = new Date().toISOString();
+  const sessionStart = pageContext(observation);
+  const sessionActions: BrowserSessionActionEvidence[] = [];
+
+  const buildResult = (
+    status: BrowserEngineResult["status"],
+    message: string,
+    steps: number
+  ): BrowserEngineResult => {
+    const evidence = evidenceStore.list();
+    return {
+      status,
+      message,
+      steps,
+      evidence,
+      session_evidence: {
+        version: 1,
+        session_id: sessionIdentity.id,
+        title: sessionIdentity.title,
+        task,
+        started_at: sessionStartedAt,
+        status,
+        start: sessionStart,
+        actions: sessionActions.map((action) => ({
+          ...action,
+          input: copySessionInput(action.input)
+        })),
+        ...(sessionActions.length
+          ? {
+              boundary_action_id:
+                sessionActions[sessionActions.length - 1].id
+            }
+          : {}),
+        tab_evidence: evidence
+      }
+    };
+  };
+
   for (let step = 0; step < maxSteps; step += 1) {
     if (dependencies.isCancelled()) {
-      return {
-        status: "stopped",
-        message: "Stopped.",
-        steps: step,
-        evidence: evidenceStore.list()
-      };
+      return buildResult("stopped", "Stopped.", step);
     }
 
     await dependencies.waitWhilePaused();
@@ -151,12 +198,7 @@ export async function runBrowserTask(
 
     const decision = routed.decision;
     if (decision.kind === "final") {
-      return {
-        status: "completed",
-        message: decision.message,
-        steps: step,
-        evidence: evidenceStore.list()
-      };
+      return buildResult("completed", decision.message, step);
     }
 
     const loopCheck = registerDecision(loopGuard, decision);
@@ -164,8 +206,9 @@ export async function runBrowserTask(
       throw new Error(loopCheck.reason);
     }
 
+    const beforeObservation = observation;
     const approval = dependencies.approvalDescription(
-      observation,
+      beforeObservation,
       decision.tool,
       decision.input
     );
@@ -173,12 +216,11 @@ export async function runBrowserTask(
     if (approval) {
       const approved = await dependencies.requestApproval(approval);
       if (!approved) {
-        return {
-          status: "approval-cancelled",
-          message: "I stopped before that action.",
-          steps: step,
-          evidence: evidenceStore.list()
-        };
+        return buildResult(
+          "approval-cancelled",
+          "I stopped before that action.",
+          step
+        );
       }
     }
 
@@ -188,6 +230,35 @@ export async function runBrowserTask(
     );
 
     if (decision.tool === "screenshot" && result.ok) {
+      sessionActions.push({
+        id: `action-${sessionActions.length + 1}`,
+        ordinal: sessionActions.length + 1,
+        recorded_at: new Date().toISOString(),
+        tool: decision.tool,
+        input: copySessionInput(decision.input),
+        note: decision.note,
+        before: pageContext(beforeObservation),
+        ...(targetEvidence(
+          beforeObservation,
+          decision.input.element_id
+        )
+          ? {
+              target: targetEvidence(
+                beforeObservation,
+                decision.input.element_id
+              )
+            }
+          : {}),
+        approval: {
+          required: Boolean(approval),
+          approved: true,
+          ...(approval ? { description: approval } : {})
+        },
+        ...(tabIdFromResult(result)
+          ? { result_tab_id: tabIdFromResult(result) }
+          : {})
+      });
+
       const data =
         result.data && typeof result.data === "object"
           ? (result.data as { data_url?: unknown })
@@ -214,6 +285,10 @@ export async function runBrowserTask(
       );
     }
 
+    let verifiedContext:
+      | ReturnType<typeof pageContext>
+      | undefined;
+
     if (
       stale ||
       MUTATING_OR_CONTEXT_CHANGING_TOOLS.includes(decision.tool)
@@ -235,6 +310,7 @@ export async function runBrowserTask(
       }
 
       observation = verified.data;
+      verifiedContext = pageContext(observation);
       evidenceStore.record(observation);
       trail.push(
         `verification: adapter=${observation.adapter || "generic-web"} tab=${observation.tab_id} page=${observation.title} url=${observation.url}`
@@ -246,15 +322,35 @@ export async function runBrowserTask(
         );
       }
     }
+
+    if (result.ok) {
+      const target = targetEvidence(
+        beforeObservation,
+        decision.input.element_id
+      );
+      const resultTabId = tabIdFromResult(result);
+      sessionActions.push({
+        id: `action-${sessionActions.length + 1}`,
+        ordinal: sessionActions.length + 1,
+        recorded_at: new Date().toISOString(),
+        tool: decision.tool,
+        input: copySessionInput(decision.input),
+        note: decision.note,
+        before: pageContext(beforeObservation),
+        ...(target ? { target } : {}),
+        approval: {
+          required: Boolean(approval),
+          approved: true,
+          ...(approval ? { description: approval } : {})
+        },
+        ...(resultTabId ? { result_tab_id: resultTabId } : {}),
+        ...(verifiedContext ? { after: verifiedContext } : {})
+      });
+    }
   }
 
   if (dependencies.isCancelled()) {
-    return {
-      status: "stopped",
-      message: "Stopped.",
-      steps: maxSteps,
-      evidence: evidenceStore.list()
-    };
+    return buildResult("stopped", "Stopped.", maxSteps);
   }
 
   throw new Error(
