@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "owner": "BrowserCrew/browsercrew",
-  "version": "0.4",
+  "version": "0.5",
   "tools": [
     {
       "id": "observe_page",
@@ -97,6 +97,21 @@
       "id": "dialog",
       "mutation": true,
       "approval": "conditional"
+    },
+    {
+      "id": "network",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "upload",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
+      "id": "save_pdf",
+      "mutation": false,
+      "approval": "never"
     },
     {
       "id": "cdp",
