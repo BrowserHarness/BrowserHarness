@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-local-bridge-foundation",
+  "status": "v0.2-source-audited-browser-reliability",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -20,7 +20,46 @@
           "beforeinput/input/change event sequence",
           "contenteditable insertion fallback"
         ],
-        "cdp_strategy": "separate Advanced/Bridge distribution; not core optional permission"
+        "cdp_strategy": "separate Advanced/Bridge distribution; not core optional permission",
+        "session_storage": "serialized read-modify-write mutations",
+        "navigation": "bounded usable-document wait with final redirected URL",
+        "page_reading": {
+          "tool": "read_page",
+          "default_max_chars": 12000,
+          "bounded_by": [
+            "chars",
+            "screens",
+            "time"
+          ],
+          "continuation": "next_start",
+          "signals": [
+            "stalled",
+            "endless_feed",
+            "budget_exhausted",
+            "shadow_hosts"
+          ],
+          "frames": "separate #fN frame reads",
+          "scroll_restoration": true
+        },
+        "foreground_policy": {
+          "new_task_tabs": "background by default",
+          "find_tab": "changes BrowserCrew task target without Chrome foreground activation",
+          "switch_tab": "explicit foreground activation",
+          "screenshot": "fails with SCREENSHOT_REQUIRES_VISIBLE_TAB rather than capture a different foreground tab"
+        },
+        "recorder_v2": {
+          "enriched_locators": true,
+          "text_input_debouncing": true,
+          "key_steps": [
+            "Enter",
+            "Tab"
+          ],
+          "inferred_inputs": true,
+          "reinjection_safe": true,
+          "resilient_locator_matching": true,
+          "cross_page_recording": "next milestone"
+        },
+        "reference_audit": "docs/research/KIMI-EXTENSION-REFERENCE-AUDIT.md"
       }
     },
     {
