@@ -55,6 +55,7 @@ export type BrowserToolRequest = {
   input?: Record<string, unknown>;
   session_id?: string;
   session_title?: string;
+  approval_granted?: boolean;
 };
 
 export type WatchRequest =
