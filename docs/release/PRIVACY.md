@@ -23,9 +23,9 @@ When the user submits a request, BrowserCrew sends only the information needed t
 Provider requests go directly from the extension to the provider endpoint configured by the user.
 
 ## Browser access
-BrowserCrew uses Chrome's active-tab permission for the tab on which the user invokes the extension. Cross-site and multi-tab automation requires optional website access granted by the user.
+BrowserCrew is a full autonomous browser agent and declares broad browser access in its primary build. It can operate across normal websites, tabs and windows; use Chrome DevTools Protocol for accessibility-tree targeting and trusted input; inspect browser/network activity; and execute user-requested cross-site workflows.
 
-Known AI provider API domains are declared as extension host permissions so direct provider requests can function. Custom OpenAI-compatible endpoints require an explicit origin grant.
+The same access also allows direct requests to supported AI providers and user-configured compatible endpoints.
 
 ## Analytics
 The v0.1 MVP does not send BrowserCrew product analytics to a BrowserCrew cloud service.
