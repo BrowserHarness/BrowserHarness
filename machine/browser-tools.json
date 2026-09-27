@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "owner": "BrowserCrew/browsercrew",
-  "version": "0.3",
+  "version": "0.4",
   "tools": [
     {
       "id": "observe_page",
@@ -10,6 +10,11 @@
     },
     {
       "id": "read_page",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "ax_snapshot",
       "mutation": false,
       "approval": "never"
     },
@@ -24,14 +29,29 @@
       "approval": "policy"
     },
     {
+      "id": "trusted_click",
+      "mutation": true,
+      "approval": "conditional"
+    },
+    {
       "id": "type",
       "mutation": true,
       "approval": "policy"
     },
     {
+      "id": "trusted_type",
+      "mutation": true,
+      "approval": "never"
+    },
+    {
       "id": "press_key",
       "mutation": true,
       "approval": "policy"
+    },
+    {
+      "id": "trusted_key",
+      "mutation": true,
+      "approval": "conditional"
     },
     {
       "id": "scroll",
@@ -72,6 +92,16 @@
       "id": "screenshot",
       "mutation": false,
       "approval": "never"
+    },
+    {
+      "id": "dialog",
+      "mutation": true,
+      "approval": "conditional"
+    },
+    {
+      "id": "cdp",
+      "mutation": true,
+      "approval": "conditional"
     }
   ]
 }
