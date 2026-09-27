@@ -461,15 +461,17 @@ describe("adaptive candidate Skill replay", () => {
 
   it("re-establishes the recorded start page from explicit plan context", async () => {
     const candidate = skill();
-    candidate.plan.steps = [
-      candidate.plan.steps[3]
-    ];
-    candidate.plan.steps[0] = {
-      ...candidate.plan.steps[0],
-      tab_ref: "tab_1"
-    } as typeof candidate.plan.steps[0];
+    const recordedType = candidate.plan.steps[1];
+    if (
+      recordedType.kind !== "action" ||
+      recordedType.action !== "type"
+    ) {
+      throw new Error("fixture type action missing");
+    }
+    candidate.plan.steps = [recordedType];
     candidate.safety = {
       ...candidate.safety,
+      boundary_step_id: recordedType.source_step_id,
       maximum_demonstrated_action_ordinal: 1,
       maximum_demonstrated_plan_index: 0
     };
@@ -490,6 +492,12 @@ describe("adaptive candidate Skill replay", () => {
       )?.input
     ).toMatchObject({
       tab_id: 101
+    });
+    expect(
+      h.calls.find((call) => call.tool === "type")?.input
+    ).toMatchObject({
+      tab_id: 101,
+      element_id: "@fresh-search"
     });
   });
 
