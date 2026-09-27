@@ -126,13 +126,23 @@ export function App() {
   const requestAbort = useRef<AbortController | null>(null);
 
   const refreshContext = async () => {
-    const [currentTab, primaryConnection, fallbackConnection] =
-      await Promise.all([
-        extensionMessage<CurrentTab>({ type: "GET_CURRENT_TAB" }),
-        loadActiveConnection(),
-        loadFallbackConnection()
-      ]);
+    const [
+      currentTab,
+      primaryConnection,
+      fallbackConnection,
+      watchStatus
+    ] = await Promise.all([
+      extensionMessage<CurrentTab>({ type: "GET_CURRENT_TAB" }),
+      loadActiveConnection(),
+      loadFallbackConnection(),
+      extensionMessage<{ recording: boolean }>({
+        type: "WATCH_STATUS"
+      })
+    ]);
     if (currentTab.ok && currentTab.data) setTab(currentTab.data);
+    if (watchStatus.ok && watchStatus.data) {
+      setRecording(Boolean(watchStatus.data.recording));
+    }
     setPrimary(primaryConnection);
     setFallback(fallbackConnection);
   };
