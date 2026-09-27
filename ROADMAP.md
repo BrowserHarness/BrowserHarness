@@ -80,6 +80,18 @@ Goal: make provider/model behavior predictable before expanding product scope.
 - Stronger framework-controlled input fills using native value setters
 - Stronger contenteditable/rich-editor insertion path
 - Watch Me v2: richer target metadata, input debouncing, key steps, inferred workflow inputs, resilient locator matching, reinjection-safe content runtime
+- Watch Me v2 cross-page/multi-tab recording:
+  - background-owned recording session survives document/side-panel lifecycles
+  - content scripts stream steps instead of owning recorder state
+  - top-frame navigation evidence via webNavigation
+  - automatic recorder re-arm after navigation/reload
+  - opener-tab adoption plus user-selected tab adoption across windows
+  - tab-open/tab-activate/tab-close context evidence
+  - serialized recording writes
+  - hard budgets: 1,000 steps, 2,000 context events, 50 tabs, ~2 MB evidence
+  - dropped excess evidence never moves the final actionable workflow boundary
+  - v3 workflows store events, recording summary and boundary_step_id
+  - WATCH_STATUS restores active recording UI after side-panel reload
 - Task tabs stay backgrounded by default; `find_tab` does not steal foreground focus
 - Screenshot refuses to capture a different foreground tab when the task target is backgrounded
 
@@ -100,34 +112,36 @@ Goal: make provider/model behavior predictable before expanding product scope.
 A behavioral clean-room audit of the shipped Kimi Browser Extension 2.0.22 is recorded at:
 `docs/research/KIMI-EXTENSION-REFERENCE-AUDIT.md`
 
-It is a reference architecture audit, not copied implementation. BrowserCrew keeps its own provider-neutral model layer, safety approvals, least-privilege Core package, deterministic tests, and Skill evaluation policy.
+It is a reference architecture audit, not copied implementation. BrowserCrew keeps its own provider-neutral model layer, safety approvals, full browser-control runtime, deterministic tests, Local Bridge, and Skill evaluation policy.
 
 ### Next
-1. **Watch Me v2 cross-page / multi-tab recording**
-   - background-owned recording session
-   - incremental step collection across navigations
-   - tab creation/navigation/activation evidence
-   - re-arm recording after page navigation
-   - bounded evidence/storage budget
-   - preserve the last recorded step as the workflow boundary
-2. **Skill compiler**
-   - Record → Skill
-   - Session → Skill
-   - reusable input/variable inference
-   - candidate evaluation before promotion
-3. Cross-runtime evaluation of `SK-BROWSER-001`
-4. **CDP parity layer in the primary BrowserCrew build**
-   - attach/detach manager
-   - Accessibility.getFullAXTree + backend-node semantic refs
-   - trusted mouse/key/text input
-   - focus emulation
-   - native dialog state/accept/dismiss
-   - raw CDP escape hatch
-5. **Advanced browser tools**
-   - network capture/details
-   - file upload
-   - print/save PDF
-6. Site → Skill after observation/recording/evaluation contracts stabilize
+1. **Skill compiler**
+   - Record → Skill from verified Watch Me v3 evidence
+   - Session → Skill from BrowserCrew task-session evidence
+   - reusable variable/input inference
+   - browser-context plan extraction from navigation/tab events
+   - preserve boundary_step_id as the maximum demonstrated workflow boundary
+   - emit candidate Skill + evaluation matrix, never auto-promote without evidence
+2. **Adaptive workflow replay**
+   - replay recorded intent/context rather than brittle exact-tab IDs
+   - remap recorded tabs to current task-session tabs
+   - recover stale refs through observe/AX escalation
+3. Cross-runtime evaluation of `SK-BROWSER-001` v0.3.0
+4. Trusted-click hardening
+   - occlusion/hit-test verification
+   - explicit CDP input-delivery verification
+5. Site → Skill after Record/Session → Skill contracts stabilize
+
+### Verified full browser-control parity
+- debugger/CDP attach manager
+- Accessibility.getFullAXTree + backend-node semantic refs
+- trusted mouse/key/text input
+- focus emulation
+- native dialog state/accept/dismiss
+- raw CDP escape hatch
+- network start/list/detail/stop + response-body retrieval
+- file upload through DOM.setFileInputFiles
+- Page.printToPDF + Chrome downloads
 
 ### Browser capability rule
 BrowserCrew is an autonomous browser agent. Functionality and reliability take priority over minimizing the permission envelope.
