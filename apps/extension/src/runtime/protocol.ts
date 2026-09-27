@@ -9,6 +9,8 @@ export type ToolName =
   | "trusted_key"
   | "dialog"
   | "network"
+  | "upload"
+  | "save_pdf"
   | "cdp"
   | "navigate"
   | "click"
