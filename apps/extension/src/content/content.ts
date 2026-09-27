@@ -243,7 +243,8 @@ function locatorFor(element: HTMLElement): WorkflowLocator {
     input_type:
       element instanceof HTMLInputElement ? element.type : undefined,
     requires_approval: risk.requires_approval,
-    approval_reason: risk.approval_reason
+    approval_reason: risk.approval_reason,
+    enter_requires_approval: risk.enter_requires_approval
   };
 }
 
