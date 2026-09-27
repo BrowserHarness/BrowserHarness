@@ -58,6 +58,7 @@ export type BrowserToolRequest = {
 };
 
 export type WatchRequest =
+  | { type: "WATCH_STATUS" }
   | { type: "WATCH_START"; tab_id?: number }
   | { type: "WATCH_STOP" }
   | {
