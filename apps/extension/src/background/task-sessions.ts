@@ -11,15 +11,32 @@ export interface TaskSession {
 const STORAGE_KEY = "browsercrew.taskSessions";
 const MAX_SESSIONS = 20;
 
-async function loadAll(): Promise<Record<string, TaskSession>> {
-  const stored = await chrome.storage.session.get(STORAGE_KEY);
-  return (stored[STORAGE_KEY] as Record<string, TaskSession> | undefined) || {};
+let writeQueue: Promise<void> = Promise.resolve();
+
+function serialize<T>(operation: () => Promise<T>): Promise<T> {
+  const run = writeQueue.then(operation, operation);
+  writeQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
 }
 
-async function saveAll(sessions: Record<string, TaskSession>): Promise<void> {
+async function loadAll(): Promise<Record<string, TaskSession>> {
+  const stored = await chrome.storage.session.get(STORAGE_KEY);
+  return (
+    (stored[STORAGE_KEY] as Record<string, TaskSession> | undefined) ||
+    {}
+  );
+}
+
+async function saveAll(
+  sessions: Record<string, TaskSession>
+): Promise<void> {
   const ordered = Object.values(sessions)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .slice(0, MAX_SESSIONS);
+
   await chrome.storage.session.set({
     [STORAGE_KEY]: Object.fromEntries(
       ordered.map((session) => [session.id, session])
@@ -27,32 +44,50 @@ async function saveAll(sessions: Record<string, TaskSession>): Promise<void> {
   });
 }
 
+async function mutateSession(
+  fallback: TaskSession,
+  mutate: (current: TaskSession) => TaskSession
+): Promise<TaskSession> {
+  return serialize(async () => {
+    const sessions = await loadAll();
+    const current = sessions[fallback.id] || fallback;
+    const next = mutate(current);
+    sessions[next.id] = next;
+    await saveAll(sessions);
+    return next;
+  });
+}
+
 export async function ensureTaskSession(
   id: string,
   title: string
 ): Promise<TaskSession> {
-  const sessions = await loadAll();
-  const existing = sessions[id];
-  if (existing) return existing;
+  return serialize(async () => {
+    const sessions = await loadAll();
+    const existing = sessions[id];
+    if (existing) return existing;
 
-  const created: TaskSession = {
-    id,
-    title,
-    created_at: new Date().toISOString(),
-    owned_tab_ids: [],
-    borrowed_tab_ids: []
-  };
-  sessions[id] = created;
-  await saveAll(sessions);
-  return created;
+    const created: TaskSession = {
+      id,
+      title,
+      created_at: new Date().toISOString(),
+      owned_tab_ids: [],
+      borrowed_tab_ids: []
+    };
+    sessions[id] = created;
+    await saveAll(sessions);
+    return created;
+  });
 }
 
 export async function updateTaskSession(
   session: TaskSession
 ): Promise<void> {
-  const sessions = await loadAll();
-  sessions[session.id] = session;
-  await saveAll(sessions);
+  await serialize(async () => {
+    const sessions = await loadAll();
+    sessions[session.id] = session;
+    await saveAll(sessions);
+  });
 }
 
 export async function getTaskSession(
@@ -66,86 +101,93 @@ export async function borrowTab(
   session: TaskSession,
   tabId: number
 ): Promise<TaskSession> {
-  const next: TaskSession = {
-    ...session,
+  return mutateSession(session, (current) => ({
+    ...current,
     current_tab_id: tabId,
-    borrowed_tab_ids: session.borrowed_tab_ids.includes(tabId)
-      ? session.borrowed_tab_ids
-      : [...session.borrowed_tab_ids, tabId]
-  };
-  await updateTaskSession(next);
-  return next;
+    borrowed_tab_ids: current.borrowed_tab_ids.includes(tabId)
+      ? current.borrowed_tab_ids
+      : [...current.borrowed_tab_ids, tabId]
+  }));
 }
 
 export async function ownTab(
   session: TaskSession,
   tabId: number
 ): Promise<TaskSession> {
-  const next: TaskSession = {
-    ...session,
+  return mutateSession(session, (current) => ({
+    ...current,
     current_tab_id: tabId,
-    owned_tab_ids: session.owned_tab_ids.includes(tabId)
-      ? session.owned_tab_ids
-      : [...session.owned_tab_ids, tabId]
-  };
-  await updateTaskSession(next);
-  return next;
+    owned_tab_ids: current.owned_tab_ids.includes(tabId)
+      ? current.owned_tab_ids
+      : [...current.owned_tab_ids, tabId]
+  }));
 }
 
 export async function selectSessionTab(
   session: TaskSession,
   tabId: number
 ): Promise<TaskSession> {
-  const belongs =
-    session.owned_tab_ids.includes(tabId) ||
-    session.borrowed_tab_ids.includes(tabId);
-  if (!belongs) {
-    throw new Error("Tab is not part of this BrowserCrew task session");
-  }
+  return mutateSession(session, (current) => {
+    const belongs =
+      current.owned_tab_ids.includes(tabId) ||
+      current.borrowed_tab_ids.includes(tabId);
 
-  const next = { ...session, current_tab_id: tabId };
-  await updateTaskSession(next);
-  return next;
+    if (!belongs) {
+      throw new Error(
+        "Tab is not part of this BrowserCrew task session"
+      );
+    }
+
+    return { ...current, current_tab_id: tabId };
+  });
 }
 
 export async function setSessionGroup(
   session: TaskSession,
   groupId: number
 ): Promise<TaskSession> {
-  const next = { ...session, group_id: groupId };
-  await updateTaskSession(next);
-  return next;
+  return mutateSession(session, (current) => ({
+    ...current,
+    group_id: groupId
+  }));
 }
 
 export async function removeSessionTab(
   session: TaskSession,
   tabId: number
 ): Promise<TaskSession> {
-  const owned = session.owned_tab_ids.filter((id) => id !== tabId);
-  const borrowed = session.borrowed_tab_ids.filter((id) => id !== tabId);
-  const next: TaskSession = {
-    ...session,
-    owned_tab_ids: owned,
-    borrowed_tab_ids: borrowed,
-    current_tab_id:
-      session.current_tab_id === tabId
-        ? owned.at(-1) ?? borrowed.at(-1)
-        : session.current_tab_id
-  };
-  await updateTaskSession(next);
-  return next;
+  return mutateSession(session, (current) => {
+    const owned = current.owned_tab_ids.filter((id) => id !== tabId);
+    const borrowed = current.borrowed_tab_ids.filter(
+      (id) => id !== tabId
+    );
+
+    return {
+      ...current,
+      owned_tab_ids: owned,
+      borrowed_tab_ids: borrowed,
+      current_tab_id:
+        current.current_tab_id === tabId
+          ? owned.at(-1) ?? borrowed.at(-1)
+          : current.current_tab_id
+    };
+  });
 }
 
 export async function closeTaskSession(
   session: TaskSession
 ): Promise<number> {
-  const tabs = [...session.owned_tab_ids];
-  if (tabs.length) {
-    await chrome.tabs.remove(tabs).catch(() => undefined);
-  }
+  return serialize(async () => {
+    const sessions = await loadAll();
+    const current = sessions[session.id] || session;
+    const tabs = [...current.owned_tab_ids];
 
-  const sessions = await loadAll();
-  delete sessions[session.id];
-  await saveAll(sessions);
-  return tabs.length;
+    if (tabs.length) {
+      await chrome.tabs.remove(tabs).catch(() => undefined);
+    }
+
+    delete sessions[current.id];
+    await saveAll(sessions);
+    return tabs.length;
+  });
 }
