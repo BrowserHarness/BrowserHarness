@@ -70,7 +70,7 @@ describe("Watch Me browser event handlers", () => {
       url: "https://example.com/next",
       transitionType: "link",
       transitionQualifiers: []
-    });
+    } as unknown as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
     await tick();
 
     expect(mocks.appendWatchEvent).toHaveBeenCalledWith({
@@ -90,7 +90,7 @@ describe("Watch Me browser event handlers", () => {
       url: "https://frame.example.com",
       transitionType: "auto_subframe",
       transitionQualifiers: []
-    });
+    } as unknown as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
     await tick();
 
     expect(mocks.appendWatchEvent).not.toHaveBeenCalled();
@@ -108,7 +108,7 @@ describe("Watch Me browser event handlers", () => {
       timeStamp: 3,
       url: "https://example.com/loaded",
       processId: 1
-    });
+    } as unknown as chrome.webNavigation.WebNavigationFramedCallbackDetails);
     await tick();
 
     expect(armWatchTab).toHaveBeenCalledWith(8);
