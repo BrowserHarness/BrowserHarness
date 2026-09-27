@@ -144,11 +144,17 @@ describe("CDP semantic and trusted-input runtime", () => {
     expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
       1,
       10,
+      "Emulation.setFocusEmulationEnabled",
+      { enabled: true }
+    );
+    expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
+      2,
+      10,
       "DOM.focus",
       { backendNodeId: 301 }
     );
     expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
-      2,
+      3,
       10,
       "Input.insertText",
       { text: "BrowserCrew" }
@@ -163,6 +169,12 @@ describe("CDP semantic and trusted-input runtime", () => {
     expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
       1,
       11,
+      "Emulation.setFocusEmulationEnabled",
+      { enabled: true }
+    );
+    expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
+      2,
+      11,
       "Input.dispatchKeyEvent",
       {
         type: "keyDown",
@@ -171,7 +183,7 @@ describe("CDP semantic and trusted-input runtime", () => {
       }
     );
     expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
-      2,
+      3,
       11,
       "Input.dispatchKeyEvent",
       {
