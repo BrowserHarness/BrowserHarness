@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "protocol_version": "0.1",
+  "transport": {
+    "daemon_http": "http://127.0.0.1:10087",
+    "extension_websocket": "ws://127.0.0.1:10087/ws",
+    "scope": "loopback-only",
+    "authentication": "pairing token"
+  },
+  "endpoints": {
+    "status": {
+      "method": "GET",
+      "path": "/status",
+      "auth": "none"
+    },
+    "command": {
+      "method": "POST",
+      "path": "/command",
+      "auth": "Bearer pairing-token",
+      "request": {
+        "session": "stable task/session id",
+        "title": "optional human-readable task label",
+        "action": "BrowserCrew tool id",
+        "args": "tool arguments object"
+      },
+      "response": {
+        "success": {
+          "ok": true,
+          "data": "tool result"
+        },
+        "failure": {
+          "ok": false,
+          "error": {
+            "code": "string",
+            "message": "string",
+            "details": "optional"
+          }
+        }
+      }
+    }
+  },
+  "websocket": {
+    "extension_hello": {
+      "type": "hello",
+      "protocol_version": "0.1",
+      "extension_id": "Chrome extension id",
+      "extension_version": "manifest version"
+    },
+    "daemon_ack": {
+      "type": "hello_ack",
+      "protocol_version": "0.1"
+    },
+    "command": {
+      "type": "command",
+      "id": "UUID",
+      "protocol_version": "0.1",
+      "session": "task id",
+      "title": "task label",
+      "action": "tool id",
+      "args": "object"
+    },
+    "result": {
+      "type": "result",
+      "id": "same command UUID",
+      "ok": "boolean",
+      "data": "success payload",
+      "error": "failure payload"
+    },
+    "keepalive": [
+      "heartbeat",
+      "heartbeat_ack"
+    ]
+  },
+  "safety": {
+    "task_sessions": "bridge session maps directly to BrowserCrew task session",
+    "borrowed_tabs": "not owned and cannot be closed by session cleanup",
+    "approval": "risky click or Enter returns APPROVAL_REQUIRED",
+    "unknown_actions": "rejected by extension allowlist",
+    "raw_cdp": "not part of core protocol v0.1"
+  },
+  "tools": [
+    "observe_page",
+    "navigate",
+    "click",
+    "type",
+    "press_key",
+    "scroll",
+    "wait",
+    "open_tab",
+    "find_tab",
+    "list_tabs",
+    "switch_tab",
+    "close_tab",
+    "screenshot"
+  ]
+}
