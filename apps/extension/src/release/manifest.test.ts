@@ -24,6 +24,7 @@ describe("MV3 release manifest", () => {
         "alarms",
         "contextMenus",
         "debugger",
+        "downloads",
         "favicon",
         "notifications",
         "sidePanel",
