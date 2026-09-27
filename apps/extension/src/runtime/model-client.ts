@@ -24,6 +24,12 @@ export interface ModelHealthResult {
 const TOOL_NAMES = new Set<ToolName>([
   "observe_page",
   "read_page",
+  "ax_snapshot",
+  "trusted_click",
+  "trusted_type",
+  "trusted_key",
+  "dialog",
+  "cdp",
   "navigate",
   "click",
   "type",
@@ -45,7 +51,7 @@ Do not claim an action succeeded unless tool evidence shows it.
 Return exactly one JSON object and no markdown.
 
 To use a tool:
-{"kind":"tool","tool":"observe_page|read_page|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
+{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|trusted_click|trusted_type|trusted_key|dialog|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
 
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
@@ -53,6 +59,13 @@ When the browser task is complete:
 Prefer semantic @e element_id values from the current observation. Never invent an element_id.
 Use list_tabs to inspect tabs belonging to this task session. New task tabs open in the background by default. Use find_tab with the exact observed URL to select a session tab without changing the user's foreground tab; use active:true only when the user's goal explicitly refers to the tab they are currently viewing. Use switch_tab only when foreground activation is genuinely necessary.
 Use read_page when a research/extraction task needs content beyond the compact visible observation. Honor next_start for bounded continuation and do not repeatedly scan an endless_feed/stalled page.
+Escalate browser control in layers:
+1. ordinary semantic observe/click/type/press_key first;
+2. ax_snapshot when DOM refs are insufficient or the site is highly dynamic;
+3. trusted_click / trusted_type / trusted_key for sites that reject synthetic DOM input;
+4. dialog for native alert/confirm/prompt state;
+5. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
+After ax_snapshot, use only the returned @e refs for trusted_* actions. Never invent a CDP ref.
 Use screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. Core BrowserCrew can capture only the tab currently visible in its window; if a task tab is backgrounded, screenshot returns SCREENSHOT_REQUIRES_VISIBLE_TAB rather than capturing the wrong tab. Do not switch tabs merely for decoration. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
 Do not request send, submit, publish, purchase, delete, payment, or account/security-changing actions unless necessary for the user's explicit goal; BrowserCrew applies approval policy separately.`;
 
