@@ -76,15 +76,19 @@
     "borrowed_tabs": "not owned and cannot be closed by session cleanup",
     "approval": "risky click or Enter returns APPROVAL_REQUIRED",
     "unknown_actions": "rejected by extension allowlist",
-    "raw_cdp": "not part of core protocol v0.1"
+    "raw_cdp": "available through authenticated local Bridge"
   },
   "tools": [
     "observe_page",
     "read_page",
+    "ax_snapshot",
     "navigate",
     "click",
+    "trusted_click",
     "type",
+    "trusted_type",
     "press_key",
+    "trusted_key",
     "scroll",
     "wait",
     "open_tab",
@@ -92,7 +96,12 @@
     "list_tabs",
     "switch_tab",
     "close_tab",
-    "screenshot"
+    "screenshot",
+    "dialog",
+    "network",
+    "upload",
+    "save_pdf",
+    "cdp"
   ],
   "read_page": {
     "purpose": "bounded full-page/document extraction without expanding observe_page",
@@ -103,5 +112,28 @@
     },
     "continuation": "use next_start when present",
     "frames": "top-frame result may include readable frame_id/#f handles"
+  },
+  "cdp": {
+    "accessibility": "ax_snapshot",
+    "trusted_input": [
+      "trusted_click",
+      "trusted_type",
+      "trusted_key"
+    ],
+    "dialogs": "dialog",
+    "raw": "cdp"
+  },
+  "network": {
+    "tool": "network",
+    "actions": [
+      "start",
+      "list",
+      "detail",
+      "stop"
+    ]
+  },
+  "files": {
+    "upload": "upload",
+    "pdf": "save_pdf"
   }
 }
