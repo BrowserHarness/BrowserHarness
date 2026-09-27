@@ -40,7 +40,7 @@ export interface ReadPageResult {
   frames_omitted?: number;
 }
 
-const DEFAULT_MAX_CHARS = 30_000;
+const DEFAULT_MAX_CHARS = 12_000;
 const DEFAULT_MAX_SCREENS = 40;
 const DEFAULT_BUDGET_MS = 15_000;
 const DEFAULT_STEP_TIMEOUT_MS = 250;
@@ -303,7 +303,7 @@ export async function readPage(
       input.max_chars,
       DEFAULT_MAX_CHARS,
       1_000,
-      60_000
+      40_000
     ),
     maxScreens: clampInteger(
       input.max_screens,
