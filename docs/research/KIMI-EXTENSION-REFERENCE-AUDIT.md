@@ -27,7 +27,7 @@ The shipped reference package uses a much broader permission envelope than Brows
 - unlimitedStorage
 - <all_urls>
 
-BrowserCrew should **not** mirror that permission envelope in the core package merely for implementation parity.
+BrowserCrew now intentionally uses a comparable high-capability permission envelope in its primary build because browser-control functionality is a first-class product requirement, not an optional add-on.
 
 ## 1. Layered browser-control runtime
 
@@ -40,11 +40,15 @@ Observed layers:
 4. explicit low-level CDP escape hatch.
 
 ### BrowserCrew decision
-Preserve the same layered *concept*, but split it by trust surface:
-- BrowserCrew Core: least-privilege DOM/scripting + semantic refs + approvals.
-- BrowserCrew Advanced/Bridge: separately disclosed debugger/CDP capability.
+Adopt the same layered control concept directly in the primary product:
+1. ordinary semantic DOM tools;
+2. real Accessibility.getFullAXTree/backend-node refs;
+3. trusted CDP mouse/text/key input;
+4. focus emulation and native dialog state;
+5. structured network/upload/PDF tools;
+6. raw CDP escape hatch.
 
-Chrome does not allow debugger to be an optional permission, so it should not be silently added to Core.
+BrowserCrew keeps its provider-neutral model layer, task sessions, Bridge, approvals, tests and Skills on top of that full browser-control substrate.
 
 ## 2. Semantic references
 
@@ -147,17 +151,16 @@ Observed trusted mouse path:
 - verify pointer events reached the page;
 - account for background-tab rendering/focus limitations.
 
-### BrowserCrew decision
-Core:
-- keep DOM click with semantic refs and mutation verification.
+### BrowserCrew state
+Implemented in the primary build:
+- DOM click with semantic refs and verification;
+- Accessibility-tree/backend-node refs;
+- trusted CDP mouse input;
+- focus emulation.
 
-Advanced/Bridge:
-- add trusted mouse input;
-- copy the **verification model**, not the implementation:
-  - layout-box check;
-  - occlusion/hit-test check;
-  - input-delivery verification;
-  - clear fallback/errors.
+Next reliability improvement:
+- stronger occlusion/hit-test verification before trusted click;
+- explicit input-delivery verification after CDP dispatch.
 
 ## 7. Text input hierarchy
 
@@ -173,8 +176,8 @@ Implemented in Core:
 - beforeinput/input/change event sequencing;
 - contenteditable range/insert fallback.
 
-Advanced/Bridge:
-- trusted insertText/send-keys path should become the final fallback for editors/sites that reject synthetic events.
+Primary build:
+- trusted Input.insertText and Input.dispatchKeyEvent are implemented as the next escalation layer for editors/sites that reject synthetic DOM events.
 
 ## 8. Focus without stealing the user's foreground
 
@@ -186,13 +189,12 @@ Observed strategy:
 - only bring a tab/window to front as a last resort;
 - surface whether the browser actually stole foreground focus.
 
-### BrowserCrew improvement opportunity
-Advanced/Bridge should implement a user-respecting focus policy:
-1. already focused → act;
-2. focus emulation → act without foreground takeover;
-3. foreground activation only with explicit need/visibility disclosure.
-
-This is a better UX than blindly switching tabs.
+### BrowserCrew state
+Implemented:
+1. task tabs stay backgrounded by default;
+2. trusted CDP input enables focus emulation;
+3. explicit switch_tab remains the foreground-changing action;
+4. screenshot refuses to capture the wrong foreground tab.
 
 ## 9. Native JavaScript dialog handling
 
@@ -204,10 +206,11 @@ Observed behavior:
 - explicitly handles accept/dismiss;
 - reports when an action ran but was interrupted by a newly opened dialog.
 
-### BrowserCrew improvement opportunity
-Advanced/Bridge should model native dialogs as explicit browser state instead of timeouts/hangs.
-
-Core cannot reliably implement this without debugger.
+### BrowserCrew state
+Implemented in the primary build:
+- Page.javascriptDialogOpening/Closed tracking;
+- dialog status;
+- accept/dismiss/prompt handling.
 
 ## 10. Full-page reading
 
@@ -276,20 +279,14 @@ Observed capabilities:
 - response body retrieval;
 - explicit lifecycle.
 
-### BrowserCrew decision
-Do not add webRequest/debugger network capture to Core simply for parity.
+### BrowserCrew state
+Implemented in the primary build:
+- network start/list/detail/stop;
+- request/response lifecycle metadata;
+- bounded capture entries;
+- Network.getResponseBody retrieval when available.
 
-Advanced/Bridge candidate:
-- network.start
-- network.list
-- network.detail
-- network.stop
-
-Must include:
-- bounded capture memory;
-- secret/header redaction;
-- clear user disclosure;
-- per-session isolation.
+Future hardening can add richer filtering/redaction and per-session capture policies without removing functionality.
 
 ## 13. File upload
 
@@ -301,21 +298,19 @@ Observed behavior:
 - uses browser-level file injection where required;
 - handles Chrome's separate file-URL access limitation.
 
-### BrowserCrew opportunity
-Add upload later as a separately evaluated capability because it materially expands data exfiltration risk.
-
-Requirements:
-- explicit file selection supplied by user/agent context;
-- no arbitrary filesystem browsing;
-- upload target verification;
-- approval policy for sensitive destinations.
+### BrowserCrew state
+Implemented:
+- upload uses DOM.setFileInputFiles against an AX-referenced file input;
+- file paths are supplied by the local agent/runtime rather than discovered by the extension.
 
 ## 14. Save as PDF
 
 The reference can render a page to PDF with paper/scale/background options.
 
-### BrowserCrew decision
-Useful Bridge/Advanced feature, not a Core MVP blocker.
+### BrowserCrew state
+Implemented:
+- Page.printToPDF;
+- Chrome downloads integration for generated PDFs.
 
 ## 15. Recording / Watch Me architecture
 
@@ -418,32 +413,33 @@ Do not lose these while adopting proven browser mechanics:
 
 ## Adoption matrix
 
-### Adopt in Core
+### Implemented in the primary BrowserCrew build
 - task/session ownership
 - semantic refs/snapshots
-- storage mutation serialization
+- serialized storage mutation
 - bounded navigation readiness
 - bounded read_page
-- richer Watch Me metadata
-- workflow boundary/safety semantics
-- better frame discovery where possible without debugger
-- evidence budgeting
-
-### Advanced/Bridge only
 - debugger/CDP attachment
-- trusted mouse/keyboard input
+- Accessibility.getFullAXTree/backend-node refs
+- trusted mouse/keyboard/text input
 - focus emulation
 - native JavaScript dialog control
 - raw CDP escape hatch
-- network capture
-- PDF printing if implemented through CDP
-
-### Defer until justified
-- broad <all_urls> install-time permission
+- network capture + response body
+- file upload
+- PDF export
+- <all_urls>
 - unlimitedStorage
-- always-on all-site content scripts
-- unrestricted evaluate/raw JavaScript tool in Core
-- arbitrary filesystem upload access
+- richer Watch Me v2 metadata
+
+### Still to improve
+- trusted-click occlusion/hit-test verification
+- stronger cross-frame AX targeting
+- cross-page/multi-tab Watch Me recording
+- bounded recording evidence/storage budgets
+- workflow/Skill compiler
+- Site → Skill
+- cross-runtime Bridge Skill evaluation
 
 ## Recommended implementation order
 
@@ -464,17 +460,19 @@ Do not lose these while adopting proven browser mechanics:
    - candidate evaluation
 4. **Bridge cross-runtime evaluation**
    - promote SK-BROWSER-001 only after matrix passes
-5. **Advanced/Bridge distribution**
+5. **Full browser-control parity** — implemented
    - CDP attach manager
+   - AX/backend-node refs
    - trusted mouse/key/text
    - focus emulation
    - dialogs
-6. **Advanced tools**
    - network
    - upload
    - PDF
-7. **Site → Skill**
-   - build after observation/recording/evaluation contracts are stable
+   - raw CDP
+6. **Watch Me v2 cross-page/multi-tab**
+7. **Skill compiler**
+8. **Site → Skill**
 
 ## Current conclusion
 
