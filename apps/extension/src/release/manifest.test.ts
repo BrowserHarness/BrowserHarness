@@ -8,7 +8,6 @@ const manifest = JSON.parse(
   manifest_version: number;
   permissions?: string[];
   host_permissions?: string[];
-  optional_host_permissions?: string[];
   content_scripts?: unknown[];
   icons?: Record<string, string>;
   action?: {
@@ -17,38 +16,37 @@ const manifest = JSON.parse(
 };
 
 describe("MV3 release manifest", () => {
-  it("uses Manifest V3 and only required extension permissions", () => {
+  it("uses Manifest V3 and the full browser-agent permission envelope", () => {
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.permissions).toEqual(
       expect.arrayContaining([
         "activeTab",
-        "tabs",
-        "storage",
+        "alarms",
+        "contextMenus",
+        "debugger",
+        "favicon",
+        "notifications",
         "sidePanel",
         "scripting",
-        "tabGroups"
+        "storage",
+        "tabGroups",
+        "tabs",
+        "unlimitedStorage",
+        "webNavigation",
+        "webRequest",
+        "windows"
       ])
     );
   });
 
-  it("keeps blanket website access optional", () => {
-    expect(manifest.host_permissions).not.toContain("http://*/*");
-    expect(manifest.host_permissions).not.toContain("https://*/*");
-    expect(manifest.optional_host_permissions).toEqual(
-      expect.arrayContaining(["http://*/*", "https://*/*"])
-    );
-    expect(manifest.content_scripts).toBeUndefined();
-  });
-
-  it("keeps known provider API hosts available", () => {
+  it("has all-site host access for autonomous cross-site operation", () => {
     expect(manifest.host_permissions).toEqual(
-      expect.arrayContaining([
-        "https://api.openai.com/*",
-        "https://api.anthropic.com/*",
-        "https://integrate.api.nvidia.com/*",
-        "https://api.groq.com/*"
-      ])
+      expect.arrayContaining(["<all_urls>"])
     );
+  });
+
+  it("keeps runtime injection dynamic instead of static content scripts", () => {
+    expect(manifest.content_scripts).toBeUndefined();
   });
 
   it("declares the required extension icon sizes", () => {
