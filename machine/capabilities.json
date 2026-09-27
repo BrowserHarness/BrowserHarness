@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-watch-me-v2-cross-page-verified",
+  "status": "v0.2-record-to-skill-compiler-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -186,7 +186,13 @@
     },
     {
       "id": "skills",
-      "owner": "BrowserCrew/Skills-"
+      "owner": "BrowserCrew/Skills-",
+      "runtime_contract": {
+        "generated_skill_policy": "workflow evidence -> candidate -> evaluation -> active",
+        "record_to_skill": "verified pure compiler",
+        "registry_persistence": "not yet wired; pure compiler contract first",
+        "auto_promote": false
+      }
     },
     {
       "id": "workflows-watch-learn",
@@ -199,7 +205,26 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "Record → Skill and Session → Skill compiler"
+        "next": "Session → Skill compiler from BrowserCrew task-session evidence",
+        "record_to_skill": {
+          "status": "verified",
+          "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
+          "input": "SavedWorkflow v3",
+          "output": "portable candidate Skill contract",
+          "input_inference": "recorded text becomes reusable string parameters",
+          "tab_normalization": "raw tab ids -> logical tab refs with source provenance",
+          "browser_context_plan": [
+            "navigation",
+            "tab_opened",
+            "tab_activated",
+            "tab_closed",
+            "actions"
+          ],
+          "boundary": "boundary_step_id is the maximum demonstrated action boundary",
+          "approval_policy": "preserve BrowserCrew approval rules",
+          "evaluations": "deterministic cases derived from source evidence",
+          "promotion": "candidate only; evaluation required; no auto-promotion"
+        }
       }
     },
     {

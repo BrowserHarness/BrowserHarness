@@ -116,12 +116,16 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
 
 ### Next
 1. **Skill compiler**
-   - Record → Skill from verified Watch Me v3 evidence
-   - Session → Skill from BrowserCrew task-session evidence
-   - reusable variable/input inference
-   - browser-context plan extraction from navigation/tab events
-   - preserve boundary_step_id as the maximum demonstrated workflow boundary
-   - emit candidate Skill + evaluation matrix, never auto-promote without evidence
+   - **Record → Skill verified** at `9a21949333de565e5a77001ce1f39da95e346657`
+   - SavedWorkflow v3 is normalized into a portable candidate Skill contract
+   - raw tab IDs are converted into logical tab refs while source IDs remain provenance
+   - recorded text values become explicit reusable string parameters
+   - navigation/tab-open/tab-activate/tab-close evidence becomes an ordered browser-context plan
+   - `boundary_step_id` is enforced as the maximum demonstrated action boundary
+   - BrowserCrew approval semantics are preserved in compiled actions
+   - provenance and deterministic candidate evaluation cases are emitted
+   - generated Skills are candidate-only and cannot auto-promote
+   - **Session → Skill is the next compiler slice**
 2. **Adaptive workflow replay**
    - replay recorded intent/context rather than brittle exact-tab IDs
    - remap recorded tabs to current task-session tabs
