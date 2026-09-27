@@ -66,7 +66,6 @@ describe("Watch Me browser event handlers", () => {
     handlers.onCommitted({
       tabId: 7,
       frameId: 0,
-      parentFrameId: -1,
       timeStamp: 1,
       url: "https://example.com/next",
       transitionType: "link",
@@ -87,7 +86,6 @@ describe("Watch Me browser event handlers", () => {
     handlers.onCommitted({
       tabId: 7,
       frameId: 2,
-      parentFrameId: 0,
       timeStamp: 2,
       url: "https://frame.example.com",
       transitionType: "auto_subframe",
@@ -107,7 +105,6 @@ describe("Watch Me browser event handlers", () => {
     handlers.onCompleted({
       tabId: 8,
       frameId: 0,
-      parentFrameId: -1,
       timeStamp: 3,
       url: "https://example.com/loaded",
       processId: 1
