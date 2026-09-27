@@ -1,6 +1,14 @@
 import { cdpCommand } from "./cdp-manager";
 import { backendNodeForRef } from "./cdp-semantic";
 
+async function enableFocusEmulation(tabId: number): Promise<void> {
+  await cdpCommand(
+    tabId,
+    "Emulation.setFocusEmulationEnabled",
+    { enabled: true }
+  ).catch(() => undefined);
+}
+
 interface BoxModel {
   model?: {
     content?: number[];
@@ -48,6 +56,7 @@ export async function trustedClick(
   tabId: number,
   ref: string
 ): Promise<{ x: number; y: number }> {
+  await enableFocusEmulation(tabId);
   const { x, y } = await pointForRef(tabId, ref);
 
   await cdpCommand(tabId, "Input.dispatchMouseEvent", {
@@ -79,6 +88,7 @@ export async function trustedType(
   ref: string,
   text: string
 ): Promise<{ typed: number }> {
+  await enableFocusEmulation(tabId);
   const backendNodeId = backendNodeForRef(tabId, ref);
 
   await cdpCommand(tabId, "DOM.focus", {
@@ -95,6 +105,7 @@ export async function trustedKey(
   tabId: number,
   key: string
 ): Promise<{ key: string }> {
+  await enableFocusEmulation(tabId);
   const code =
     key === "Enter"
       ? "Enter"
