@@ -13,7 +13,7 @@
     "dev": "npm run dev -w @browsercrew/extension",
     "build": "npm run build -w @browsercrew/extension",
     "typecheck": "npm run typecheck -w @browsercrew/extension",
-    "test": "npm run test -w @browsercrew/extension",
+    "test": "npm run test --workspaces --if-present",
     "validate:mvp": "node scripts/validate-mvp.mjs"
   }
 }
