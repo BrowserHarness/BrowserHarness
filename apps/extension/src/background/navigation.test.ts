@@ -21,6 +21,7 @@ beforeEach(() => {
     incognito: false,
     selected: true,
     discarded: false,
+    frozen: false,
     autoDiscardable: true,
     windowId: 1,
     groupId: -1,
