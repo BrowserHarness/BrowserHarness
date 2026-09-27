@@ -5,9 +5,17 @@
   "type": "module",
   "scripts": {
     "start": "node src/cli.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "status": "node src/cli.mjs status",
+    "stop": "node src/cli.mjs stop",
+    "restart": "node src/cli.mjs restart",
+    "logs": "node src/cli.mjs logs",
+    "pair": "node src/cli.mjs pair"
   },
   "dependencies": {
     "ws": "^8.18.3"
+  },
+  "bin": {
+    "browsercrew-bridge": "src/cli.mjs"
   }
 }
