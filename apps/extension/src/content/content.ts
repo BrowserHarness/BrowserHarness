@@ -344,31 +344,130 @@ function findByLocator(locator: WorkflowLocator): HTMLElement | null {
   return best.element;
 }
 
+function isTextEntryElement(
+  element: HTMLElement | null
+): element is HTMLElement {
+  if (!element) return false;
+  if (element.isContentEditable) return true;
+  if (element instanceof HTMLTextAreaElement) return true;
+  if (!(element instanceof HTMLInputElement)) return false;
+
+  const type = (element.type || "text").toLowerCase();
+  return ![
+    "password",
+    "checkbox",
+    "radio",
+    "button",
+    "submit",
+    "reset",
+    "file",
+    "image",
+    "hidden",
+    "range",
+    "color"
+  ].includes(type);
+}
+
+function currentTextValue(element: HTMLElement): string {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    return element.value;
+  }
+  return element.innerText || element.textContent || "";
+}
+
+function flushPendingText(
+  preferred?: HTMLElement | null
+): void {
+  const element =
+    preferred && isTextEntryElement(preferred)
+      ? preferred
+      : pendingTextElement;
+
+  if (!recording || !element || !isTextEntryElement(element)) {
+    if (preferred === pendingTextElement) {
+      pendingTextElement = null;
+    }
+    return;
+  }
+
+  if (
+    element instanceof HTMLInputElement &&
+    element.type === "password"
+  ) {
+    pendingTextElement = null;
+    return;
+  }
+
+  const locator = locatorFor(element);
+  const text = currentTextValue(element);
+  const signature = JSON.stringify({
+    tag: locator.tag,
+    role: locator.role,
+    name: locator.accessible_name,
+    label: locator.label,
+    text
+  });
+
+  if (signature !== lastInputSignature) {
+    recordedSteps.push({
+      ...stepContext(),
+      action: "type",
+      locator,
+      text
+    });
+    lastInputSignature = signature;
+  }
+
+  if (element === pendingTextElement) {
+    pendingTextElement = null;
+  }
+}
+
+function recordClick(
+  element: HTMLElement,
+  event?: PointerEvent | MouseEvent
+): void {
+  flushPendingText();
+  recordedSteps.push({
+    ...stepContext(),
+    action: "click",
+    locator: locatorFor(element),
+    ...(event &&
+    Number.isFinite(event.clientX) &&
+    Number.isFinite(event.clientY)
+      ? {
+          pointer: {
+            x: Math.round(event.clientX),
+            y: Math.round(event.clientY)
+          }
+        }
+      : {})
+  });
+}
+
 document.addEventListener(
-  "click",
+  "pointerdown",
   (event) => {
     if (!recording) return;
     const element = interactiveTarget(event.target);
     if (!element) return;
-    recordedSteps.push({ action: "click", locator: locatorFor(element) });
+    recordClick(element, event);
   },
-  true
+  { capture: true, signal: contentAbortController.signal }
 );
 
 document.addEventListener(
-  "change",
+  "click",
   (event) => {
-    if (!recording) return;
+    if (!recording || event.detail !== 0) return;
     const element = interactiveTarget(event.target);
-    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return;
-    if (element instanceof HTMLInputElement && element.type === "password") return;
-    recordedSteps.push({
-      action: "type",
-      locator: locatorFor(element),
-      text: element.value
-    });
+    if (!element) return;
+    recordClick(element, event);
   },
-  true
+  { capture: true, signal: contentAbortController.signal }
 );
 
 document.addEventListener(
@@ -376,14 +475,60 @@ document.addEventListener(
   (event) => {
     if (!recording) return;
     const element = interactiveTarget(event.target);
-    if (!element?.isContentEditable) return;
+    if (!element || !isTextEntryElement(element)) return;
+    if (
+      element instanceof HTMLInputElement &&
+      element.type === "password"
+    ) {
+      return;
+    }
+    pendingTextElement = element;
+  },
+  { capture: true, signal: contentAbortController.signal }
+);
+
+document.addEventListener(
+  "change",
+  (event) => {
+    if (!recording) return;
+    const element = interactiveTarget(event.target);
+    if (!element || !isTextEntryElement(element)) return;
+    flushPendingText(element);
+  },
+  { capture: true, signal: contentAbortController.signal }
+);
+
+document.addEventListener(
+  "focusout",
+  (event) => {
+    if (!recording) return;
+    const element = interactiveTarget(event.target);
+    if (!element || !isTextEntryElement(element)) return;
+    flushPendingText(element);
+  },
+  { capture: true, signal: contentAbortController.signal }
+);
+
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (!recording) return;
+    if (event.key !== "Enter" && event.key !== "Tab") return;
+
+    flushPendingText();
+    const active =
+      document.activeElement instanceof HTMLElement
+        ? interactiveTarget(document.activeElement)
+        : null;
+
     recordedSteps.push({
-      action: "type",
-      locator: locatorFor(element),
-      text: element.innerText || element.textContent || ""
+      ...stepContext(),
+      action: "key",
+      key: event.key,
+      ...(active ? { locator: locatorFor(active) } : {})
     });
   },
-  true
+  { capture: true, signal: contentAbortController.signal }
 );
 
 function observe(tabId: number) {
@@ -657,17 +802,60 @@ function execute(action: Extract<ContentRequest, { type: "EXECUTE_CONTENT_ACTION
 }
 
 function replayStep(step: RecordedWorkflowStep) {
+  if (step.action === "key") {
+    const element = step.locator
+      ? findByLocator(step.locator)
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    if (step.locator && !element) {
+      throw new Error(
+        `Recorded element not found: ${step.locator.accessible_name || step.locator.role}`
+      );
+    }
+
+    element?.focus();
+    element?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: step.key,
+        bubbles: true
+      })
+    );
+    element?.dispatchEvent(
+      new KeyboardEvent("keyup", {
+        key: step.key,
+        bubbles: true
+      })
+    );
+    return { action: "key", key: step.key };
+  }
+
   const element = findByLocator(step.locator);
-  if (!element) throw new Error(`Recorded element not found: ${step.locator.accessible_name || step.locator.role}`);
-  element.scrollIntoView({ block: "center", inline: "nearest" });
+  if (!element) {
+    throw new Error(
+      `Recorded element not found: ${step.locator.accessible_name || step.locator.role}`
+    );
+  }
+
+  element.scrollIntoView({
+    block: "center",
+    inline: "nearest"
+  });
+
   if (step.action === "click") {
     element.click();
     return { action: "click" };
   }
+
   return writeText(element, step.text, true);
 }
 
-chrome.runtime.onMessage.addListener((request: ContentRequest, _sender, sendResponse) => {
+const contentMessageListener = (
+  request: ContentRequest,
+  _sender: chrome.runtime.MessageSender,
+  sendResponse: (response?: unknown) => void
+) => {
   try {
     if (request.type === "OBSERVE_PAGE") {
       sendResponse({ ok: true, data: observe(request.tab_id) });
@@ -680,10 +868,13 @@ chrome.runtime.onMessage.addListener((request: ContentRequest, _sender, sendResp
     if (request.type === "WATCH_START") {
       recording = true;
       recordedSteps = [];
+      pendingTextElement = null;
+      lastInputSignature = "";
       sendResponse({ ok: true, data: { recording: true } });
       return;
     }
     if (request.type === "WATCH_STOP") {
+      flushPendingText();
       recording = false;
       sendResponse({ ok: true, data: { steps: recordedSteps } });
       return;
@@ -696,9 +887,21 @@ chrome.runtime.onMessage.addListener((request: ContentRequest, _sender, sendResp
     sendResponse({
       ok: false,
       error: {
-        code: error instanceof Error && /not found/i.test(error.message) ? "ELEMENT_NOT_FOUND" : "INTERNAL_ERROR",
-        message: error instanceof Error ? error.message : "Unknown content-script error"
+        code:
+          error instanceof Error && /not found/i.test(error.message)
+            ? "ELEMENT_NOT_FOUND"
+            : "INTERNAL_ERROR",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown content-script error"
       }
     });
   }
-});
+};
+
+chrome.runtime.onMessage.addListener(contentMessageListener);
+runtimeGlobal.__browsercrewContentRuntime = {
+  abortController: contentAbortController,
+  messageListener: contentMessageListener
+};
