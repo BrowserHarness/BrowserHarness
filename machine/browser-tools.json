@@ -1,10 +1,15 @@
 {
   "schema_version": 1,
   "owner": "BrowserCrew/browsercrew",
-  "version": "0.2",
+  "version": "0.3",
   "tools": [
     {
       "id": "observe_page",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
+      "id": "read_page",
       "mutation": false,
       "approval": "never"
     },
