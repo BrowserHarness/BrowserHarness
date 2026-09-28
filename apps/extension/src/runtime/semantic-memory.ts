@@ -201,6 +201,20 @@ function rrf(rank: number): number {
   return 1 / (60 + rank);
 }
 
+function lexicalHits(
+  episodes: TaskEpisodeMemory[],
+  limit: number
+): TaskMemorySearchHit[] {
+  return episodes.slice(0, limit).map(
+    (episode, index) => ({
+      episode,
+      score: rrf(index + 1),
+      lexical_rank: index + 1,
+      retrieval: ["lexical"]
+    })
+  );
+}
+
 export async function searchTaskMemoryHybrid(
   query: string,
   limit = 10
@@ -216,31 +230,30 @@ export async function searchTaskMemoryHybrid(
 
   const connection = await loadEmbeddingConnection();
   if (!connection) {
-    return lexical.slice(0, boundedLimit).map(
-      (episode, index) => ({
-        episode,
-        score: rrf(index + 1),
-        lexical_rank: index + 1,
-        retrieval: ["lexical"]
-      })
-    );
+    return lexicalHits(lexical, boundedLimit);
   }
 
-  const source = await listTaskEpisodeMemory(
-    INDEX_SOURCE_LIMIT
-  );
+  let source: TaskEpisodeMemory[];
+  let index: TaskEpisodeVectorRecord[];
+  let queryEmbedding: Awaited<ReturnType<typeof embedTexts>>;
 
-  let index = await loadIndex();
-  index = await indexEpisodes(
-    connection,
-    source,
-    index
-  );
-
-  const queryEmbedding = await embedTexts(
-    connection,
-    [bounded(query, 1000)]
-  );
+  try {
+    source = await listTaskEpisodeMemory(
+      INDEX_SOURCE_LIMIT
+    );
+    index = await loadIndex();
+    index = await indexEpisodes(
+      connection,
+      source,
+      index
+    );
+    queryEmbedding = await embedTexts(
+      connection,
+      [bounded(query, 1000)]
+    );
+  } catch {
+    return lexicalHits(lexical, boundedLimit);
+  }
   const queryVector = queryEmbedding.vectors[0];
 
   const semantic = source
