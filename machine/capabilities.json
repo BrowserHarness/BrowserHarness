@@ -124,6 +124,36 @@
               "pointer/mouse down on source and up on target delivery proof",
               "fresh page observation after action"
             ]
+          },
+          "send_keys": {
+            "tool": "send_keys",
+            "syntax": [
+              "named keys",
+              "modifier chords such as Mod+A and Shift+Tab",
+              "space-separated sequences",
+              "repeat 1-100"
+            ],
+            "named_keys": [
+              "Enter",
+              "Escape",
+              "Tab",
+              "Backspace",
+              "Delete",
+              "Space",
+              "ArrowUp",
+              "ArrowDown",
+              "ArrowLeft",
+              "ArrowRight",
+              "Home",
+              "End",
+              "PageUp",
+              "PageDown",
+              "F1-F12",
+              "single letters/digits"
+            ],
+            "modifier_bits": "Alt/Ctrl/Cmd/Meta/Shift with Mod resolving to Cmd on macOS and Ctrl elsewhere",
+            "verification": "fresh page observation after dispatch",
+            "approval": "sequences containing Enter preserve BrowserCrew approval rules"
           }
         },
         "network": {
@@ -201,7 +231,7 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 29
+        "tools": 30
       }
     },
     {
@@ -213,7 +243,7 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "richer key chords/sequences/modifiers, await-user-action, then versioned Skill refinement/promotion",
+        "next": "await-user-action / human handoff, then versioned Skill refinement/promotion",
         "site_to_skill": {
           "status": "verified-v1",
           "tool": "site_skill",
@@ -256,7 +286,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "richer key chords/sequences/modifiers and await-user-action; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
+        "next": "await-user-action / human handoff; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
