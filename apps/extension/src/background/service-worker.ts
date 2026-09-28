@@ -79,6 +79,10 @@ import {
   searchTaskEpisodeMemory
 } from "../runtime/task-memory";
 import {
+  clearBrowserWorkingMemory,
+  getBrowserWorkingMemory
+} from "../runtime/working-memory";
+import {
   extensionPageApprovalGranted,
   isRiskyTrustedLabel,
   type ToolExecutionOptions
@@ -546,6 +550,9 @@ async function runTool(
 
     const sessionId = session.id;
     const closedOwnedTabs = await closeTaskSession(session);
+    await clearBrowserWorkingMemory(sessionId).catch(
+      () => false
+    );
     return {
       ok: true,
       data: {
@@ -561,6 +568,44 @@ async function runTool(
       typeof input.action === "string"
         ? input.action
         : "search";
+
+    if (action === "active") {
+      const sessionId =
+        typeof input.session_id === "string" &&
+        input.session_id.trim()
+          ? input.session_id.trim()
+          : session?.id;
+
+      if (!sessionId) {
+        return {
+          ok: false,
+          error: {
+            code: "SESSION_REQUIRED",
+            message:
+              "memory active requires a BrowserCrew task session"
+          }
+        };
+      }
+
+      const memory = await getBrowserWorkingMemory(
+        sessionId
+      );
+      return memory
+        ? {
+            ok: true,
+            data: {
+              working_memory: memory
+            }
+          }
+        : {
+            ok: false,
+            error: {
+              code: "WORKING_MEMORY_NOT_FOUND",
+              message:
+                "No active working memory exists for this task session"
+            }
+          };
+    }
 
     if (action === "search") {
       if (
@@ -646,7 +691,7 @@ async function runTool(
       error: {
         code: "MEMORY_ACTION_INVALID",
         message:
-          "memory action must be search, list, get, or delete"
+          "memory action must be active, search, list, get, or delete"
       }
     };
   }
