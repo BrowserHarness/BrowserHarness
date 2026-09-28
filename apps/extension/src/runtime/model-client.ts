@@ -22,6 +22,11 @@ export interface ModelHealthResult {
   agent: CapabilityProbeResult;
 }
 
+export interface EmbeddingResult {
+  vectors: number[][];
+  dimensions: number;
+}
+
 const TOOL_NAMES = new Set<ToolName>([
   "observe_page",
   "read_page",
@@ -250,6 +255,127 @@ ${trail.slice(-8).join("\n") || "No actions yet."}
 If DOM/text evidence is insufficient and VISION AVAILABLE is yes, you may request screenshot once and inspect it on the next turn.
 Choose the next single browser action or finish.
 Return one JSON object only.`;
+}
+
+export async function embedTexts(
+  config: ProviderConfig,
+  inputs: string[],
+  signal?: AbortSignal
+): Promise<EmbeddingResult> {
+  if (config.provider === "anthropic") {
+    throw new Error(
+      "This provider does not expose an OpenAI-compatible embeddings endpoint."
+    );
+  }
+
+  const texts = inputs
+    .map((input) => String(input))
+    .filter((input) => input.length > 0);
+
+  if (!texts.length) {
+    throw new Error("Embedding input is required.");
+  }
+  if (texts.length > 64) {
+    throw new Error(
+      "BrowserCrew limits one embedding request to 64 inputs."
+    );
+  }
+
+  const base = providerBaseUrl(
+    config.provider,
+    config.baseUrl
+  );
+  if (!base) {
+    throw new Error("Provider base URL is missing.");
+  }
+
+  const response = await fetchWithTimeout(
+    `${base}/embeddings`,
+    {
+      method: "POST",
+      headers: openAIHeaders(config),
+      body: JSON.stringify({
+        model: config.model,
+        input: texts
+      })
+    },
+    20_000,
+    signal
+  );
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `Embedding request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`
+    );
+  }
+
+  const json = (await response.json()) as {
+    data?: Array<{
+      index?: number;
+      embedding?: unknown;
+    }>;
+  };
+  const rows = Array.isArray(json.data)
+    ? [...json.data].sort(
+        (left, right) =>
+          Number(left.index ?? 0) - Number(right.index ?? 0)
+      )
+    : [];
+
+  if (rows.length !== texts.length) {
+    throw new Error(
+      `Embedding endpoint returned ${rows.length} vectors for ${texts.length} inputs.`
+    );
+  }
+
+  const vectors = rows.map((row, index) => {
+    if (
+      !Array.isArray(row.embedding) ||
+      row.embedding.length === 0 ||
+      !row.embedding.every(
+        (value) =>
+          typeof value === "number" &&
+          Number.isFinite(value)
+      )
+    ) {
+      throw new Error(
+        `Embedding vector ${index} is invalid.`
+      );
+    }
+    return row.embedding as number[];
+  });
+
+  const dimensions = vectors[0].length;
+  if (
+    vectors.some(
+      (vector) => vector.length !== dimensions
+    )
+  ) {
+    throw new Error(
+      "Embedding endpoint returned inconsistent vector dimensions."
+    );
+  }
+
+  return { vectors, dimensions };
+}
+
+export async function testEmbeddingCapability(
+  config: ProviderConfig,
+  signal?: AbortSignal
+): Promise<CapabilityProbeResult> {
+  const started = performance.now();
+  const result = await embedTexts(
+    config,
+    ["BrowserCrew embedding health probe"],
+    signal
+  );
+
+  return {
+    ok: true,
+    latencyMs: Math.round(performance.now() - started),
+    preview: `Embedding OK · ${result.dimensions} dimensions`
+  };
 }
 
 function openAIHeaders(config: ProviderConfig) {
