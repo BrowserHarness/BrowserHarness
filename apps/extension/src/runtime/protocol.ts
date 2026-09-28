@@ -7,6 +7,7 @@ export type ToolName =
   | "find"
   | "evaluate"
   | "site_skill"
+  | "memory"
   | "select_option"
   | "hover"
   | "drag"
