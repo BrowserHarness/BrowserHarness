@@ -11,6 +11,8 @@ import {
   loadSiteSkillCandidates,
   promoteSiteSkillRevision,
   recordSiteSkillEvaluation,
+  recordSiteSkillExecutionEvidence,
+  listSiteSkillExecutionEvidence,
   rollbackSiteSkillRevision,
   saveSiteSkillCandidate,
   SITE_SKILL_CANDIDATES_KEY,
@@ -473,6 +475,55 @@ describe("versioned Site Skill storage", () => {
         )
       )?.name
     ).toBe("Revision one");
+  });
+
+  it("persists inspectable execution evidence without parameter values", async () => {
+    await saveSiteSkillCandidate(
+      candidate("SK-SITE-EXECUTION"),
+      { reason: "create" }
+    );
+
+    const recorded = await recordSiteSkillExecutionEvidence(
+      "SK-SITE-EXECUTION",
+      "SK-SITE-EXECUTION:r1",
+      {
+        recipe_id: "recipe-form-1",
+        started_at: "2026-09-28T07:00:00.000Z",
+        finished_at: "2026-09-28T07:00:02.000Z",
+        outcome: "failed",
+        evidence_id: "evidence-run-1",
+        executed_steps: 2,
+        submitted: false,
+        parameter_names: ["email", "password", "email"],
+        error_code: "SITE_SKILL_TARGET_NOT_FOUND",
+        error_message: "Submit button changed"
+      }
+    );
+
+    expect(recorded).toMatchObject({
+      execution_id: "SK-SITE-EXECUTION:execution-1",
+      revision_id: "SK-SITE-EXECUTION:r1",
+      recipe_id: "recipe-form-1",
+      outcome: "failed",
+      evidence_id: "evidence-run-1",
+      executed_steps: 2,
+      submitted: false,
+      parameter_names: ["email", "password"],
+      error_code: "SITE_SKILL_TARGET_NOT_FOUND",
+      error_message: "Submit button changed"
+    });
+
+    expect(
+      await listSiteSkillExecutionEvidence(
+        "SK-SITE-EXECUTION",
+        "SK-SITE-EXECUTION:r1"
+      )
+    ).toEqual([recorded]);
+
+    const family = await getSiteSkillFamily(
+      "SK-SITE-EXECUTION"
+    );
+    expect(JSON.stringify(family)).not.toContain("secret-value");
   });
 
   it("gets and deletes the full Skill family", async () => {
