@@ -12,6 +12,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBridgeServer } from "./core.mjs";
 import { serveBrowserCrewMcp } from "./mcp.mjs";
+import {
+  createMcpClientManager,
+  DEFAULT_MCP_SERVERS_FILE
+} from "./mcp-client.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 const HOME = path.join(os.homedir(), ".browsercrew-bridge");
@@ -87,7 +91,11 @@ async function waitForState(config, expectedRunning, timeoutMs = 5000) {
 
 async function serve(config) {
   await mkdir(LOG_DIR, { recursive: true });
-  const bridge = createBridgeServer(config);
+  const mcpManager = createMcpClientManager();
+  const bridge = createBridgeServer({
+    ...config,
+    mcpManager
+  });
   const address = await bridge.listen();
 
   await writeFile(PID_FILE, `${process.pid}\n`);
@@ -205,6 +213,18 @@ async function stop(config) {
   print(status);
 }
 
+async function listMcpServers() {
+  const manager = createMcpClientManager();
+  try {
+    print({
+      config: DEFAULT_MCP_SERVERS_FILE,
+      servers: await manager.listServers()
+    });
+  } finally {
+    await manager.closeAll();
+  }
+}
+
 async function logs() {
   const nIndex = process.argv.indexOf("-n");
   const requested =
@@ -241,6 +261,8 @@ try {
     await start(config, false);
   } else if (command === "logs") {
     await logs();
+  } else if (command === "mcp-servers") {
+    await listMcpServers();
   } else if (command === "pair") {
     print({
       ws: wsBase(config),
@@ -249,7 +271,7 @@ try {
     });
   } else {
     throw new Error(
-      "Usage: browsercrew-bridge [start|status|stop|restart|logs|pair|mcp]"
+      "Usage: browsercrew-bridge [start|status|stop|restart|logs|pair|mcp|mcp-servers]"
     );
   }
 } catch (error) {
