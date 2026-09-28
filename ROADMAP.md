@@ -223,13 +223,25 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - findings return status/message plus up to 6 source URL/title records and up to 20 tools used
    - verified gate: 16/16 Bridge tests + 263/263 extension tests across 53 files; typecheck/build/MV3/contracts/package PASS
    - runtime surface: **37 tools** = 35 service-worker tools + orchestrator-only `agent` + `await_user_action`
-13. **Parallel supervisor research + provenance merge — next active engineering target**
-   - allow the supervisor to delegate multiple independent read-only subtasks in one request
-   - bounded concurrency (start with max 2 workers) and per-worker 8-step limits
-   - distinct child sessions and automatic cleanup
-   - deterministic merge of findings with worker/session/source provenance
-   - one worker failure must not cancel successful sibling findings
-14. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+13. **Parallel supervisor research + provenance merge — verified at `d572e84d7a5344b03052f6a7b6d9343423cc1dc1` (CI `36383377960`)**
+   - one `agent` delegation supports one task or up to two independent `tasks[]`
+   - workers launch concurrently with distinct child sessions and independent 8-step limits
+   - duplicate delegated tasks are removed and >2 workers are rejected explicitly
+   - merge order is deterministic and follows supervisor input order, not completion timing
+   - one worker failure is retained as evidence and does not discard a successful sibling
+   - parent session evidence stores bounded child-session/task/status/source/tool provenance
+   - worker internals/raw external payloads are not copied into parent evidence
+   - verified gate: 16/16 Bridge tests + 267/267 extension tests across 54 files; typecheck/build/MV3/contracts/package PASS
+14. **Delegation-aware memory + supervisor synthesis evidence — next active engineering target**
+   - carry child-worker tasks/sources/status into durable episodic memory
+   - include delegated source provenance in semantic retrieval text without copying worker raw payloads
+   - preserve which prior conclusions were supported by which child sources
+   - make recalled delegation evidence explicit historical context, never authority
+15. **Task DAG + verifier workers — after delegation memory**
+   - explicit dependency graph for multi-step delegated research
+   - verifier workers receive evidence but no mutation authority
+   - independent verification of important worker claims before supervisor synthesis
+16. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
