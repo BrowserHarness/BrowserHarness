@@ -55,6 +55,7 @@ import {
   deleteSiteSkillCandidate,
   getSiteSkillCandidate,
   listSiteSkillCandidateSummaries,
+  listSiteSkillRevisionSummaries,
   saveSiteSkillCandidate
 } from "../runtime/site-skill-store";
 import {
@@ -534,7 +535,12 @@ async function runTool(
           }
         };
       }
-      const candidate = await getSiteSkillCandidate(input.id);
+      const candidate = await getSiteSkillCandidate(
+        input.id,
+        typeof input.revision_id === "string"
+          ? input.revision_id
+          : undefined
+      );
       return candidate
         ? { ok: true, data: { candidate } }
         : {
@@ -544,6 +550,39 @@ async function runTool(
               message: "Site Skill candidate was not found"
             }
           };
+    }
+
+    if (action === "history") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill history requires id"
+          }
+        };
+      }
+
+      const revisions = await listSiteSkillRevisionSummaries(
+        input.id
+      );
+      if (!revisions.length) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_NOT_FOUND",
+            message: "Site Skill candidate was not found"
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          id: input.id,
+          revisions
+        }
+      };
     }
 
     if (action === "delete") {
@@ -568,14 +607,15 @@ async function runTool(
     if (
       action !== "create" &&
       action !== "verify" &&
-      action !== "run"
+      action !== "run" &&
+      action !== "history"
     ) {
       return {
         ok: false,
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, verify, run, list, get, or delete"
+            "site_skill action must be create, verify, run, list, get, history, or delete"
         }
       };
     }
@@ -647,7 +687,9 @@ async function runTool(
           ...existing,
           verification
         };
-        await saveSiteSkillCandidate(updated);
+        const revision = await saveSiteSkillCandidate(updated, {
+          reason: "run-verification"
+        });
 
         if (verification.status !== "verified") {
           return {
@@ -701,6 +743,7 @@ async function runTool(
           ok: true,
           data: {
             candidate_id: updated.id,
+            revision_id: revision.revision_id,
             verification,
             run
           }
@@ -757,12 +800,15 @@ async function runTool(
           ...existing,
           verification
         };
-        await saveSiteSkillCandidate(updated);
+        const revision = await saveSiteSkillCandidate(updated, {
+          reason: "verify"
+        });
 
         return {
           ok: verification.status === "verified",
           data: {
             candidate: updated,
+            revision_id: revision.revision_id,
             verification
           },
           ...(verification.status === "failed"
@@ -798,12 +844,16 @@ async function runTool(
           typeof input.name === "string" ? input.name : undefined,
         include_network: input.include_network !== false
       });
-      await saveSiteSkillCandidate(created.candidate);
+      const revision = await saveSiteSkillCandidate(
+        created.candidate,
+        { reason: "create" }
+      );
 
       return {
         ok: true,
         data: {
           candidate: created.candidate,
+          revision_id: revision.revision_id,
           evidence_summary: {
             ax_target_count: created.evidence.ax.target_count,
             form_count: created.evidence.forms.length,
