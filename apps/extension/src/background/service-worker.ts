@@ -36,10 +36,8 @@ import {
   startNetworkCapture,
   stopNetworkCapture
 } from "./network-capture";
-import {
-  screenshotVisibilityError,
-  shouldActivateNewTaskTab
-} from "./tab-policy";
+import { shouldActivateNewTaskTab } from "./tab-policy";
+import { captureCdpScreenshot } from "./cdp-screenshot";
 import {
   extensionPageApprovalGranted,
   isRiskyTrustedLabel,
@@ -975,22 +973,33 @@ async function runTool(
   }
 
   if (tool === "screenshot") {
-    const visibilityError = screenshotVisibilityError(tab);
-    if (visibilityError) {
+    try {
+      const captured = await captureCdpScreenshot(tabId, {
+        ...(typeof input.element_id === "string"
+          ? { element_id: input.element_id }
+          : {}),
+        full_page: input.full_page === true
+      });
+      return {
+        ok: true,
+        data: {
+          tab_id: tabId,
+          data_url: captured.data_url,
+          mode: captured.mode
+        }
+      };
+    } catch (error) {
       return {
         ok: false,
-        error: visibilityError
+        error: {
+          code: "SCREENSHOT_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "CDP screenshot failed"
+        }
       };
     }
-
-    const dataUrl = await chrome.tabs.captureVisibleTab(
-      tab.windowId,
-      { format: "png" }
-    );
-    return {
-      ok: true,
-      data: { tab_id: tabId, data_url: dataUrl }
-    };
   }
 
   if (tool === "observe_page") {
