@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.3-bounded-read-only-subagent-verified",
+  "status": "v0.4-parallel-read-only-supervisor-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -698,7 +698,33 @@
         },
         "verified_sha": "a159bef5c3c086d9b18f0afd5d0af49fcbccf5b1",
         "ci_run_id": 36382897733,
-        "tests": "16/16 Bridge + 263/263 extension tests across 53 files"
+        "tests": "16/16 Bridge + 263/263 extension tests across 53 files",
+        "parallel_supervisor": {
+          "status": "verified",
+          "maximum_parallel_workers": 2,
+          "per_worker_max_steps": 8,
+          "task_input": "single task or tasks[]; duplicates removed; >2 rejected",
+          "concurrency": "true Promise.allSettled launch",
+          "child_sessions": "distinct BrowserCrew task sessions",
+          "sibling_failure": "does not discard successful sibling findings",
+          "merge": "deterministic input-order worker results",
+          "provenance": {
+            "parent_session_evidence": true,
+            "worker_session_id": true,
+            "worker_task": true,
+            "worker_status": true,
+            "sources": "up to 6 URL/title records per worker",
+            "tools_used": "up to 20 per worker"
+          },
+          "verified_sha": "d572e84d7a5344b03052f6a7b6d9343423cc1dc1",
+          "ci_run_id": 36383377960,
+          "tests": "16/16 Bridge + 267/267 extension tests across 54 files"
+        },
+        "next": [
+          "delegation-aware episodic/semantic memory",
+          "supervisor synthesis evidence",
+          "task DAG and verifier workers"
+        ]
       }
     }
   ],
