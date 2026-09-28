@@ -983,6 +983,135 @@ describe("Browser MVP engine scenarios", () => {
     );
   });
 
+  it("resumes planning from fresh page state after a manual handoff", async () => {
+    const h = harness({
+      observations: [
+        page(12, "Sign in", "Two-factor authentication required"),
+        page(12, "Account", "Signed in")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "await_user_action",
+          input: {
+            reason: "Complete two-factor authentication on example.com."
+          },
+          note: "Waiting for authentication"
+        },
+        {
+          kind: "final",
+          message: "Signed in and ready."
+        }
+      ]
+    });
+
+    const requestUserAction = vi.fn(async () => ({
+      status: "continue" as const,
+      source: "user" as const
+    }));
+    h.dependencies.requestUserAction = requestUserAction;
+    h.dependencies.session = {
+      id: "task-handoff-12",
+      title: "Sign in"
+    };
+
+    const result = await runBrowserTask(
+      "Open my account after I sign in",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.message).toBe("Signed in and ready.");
+    expect(requestUserAction).toHaveBeenCalledWith(
+      "Complete two-factor authentication on example.com.",
+      expect.objectContaining({
+        tab_id: 12,
+        title: "Sign in"
+      }),
+      undefined
+    );
+    expect(h.contexts[1].observation).toMatchObject({
+      tab_id: 12,
+      title: "Account",
+      visible_text: "Signed in"
+    });
+    expect(result.session_evidence.actions).toEqual([]);
+    expect(
+      result.session_evidence.boundary_action_id
+    ).toBeUndefined();
+    expect(result.session_evidence.manual_handoffs).toEqual([
+      expect.objectContaining({
+        id: "handoff-1",
+        reason: "Complete two-factor authentication on example.com.",
+        status: "continued",
+        source: "user",
+        before: {
+          tab_id: 12,
+          url: "https://example.com/12",
+          title: "Sign in"
+        },
+        after: {
+          tab_id: 12,
+          url: "https://example.com/12",
+          title: "Account"
+        }
+      })
+    ]);
+  });
+
+  it("stops cleanly when the user cancels a manual handoff", async () => {
+    const h = harness({
+      observations: [
+        page(13, "Verification", "Complete CAPTCHA")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "await_user_action",
+          input: {
+            reason: "Complete the CAPTCHA on example.com."
+          },
+          note: "Waiting for verification"
+        }
+      ]
+    });
+
+    const requestUserAction = vi.fn(async () => ({
+      status: "cancelled" as const,
+      source: "user" as const
+    }));
+    h.dependencies.requestUserAction = requestUserAction;
+
+    const result = await runBrowserTask(
+      "Continue after verification",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("stopped");
+    expect(result.message).toContain("manual step was cancelled");
+    expect(result.session_evidence.actions).toEqual([]);
+    expect(
+      result.session_evidence.boundary_action_id
+    ).toBeUndefined();
+    expect(result.session_evidence.manual_handoffs).toEqual([
+      expect.objectContaining({
+        reason: "Complete the CAPTCHA on example.com.",
+        status: "cancelled",
+        source: "user",
+        before: {
+          tab_id: 13,
+          url: "https://example.com/13",
+          title: "Verification"
+        }
+      })
+    ]);
+    expect(
+      h.toolMock.mock.calls.filter(
+        ([tool]) => tool === "observe_page"
+      )
+    ).toHaveLength(1);
+  });
+
   it("does not learn a consequential action when approval is denied", async () => {
     const h = harness({
       observations: [
