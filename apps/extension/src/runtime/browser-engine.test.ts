@@ -10,6 +10,7 @@ import type {
   ToolResult
 } from "./protocol";
 import type { AgentDecision } from "./model-client";
+import type { BrowserWorkingMemory } from "./working-memory";
 
 function page(
   tabId: number,
@@ -74,7 +75,7 @@ function harness(options: {
   const waitWhilePaused = vi.fn(async () => undefined);
   const onFallback = vi.fn();
   const persistWorkingMemory = vi.fn(
-    async () => undefined
+    async (_memory: BrowserWorkingMemory) => undefined
   );
 
   const dependencies: BrowserEngineDependencies = {
