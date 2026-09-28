@@ -34,6 +34,7 @@ const TOOL_NAMES = new Set<ToolName>([
   "trusted_click",
   "trusted_type",
   "trusted_key",
+  "send_keys",
   "dialog",
   "network",
   "upload",
@@ -60,7 +61,7 @@ Do not claim an action succeeded unless tool evidence shows it.
 Return exactly one JSON object and no markdown.
 
 To use a tool:
-{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|find|evaluate|site_skill|select_option|hover|drag|trusted_click|trusted_type|trusted_key|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
+{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|find|evaluate|site_skill|select_option|hover|drag|trusted_click|trusted_type|trusted_key|send_keys|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
 
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
@@ -81,6 +82,7 @@ Escalate browser control in layers:
 10. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
 Use hover after a fresh ax_snapshot when menus, tooltips, previews, or controls require a real pointer hover; pass a fresh element_id and BrowserCrew will verify the intended target is actually hovered, then re-observe the page.
 Use drag after a fresh ax_snapshot when the user wants a real drag/drop or reorder action; pass source_element_id and target_element_id. BrowserCrew hit-tests both endpoints, holds the real CDP mouse button through a bounded pointer path, verifies down/up delivery, then re-observes the page.
+Use send_keys for real keyboard shortcuts and sequences at the current focus: examples include "Enter", "Mod+A", "Shift+Tab", "ArrowDown", "F5", or "Enter Escape". Space-separated segments are dispatched in order; repeat may be 1-100. Mod resolves to Cmd on macOS and Ctrl elsewhere. Use trusted_type/key_type-style text insertion for literal text rather than spelling text through key events.
 Use select_option after a fresh ax_snapshot when a native select/combobox must choose an option; pass element_id plus value or values and re-observe afterwards.
 Use site_skill with action "create" when the user asks BrowserCrew to learn/save the current site as a reusable Skill candidate. It inspects fresh AX/form structure, optionally includes already-captured network evidence, persists a candidate-only Skill, and never auto-promotes it. Use action "verify" with the candidate id to re-check origin, form action/method, fields and submit target against fresh evidence. Use action "run" with id, optional recipe_id, and a parameters object when the user asks to execute a saved Site Skill. Run always re-verifies fresh site evidence and fresh semantic targets before acting; non-GET or risky submission can return APPROVAL_REQUIRED and must be approved through the BrowserCrew UI. Use action "list", "get", or "delete" to manage Site Skill candidates. Structural Site Skill analysis is not promotion proof; generated Skills remain candidates even after verified execution.
 After ax_snapshot, use only the returned @e refs for trusted_* actions. Never invent a CDP ref.
