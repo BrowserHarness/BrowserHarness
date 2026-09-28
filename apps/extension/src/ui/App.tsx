@@ -57,6 +57,7 @@ import {
 import { SettingsView } from "./SettingsView";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
+import { waitForUserAction } from "../runtime/user-handoff";
 
 type Message = { id: string; role: "user" | "assistant"; text: string };
 type Activity = { id: string; text: string; state: "working" | "done" | "error" };
@@ -64,6 +65,10 @@ type CurrentTab = { tab_id: number; title?: string; url?: string };
 type Approval = {
   description: string;
   resolve: (approved: boolean) => void;
+};
+type Handoff = {
+  reason: string;
+  resolve: (status: "continue" | "cancelled") => void;
 };
 
 const APPROVAL_WORDS =
@@ -128,6 +133,7 @@ export function App() {
   const [recording, setRecording] = useState(false);
   const [lastWorkflow, setLastWorkflow] = useState<SavedWorkflow | null>(null);
   const [approval, setApproval] = useState<Approval | null>(null);
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const cancelled = useRef(false);
   const pausedRef = useRef(false);
@@ -180,6 +186,11 @@ export function App() {
 
   const requestApproval = (description: string) =>
     new Promise<boolean>((resolve) => setApproval({ description, resolve }));
+
+  const showHandoffPrompt = (reason: string) =>
+    new Promise<"continue" | "cancelled">((resolve) => {
+      setHandoff({ reason, resolve });
+    });
 
   const handleRecord = async () => {
     if (!tab?.tab_id) {
@@ -564,6 +575,23 @@ export function App() {
             setApproval(null);
             return approved;
           },
+          requestUserAction: async (
+            reason,
+            observation,
+            handoffSignal
+          ) => {
+            try {
+              return await waitForUserAction({
+                tab_id: observation.tab_id,
+                starting_url: observation.url,
+                reason,
+                signal: handoffSignal,
+                prompt: showHandoffPrompt
+              });
+            } finally {
+              setHandoff(null);
+            }
+          },
           isCancelled: () => cancelled.current,
           waitWhilePaused: async () => {
             while (pausedRef.current && !cancelled.current) {
@@ -638,6 +666,10 @@ export function App() {
 
   const handleStop = () => {
     cancelled.current = true;
+    if (handoff) {
+      handoff.resolve("cancelled");
+      setHandoff(null);
+    }
     requestAbort.current?.abort();
     requestAbort.current = null;
     pausedRef.current = false;
@@ -878,6 +910,36 @@ export function App() {
                 }
               >
                 BrowserCrew wants to: {approval.description}
+              </Alert>
+            )}
+
+            {handoff && (
+              <Alert
+                severity="info"
+                action={
+                  <Stack direction="row" spacing={0.5}>
+                    <Button
+                      size="small"
+                      onClick={() => handoff.resolve("cancelled")}
+                    >
+                      Cancel task
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => handoff.resolve("continue")}
+                    >
+                      I’m done, continue
+                    </Button>
+                  </Stack>
+                }
+              >
+                <Typography variant="subtitle2">
+                  Need you to take over
+                </Typography>
+                <Typography variant="body2">
+                  {handoff.reason} Complete it on the page, then come back here.
+                </Typography>
               </Alert>
             )}
           </Stack>
