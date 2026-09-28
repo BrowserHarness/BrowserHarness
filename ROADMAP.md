@@ -138,7 +138,8 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - Site Skill run parameter values are redacted from BrowserTaskSessionEvidence
    - `list/get/delete` candidate library operations
    - candidate status is preserved after verified execution; no auto-promotion
-   - Local Bridge/browser runtime surface: **27 tools**
+   - Site Skill library now supports immutable history, compare/refine/promote/rollback and inspectable execution evidence
+   - Local Bridge surface: **33 tools**; BrowserCrew runtime surface: **34 tools** including orchestrator-only human handoff
    - CI run `36369232137`: 181/181 extension tests across 38 files + 3/3 Bridge tests, all typecheck/build/MV3/contract/package gates green
 5. **Kimi-reference interaction parity — verified**
    - hover — verified
@@ -151,13 +152,26 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - manual login/CAPTCHA/2FA/consent steps are recorded as non-executable evidence and never advance the learned action boundary
    - Session → Skill compilation rejects sessions crossing manual handoffs instead of pretending the human-only precondition is automated
    - verified gate: 201/201 extension tests across 42 files + 3/3 Bridge tests; typecheck/build/MV3/contract/package PASS
-6. **Versioned Skill lifecycle + refinement — next active engineering target**
-   - candidate revision history
-   - evaluation comparison against active version
-   - explicit promotion
-   - rollback
-   - use successful/failed executions as inspectable refinement evidence rather than opaque self-modification
-7. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+   - back/reload — verified through the same bounded navigation-readiness contract
+   - close_session — verified task-owned cleanup; borrowed user tabs are preserved
+6. **Versioned Skill lifecycle + refinement — verified at `e23be905d190f60aaecee916dc031eaa0c1a1380` (CI `36374874922`)**
+   - immutable candidate revision history with explicit parent links
+   - successful/failed runs persist inspectable execution evidence without parameter values
+   - partial failed-run progress and bounded error codes/messages are retained for diagnosis
+   - failed/drifted runs return `refinement_recommended` and `next_action: site_skill refine`
+   - `site_skill refine` recollects fresh evidence, computes a deterministic contract diff and creates a new candidate revision only when the contract changed
+   - active revisions are never silently mutated or replaced by refinement
+   - `site_skill compare` reports candidate-vs-active execution counts, pass/fail rates, latest outcomes and deterministic regression/improvement signals
+   - explicit promotion requires passing latest structural + execution evaluation for the same revision
+   - explicit rollback only targets a previously active revision
+   - no auto-promotion
+7. **v0.3 Memory + MCP foundation — next active engineering target**
+   - working memory for the current task/session
+   - episodic execution memory linked to task/Skill evidence
+   - semantic retrieval over reusable knowledge
+   - procedural memory linked to versioned Skills
+   - MCP client/tool bridge without weakening BrowserCrew task-session ownership
+8. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
@@ -173,6 +187,11 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
 - network start/list/detail/stop + response-body retrieval + wire-header/post-data recovery
 - file upload through DOM.setFileInputFiles
 - Page.printToPDF + Chrome downloads
+- real CDP hover + drag/drop with target/delivery verification
+- OS-aware modifier chords/sequences via send_keys
+- bounded back/reload navigation
+- task-owned close_session cleanup with borrowed-tab preservation
+- human handoff for login/CAPTCHA/2FA/manual consent
 
 ### Browser capability rule
 BrowserCrew is an autonomous browser agent. Functionality and reliability take priority over minimizing the permission envelope.
