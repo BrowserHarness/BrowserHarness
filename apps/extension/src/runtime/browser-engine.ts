@@ -77,6 +77,7 @@ const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
   "trusted_click",
   "trusted_type",
   "trusted_key",
+  "send_keys",
   "select_option",
   "hover",
   "drag",
