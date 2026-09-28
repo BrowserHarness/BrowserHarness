@@ -142,6 +142,20 @@ function sessionInputForTool(
     );
   }
 
+  if (
+    tool === "mcp" &&
+    input.action === "call_tool" &&
+    input.arguments &&
+    typeof input.arguments === "object" &&
+    !Array.isArray(input.arguments)
+  ) {
+    copied.arguments = Object.fromEntries(
+      Object.keys(
+        input.arguments as Record<string, unknown>
+      ).map((name) => [name, "<redacted>"])
+    );
+  }
+
   return copied;
 }
 
