@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-kimi-reference-parity-hardening",
+  "status": "v0.2-site-skill-v1-active",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -123,7 +123,9 @@
             "detail",
             "stop"
           ],
-          "response_body": "Network.getResponseBody"
+          "response_body": "Network.getResponseBody",
+          "request_headers": "Network.requestWillBeSent + requestWillBeSentExtraInfo merge",
+          "request_post_data": "Network.getRequestPostData fallback when initial event omits body"
         },
         "files": {
           "upload": "DOM.setFileInputFiles",
@@ -200,7 +202,7 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "adaptive replay consumes candidate plan contracts before registry persistence/promotion"
+        "next": "Site -> Skill v1 evidence/recipe compiler and user-facing persistence; never auto-promote"
       }
     },
     {
@@ -214,7 +216,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "cross-runtime evaluation of SK-BROWSER-001 v0.3.0; then trusted-input approval hardening",
+        "next": "Site -> Skill v1; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
@@ -258,8 +260,8 @@
         },
         "adaptive_replay": {
           "status": "verified",
-          "verified_sha": "0ad7117761a3f0d65987a6919e4eb3555f595678",
-          "ci_run_id": 36342347225,
+          "verified_sha": "3b6c7567f5f20124bedbe30abdac45005c777756",
+          "ci_run_id": 36367934722,
           "source": "SavedWorkflow v3 -> Record-to-Skill CandidateSkill",
           "ui": "Watch Me v3 Replay uses adaptive executor; legacy v2 retains exact single-tab replay",
           "task_session": "fresh BrowserCrew task-session identity per replay",
@@ -276,12 +278,11 @@
             "recorded element/semantic refs are evidence hints only"
           ],
           "parameters": "runtime overrides supported; recorded defaults used when no override is supplied",
-          "approvals": "recorded and current DOM approval metadata preserved",
+          "approvals": "recorded/current DOM approvals plus privileged extension-page proof for newly risky AX-only trusted actions",
           "boundary": "execution stops at maximum demonstrated plan index / boundary_step_id",
           "verification": "wait + fresh observation after actions and context changes",
           "known_limits": [
             "SessionCandidateSkill has no user-facing adaptive runner yet",
-            "newly risky AX-only targets can still be rejected by trusted-input safety after UI approval; trusted-input approval proof is not yet implemented",
             "Chat replay currently uses recorded parameter defaults; parameter-edit UX is not yet exposed"
           ]
         }
@@ -303,5 +304,20 @@
       "id": "security-permissions",
       "owner": "BrowserCrew/Security-Trust + BrowserCrew/browsercrew"
     }
-  ]
+  ],
+  "latest_verified": {
+    "sha": "3b6c7567f5f20124bedbe30abdac45005c777756",
+    "ci_run_id": 36367934722,
+    "extension_tests": {
+      "passed": 160,
+      "total": 160,
+      "files": 32
+    },
+    "bridge_tests": {
+      "passed": 3,
+      "total": 3
+    },
+    "artifact_id": 10947872942,
+    "artifact_digest": "sha256:7329bb00a869ff475f1e5bc270446d945a44b5624e6353e1bab46b353b5a1923"
+  }
 }
