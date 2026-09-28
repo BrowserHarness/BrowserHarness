@@ -2,11 +2,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   deleteSiteSkillCandidate,
   getSiteSkillCandidate,
+  getSiteSkillExecutableCandidate,
   getSiteSkillFamily,
+  getSiteSkillPromotionGate,
   listSiteSkillCandidateSummaries,
   listSiteSkillRevisionSummaries,
   listSiteSkillRevisions,
   loadSiteSkillCandidates,
+  promoteSiteSkillRevision,
+  recordSiteSkillEvaluation,
+  rollbackSiteSkillRevision,
   saveSiteSkillCandidate,
   SITE_SKILL_CANDIDATES_KEY,
   SITE_SKILL_LIBRARY_KEY
@@ -225,6 +230,227 @@ describe("versioned Site Skill storage", () => {
         reason: "refinement"
       })
     ]);
+  });
+
+  it("requires passed structural and execution evidence before explicit promotion", async () => {
+    await saveSiteSkillCandidate(candidate("SK-SITE-PROMOTE"), {
+      reason: "create",
+      created_at: "2026-09-28T05:00:00.000Z"
+    });
+
+    expect(
+      await getSiteSkillPromotionGate("SK-SITE-PROMOTE")
+    ).toEqual({
+      revision_id: "SK-SITE-PROMOTE:r1",
+      eligible: false,
+      structural_verification: "missing",
+      execution: "missing",
+      reasons: [
+        "structural verification evidence is missing",
+        "successful execution evidence is missing"
+      ]
+    });
+
+    await recordSiteSkillEvaluation(
+      "SK-SITE-PROMOTE",
+      "SK-SITE-PROMOTE:r1",
+      {
+        kind: "structural-verification",
+        outcome: "passed",
+        recorded_at: "2026-09-28T05:01:00.000Z"
+      }
+    );
+
+    await expect(
+      promoteSiteSkillRevision(
+        "SK-SITE-PROMOTE",
+        "SK-SITE-PROMOTE:r1"
+      )
+    ).rejects.toThrow("successful execution evidence is missing");
+
+    await recordSiteSkillEvaluation(
+      "SK-SITE-PROMOTE",
+      "SK-SITE-PROMOTE:r1",
+      {
+        kind: "execution",
+        outcome: "passed",
+        recorded_at: "2026-09-28T05:02:00.000Z"
+      }
+    );
+
+    const promotion = await promoteSiteSkillRevision(
+      "SK-SITE-PROMOTE",
+      "SK-SITE-PROMOTE:r1",
+      "2026-09-28T05:03:00.000Z"
+    );
+
+    expect(promotion).toMatchObject({
+      event_id: "SK-SITE-PROMOTE:lifecycle-1",
+      kind: "promotion",
+      to_revision_id: "SK-SITE-PROMOTE:r1"
+    });
+    expect(
+      (await getSiteSkillFamily("SK-SITE-PROMOTE"))
+        ?.active_revision_id
+    ).toBe("SK-SITE-PROMOTE:r1");
+  });
+
+  it("keeps execution pinned to the active revision when a newer candidate is created", async () => {
+    await saveSiteSkillCandidate(
+      candidate("SK-SITE-PINNED", "Stable"),
+      { reason: "create" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-PINNED",
+      "SK-SITE-PINNED:r1",
+      {
+        kind: "structural-verification",
+        outcome: "passed"
+      }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-PINNED",
+      "SK-SITE-PINNED:r1",
+      {
+        kind: "execution",
+        outcome: "passed"
+      }
+    );
+    await promoteSiteSkillRevision(
+      "SK-SITE-PINNED",
+      "SK-SITE-PINNED:r1"
+    );
+
+    const refinement = candidate(
+      "SK-SITE-PINNED",
+      "Experimental"
+    );
+    refinement.provenance.evidence_id = "ev-new";
+    refinement.provenance.captured_at =
+      "2026-09-28T06:00:00.000Z";
+    await saveSiteSkillCandidate(refinement, {
+      reason: "refinement"
+    });
+
+    expect(
+      (await getSiteSkillCandidate("SK-SITE-PINNED"))?.name
+    ).toBe("Experimental");
+    expect(
+      (
+        await getSiteSkillExecutableCandidate(
+          "SK-SITE-PINNED"
+        )
+      )?.name
+    ).toBe("Stable");
+    expect(
+      (await getSiteSkillFamily("SK-SITE-PINNED"))
+        ?.active_revision_id
+    ).toBe("SK-SITE-PINNED:r1");
+  });
+
+  it("uses the latest evaluation outcome and only rolls back to a previously active revision", async () => {
+    await saveSiteSkillCandidate(
+      candidate("SK-SITE-ROLLBACK", "Revision one"),
+      { reason: "create" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r1",
+      { kind: "structural-verification", outcome: "passed" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r1",
+      { kind: "execution", outcome: "passed" }
+    );
+    await promoteSiteSkillRevision(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r1"
+    );
+
+    const second = candidate(
+      "SK-SITE-ROLLBACK",
+      "Revision two"
+    );
+    second.provenance.evidence_id = "ev-2";
+    second.provenance.captured_at =
+      "2026-09-28T06:10:00.000Z";
+    await saveSiteSkillCandidate(second, {
+      reason: "refinement"
+    });
+
+    await recordSiteSkillEvaluation(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r2",
+      { kind: "structural-verification", outcome: "passed" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r2",
+      { kind: "execution", outcome: "passed" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r2",
+      {
+        kind: "execution",
+        outcome: "failed",
+        detail: "Submit target drifted"
+      }
+    );
+
+    expect(
+      await getSiteSkillPromotionGate(
+        "SK-SITE-ROLLBACK",
+        "SK-SITE-ROLLBACK:r2"
+      )
+    ).toMatchObject({
+      eligible: false,
+      execution: "failed"
+    });
+
+    await expect(
+      promoteSiteSkillRevision(
+        "SK-SITE-ROLLBACK",
+        "SK-SITE-ROLLBACK:r2"
+      )
+    ).rejects.toThrow("latest execution evaluation failed");
+
+    await expect(
+      rollbackSiteSkillRevision(
+        "SK-SITE-ROLLBACK",
+        "SK-SITE-ROLLBACK:r2"
+      )
+    ).rejects.toThrow(
+      "SITE_SKILL_ROLLBACK_TARGET_NOT_PREVIOUSLY_ACTIVE"
+    );
+
+    await recordSiteSkillEvaluation(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r2",
+      { kind: "execution", outcome: "passed" }
+    );
+    await promoteSiteSkillRevision(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r2"
+    );
+
+    const rollback = await rollbackSiteSkillRevision(
+      "SK-SITE-ROLLBACK",
+      "SK-SITE-ROLLBACK:r1"
+    );
+    expect(rollback).toMatchObject({
+      kind: "rollback",
+      from_revision_id: "SK-SITE-ROLLBACK:r2",
+      to_revision_id: "SK-SITE-ROLLBACK:r1"
+    });
+    expect(
+      (
+        await getSiteSkillExecutableCandidate(
+          "SK-SITE-ROLLBACK"
+        )
+      )?.name
+    ).toBe("Revision one");
   });
 
   it("gets and deletes the full Skill family", async () => {
