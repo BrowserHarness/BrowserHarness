@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { waitForTabUsable } from "./navigation";
+import {
+  goBackAndWait,
+  reloadAndWait,
+  waitForTabUsable
+} from "./navigation";
 
 let tab: chrome.tabs.Tab;
 let listeners: Array<
@@ -35,6 +39,21 @@ beforeEach(() => {
     value: {
       tabs: {
         get: vi.fn(async () => ({ ...tab })),
+        goBack: vi.fn(async () => {
+          tab = {
+            ...tab,
+            status: "complete",
+            url: "https://example.com/previous",
+            title: "Previous"
+          };
+          return { ...tab };
+        }),
+        reload: vi.fn(async () => {
+          tab = {
+            ...tab,
+            status: "complete"
+          };
+        }),
         onUpdated: {
           addListener: vi.fn((listener) => listeners.push(listener)),
           removeListener: vi.fn((listener) => {
@@ -102,5 +121,35 @@ describe("navigation readiness", () => {
     await expect(waitForTabUsable(1, 25)).rejects.toThrow(
       "did not become usable"
     );
+  });
+
+  it("navigates back and returns the final usable page", async () => {
+    const ready = await goBackAndWait(1, 100);
+
+    expect(chrome.tabs.goBack).toHaveBeenCalledWith(1);
+    expect(ready).toMatchObject({
+      tab_id: 1,
+      url: "https://example.com/previous",
+      title: "Previous",
+      status: "complete"
+    });
+  });
+
+  it("reloads with optional cache bypass and waits for usability", async () => {
+    tab.status = "complete";
+
+    const ready = await reloadAndWait(1, {
+      bypassCache: true,
+      timeoutMs: 100
+    });
+
+    expect(chrome.tabs.reload).toHaveBeenCalledWith(1, {
+      bypassCache: true
+    });
+    expect(ready).toMatchObject({
+      tab_id: 1,
+      url: "https://example.com",
+      status: "complete"
+    });
   });
 });
