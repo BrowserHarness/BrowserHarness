@@ -11,7 +11,8 @@ vi.mock("./cdp-manager", () => ({
 import {
   backendNodeForRef,
   captureAxSnapshot,
-  elementForAxRef
+  elementForAxRef,
+  findAxElements
 } from "./cdp-semantic";
 import {
   trustedClick,
@@ -74,6 +75,49 @@ describe("CDP semantic and trusted-input runtime", () => {
     expect(snapshot.text).toContain('@e1 button "Continue"');
     expect(backendNodeForRef(7, "@e2")).toBe(102);
     expect(elementForAxRef(7, "@e1")?.name).toBe("Continue");
+  });
+
+  it("finds fresh AX elements by semantic text and role", () => {
+    const matches = findAxElements(
+      {
+        text: "",
+        elements: [
+          {
+            element_id: "@e1",
+            backend_node_id: 1,
+            role: "button",
+            name: "Continue checkout",
+            disabled: false,
+            focused: false
+          },
+          {
+            element_id: "@e2",
+            backend_node_id: 2,
+            role: "link",
+            name: "Continue reading",
+            disabled: false,
+            focused: false
+          },
+          {
+            element_id: "@e3",
+            backend_node_id: 3,
+            role: "button",
+            name: "Cancel",
+            description: "Return to cart",
+            disabled: false,
+            focused: false
+          }
+        ]
+      },
+      {
+        query: "continue",
+        role: "button"
+      }
+    );
+
+    expect(matches.map((item) => item.element_id)).toEqual([
+      "@e1"
+    ]);
   });
 
   it("dispatches trusted mouse input at the target box center", async () => {
