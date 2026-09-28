@@ -84,6 +84,7 @@
     "ax_snapshot",
     "evaluate",
     "site_skill",
+    "memory",
     "select_option",
     "hover",
     "drag",
@@ -263,5 +264,33 @@
     "purpose": "close all task-owned tabs and delete the BrowserCrew task session",
     "preserves": "borrowed user tabs are never closed",
     "output": "session_id, closed_owned_tabs count, borrowed_tabs_preserved count"
+  },
+  "memory": {
+    "actions": [
+      "active",
+      "search",
+      "list",
+      "get",
+      "delete"
+    ],
+    "working": {
+      "storage": "chrome.storage.session",
+      "scope": "current BrowserCrew task session only",
+      "automatic_updates": "initial page + successful browser actions + human handoffs",
+      "payload_policy": "tool input payloads are excluded; stores task/page/tool/target/Skill references only",
+      "retirement": "cleared after final durable task episode is saved or when close_session runs"
+    },
+    "episodic": {
+      "storage": "chrome.storage.local",
+      "max_episodes": 500,
+      "source": "BrowserTaskSessionEvidence",
+      "search": "bounded deterministic lexical retrieval over task/title/sites/tools/targets/Skill refs",
+      "payload_policy": "raw action inputs, typed text, uploads and Site Skill parameter values are not persisted"
+    },
+    "automatic_recall": {
+      "query": "current user goal + current hostname",
+      "max_results": 3,
+      "planner_semantics": "recalled episodes are labeled historical evidence only and never override current goal/fresh browser evidence"
+    }
   }
 }
