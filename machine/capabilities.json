@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-site-skill-v1-verified-interaction-parity-active",
+  "status": "v0.2-kimi-interaction-parity-verified-skill-lifecycle-next",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -171,6 +171,31 @@
         "files": {
           "upload": "DOM.setFileInputFiles",
           "pdf": "Page.printToPDF + chrome.downloads"
+        },
+        "human_handoff": {
+          "tool": "await_user_action",
+          "scope": "orchestrator-only; not Local Bridge command surface",
+          "use_cases": [
+            "login/sign-in or expired session",
+            "CAPTCHA/slider/human verification",
+            "2FA/SMS/authenticator approval",
+            "explicit one-off manual consent/age gate"
+          ],
+          "behavior": [
+            "10-second navigation-first grace window",
+            "takeover card only when the page has not advanced",
+            "navigation remains a live resume path while takeover UI is visible",
+            "manual confirmation resumes",
+            "cancel stops task",
+            "fresh observe_page before planner resumes"
+          ],
+          "learning": [
+            "manual handoffs are non-executable BrowserTaskSessionEvidence",
+            "manual handoffs do not advance boundary_action_id",
+            "Session-to-Skill compiler rejects sessions crossing manual handoff preconditions"
+          ],
+          "verified_sha": "0204ecbf78b5be694267cf7a9dc0ea04afaeb9f4",
+          "ci_run_id": 36371442796
         }
       }
     },
@@ -231,7 +256,11 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 30
+        "tools": 30,
+        "planner_tools": 31,
+        "orchestrator_only": [
+          "await_user_action"
+        ]
       }
     },
     {
@@ -243,7 +272,7 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "await-user-action / human handoff, then versioned Skill refinement/promotion",
+        "next": "versioned candidate revisions, evaluation comparison, explicit promotion and rollback",
         "site_to_skill": {
           "status": "verified-v1",
           "tool": "site_skill",
@@ -286,7 +315,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "await-user-action / human handoff; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
+        "next": "versioned Skill refinement/promotion/rollback; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
