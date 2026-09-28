@@ -11,6 +11,7 @@ import type {
 } from "./protocol";
 import type { AgentDecision } from "./model-client";
 import type { BrowserWorkingMemory } from "./working-memory";
+import type { TaskEpisodeMemory } from "./task-memory";
 
 function page(
   tabId: number,
@@ -122,6 +123,60 @@ function harness(options: {
 }
 
 describe("Browser MVP engine scenarios", () => {
+  it("supplies bounded recalled episodes as historical planning evidence", async () => {
+    const h = harness({
+      observations: [page(1, "Checkout", "Continue")],
+      decisions: [
+        {
+          kind: "final",
+          message: "Done."
+        }
+      ]
+    });
+
+    const recalled: TaskEpisodeMemory = {
+      schema_version: 1,
+      id: "episode:prior",
+      kind: "task_episode",
+      recorded_at: "2026-09-28T08:00:00.000Z",
+      session_id: "prior-session",
+      title: "Prior checkout",
+      task: "Finish checkout",
+      status: "completed",
+      start: {
+        tab_id: 4,
+        url: "https://example.com/checkout",
+        title: "Checkout"
+      },
+      action_count: 2,
+      manual_handoff_count: 0,
+      tools: ["site_skill"],
+      targets: ["Continue"],
+      sites: ["https://example.com"],
+      skill_refs: [
+        {
+          id: "SK-SITE-CHECKOUT",
+          action: "run",
+          revision_id: "SK-SITE-CHECKOUT:r1"
+        }
+      ],
+      sensitive_payloads_removed: true
+    };
+
+    h.dependencies.recallMemory = vi.fn(
+      async () => [recalled]
+    );
+
+    await runBrowserTask(
+      "Finish checkout",
+      h.dependencies
+    );
+
+    expect(h.contexts[0].recalled_memory).toEqual([
+      recalled
+    ]);
+  });
+
   it("completes a current-page read without mutation", async () => {
     const h = harness({
       observations: [page(1, "Article", "AI is changing software.")],
