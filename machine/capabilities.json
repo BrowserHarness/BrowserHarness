@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-watch-me-v3-adaptive-replay-verified",
+  "status": "v0.2-kimi-reference-parity-hardening",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -45,7 +45,7 @@
           "new_task_tabs": "background by default",
           "find_tab": "changes BrowserCrew task target without Chrome foreground activation",
           "switch_tab": "explicit foreground activation",
-          "screenshot": "fails with SCREENSHOT_REQUIRES_VISIBLE_TAB rather than capture a different foreground tab"
+          "screenshot": "CDP Page.captureScreenshot targets the selected task tab even when backgrounded; full-page and semantic-element clip modes supported"
         },
         "recorder_v2": {
           "enriched_locators": true,
@@ -106,7 +106,14 @@
           ],
           "focus_emulation": "Emulation.setFocusEmulationEnabled",
           "native_dialogs": "Page.javascriptDialogOpening + Page.handleJavaScriptDialog",
-          "raw_escape_hatch": "cdp tool"
+          "raw_escape_hatch": "cdp tool",
+          "semantic_find": "fresh Accessibility.getFullAXTree search by query/role",
+          "page_evaluate": "bounded Runtime.evaluate with JSON-safe by-value results",
+          "screenshot": "Page.captureScreenshot viewport/full-page/semantic-element clip",
+          "trusted_click_verification": [
+            "elementFromPoint occlusion check at calculated target point",
+            "pointerdown/mousedown delivery proof before success"
+          ]
         },
         "network": {
           "tool": "network",
@@ -181,7 +188,7 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 23
+        "tools": 25
       }
     },
     {
