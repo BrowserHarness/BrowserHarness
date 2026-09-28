@@ -1,8 +1,38 @@
-import { describe, expect, it, vi } from "vitest";
+import {
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi
+} from "vitest";
 import {
   externalMcpToolRequiresApproval,
   runExternalMcpTool
 } from "./mcp-tools";
+
+let trustStore: Record<string, unknown>;
+
+beforeEach(() => {
+  trustStore = {};
+  Object.defineProperty(globalThis, "chrome", {
+    configurable: true,
+    value: {
+      storage: {
+        local: {
+          get: async (key: string) => ({
+            [key]: trustStore[key]
+          }),
+          set: async (value: Record<string, unknown>) => {
+            Object.assign(
+              trustStore,
+              structuredClone(value)
+            );
+          }
+        }
+      }
+    }
+  });
+});
 
 describe("external MCP runtime tool", () => {
   it("treats only explicitly read-only non-destructive tools as approval-free", () => {
