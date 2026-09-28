@@ -184,14 +184,21 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - automatic recall now uses hybrid retrieval and remains capped at three historical episodes
    - embedding endpoint failure degrades to lexical retrieval instead of failing the browser task
    - raw action inputs, typed values, upload paths and Skill parameter values are never embedded
-9. **Procedural memory — next active engineering target**
-   - retrieve exact immutable Site Skill revisions rather than generic summaries
-   - include lifecycle state, structural verification, execution evidence and recipe contracts
-   - hybrid lexical/semantic retrieval with active/proven procedures favored only by explicit evidence
-   - planner recall must expose exact Skill/revision provenance and never silently execute a retrieved procedure
-10. **MCP client/tool bridge — after memory retrieval**
-   - connect external MCP servers without weakening BrowserCrew task-session ownership, approval handling or evidence contracts
-10. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+9. **Procedural memory — verified at `aa0cc7e64bbcbaa0eaef53b92687acb05710fe84` (CI `36377638107`)**
+   - retrieval preserves exact immutable Site Skill + revision provenance
+   - active revision and newer candidate remain separate procedures when they differ
+   - each procedure exposes lifecycle state, structural verification, latest execution, execution counts/success rate, promotion gate, parameter contract and recipe/step contract
+   - hybrid lexical + semantic retrieval with lexical fallback on embedding failure
+   - active/proven evidence contributes only a tiny explicit near-tie preference; relevance ranking remains authoritative
+   - task-start procedure recall is capped at three
+   - `memory procedures` exposes the same revision-aware retrieval to Bridge/external agents
+   - procedural retrieval must never execute implicitly; the planner must explicitly call `site_skill run` with the exact revision after checking the current goal and fresh page
+   - CI: 240/240 extension tests across 48 files; typecheck/build/MV3/contract/package PASS
+10. **MCP client/tool bridge — next active engineering target**
+   - expose BrowserCrew through a local stdio MCP server backed by the existing authenticated Local Bridge
+   - preserve BrowserCrew task-session ownership, approval handling and evidence contracts; MCP must not become a second browser executor
+   - then add outbound MCP client support for external MCP servers
+11. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
