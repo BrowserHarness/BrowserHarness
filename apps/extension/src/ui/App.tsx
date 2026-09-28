@@ -585,11 +585,11 @@ export function App() {
               usedFallback: routed.usedFallback
             };
           },
-          tool: async (
-            tool,
-            input = {},
+          tool: async <T = unknown>(
+            tool: ToolName,
+            input: Record<string, unknown> = {},
             execution?: BrowserToolExecution
-          ) => {
+          ): Promise<ToolResult<T>> => {
             if (tool === "agent") {
               const workerTask =
                 typeof input.task === "string"
@@ -603,7 +603,7 @@ export function App() {
                     message:
                       "agent requires a non-empty task"
                   }
-                };
+                } as ToolResult<T>;
               }
 
               const workerSessionId =
@@ -720,11 +720,11 @@ export function App() {
 
               return {
                 ok: true,
-                data: finding
+                data: finding as T
               };
             }
 
-            return extensionMessage({
+            return extensionMessage<T>({
               type: "BROWSER_TOOL",
               tool,
               input,
