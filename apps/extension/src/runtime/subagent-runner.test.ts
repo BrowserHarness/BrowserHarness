@@ -4,8 +4,27 @@ import {
 } from "./subagent-runner";
 import type {
   PageObservation,
-  ToolName
+  ToolName,
+  ToolResult
 } from "./protocol";
+import type {
+  BrowserToolExecution
+} from "./browser-engine";
+
+function genericBaseTool(
+  mock: ReturnType<typeof vi.fn>
+) {
+  return async <T = unknown>(
+    tool: ToolName,
+    input?: Record<string, unknown>,
+    execution?: BrowserToolExecution
+  ): Promise<ToolResult<T>> =>
+    (await mock(
+      tool,
+      input,
+      execution
+    )) as ToolResult<T>;
+}
 
 function page(
   tab_id: number,
@@ -72,7 +91,7 @@ describe("read-only subagent runner", () => {
                 }
               };
         },
-        baseTool,
+        baseTool: genericBaseTool(baseTool),
         isCancelled: () => false,
         waitWhilePaused: async () => undefined
       }
@@ -128,7 +147,7 @@ describe("read-only subagent runner", () => {
             note: "Clicking"
           }
         }),
-        baseTool,
+        baseTool: genericBaseTool(baseTool),
         isCancelled: () => false,
         waitWhilePaused: async () => undefined
       }
@@ -192,7 +211,7 @@ describe("read-only subagent runner", () => {
             note: "Trying MCP"
           }
         }),
-        baseTool,
+        baseTool: genericBaseTool(baseTool),
         isCancelled: () => false,
         waitWhilePaused: async () => undefined
       }
