@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   directChatCompletion,
+  embedTexts,
   nextAgentDecision,
   parseAgentDecision,
+  testEmbeddingCapability,
   testModelConnection
 } from "./model-client";
 import type { PageObservation } from "./protocol";
@@ -36,6 +38,113 @@ const observation: PageObservation = {
     }
   ]
 };
+
+describe("embedding capability", () => {
+  it("uses the OpenAI-compatible embeddings endpoint and preserves input order", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { index: 1, embedding: [0, 1, 0] },
+            { index: 0, embedding: [1, 0, 0] }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    const config: ProviderConfig = {
+      provider: "openai-compatible",
+      apiKey: "local-key",
+      model: "bge-small-en",
+      baseUrl: "http://127.0.0.1:1234/v1"
+    };
+
+    const result = await embedTexts(
+      config,
+      ["checkout", "pricing"]
+    );
+
+    expect(result).toEqual({
+      vectors: [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      dimensions: 3
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "http://127.0.0.1:1234/v1/embeddings"
+    );
+    const body = JSON.parse(String(init?.body));
+    expect(body).toEqual({
+      model: "bge-small-en",
+      input: ["checkout", "pricing"]
+    });
+  });
+
+  it("rejects malformed or inconsistent embedding vectors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { index: 0, embedding: [1, 0] },
+            { index: 1, embedding: [1, 0, 0] }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    await expect(
+      embedTexts(
+        {
+          provider: "openai-compatible",
+          apiKey: "x",
+          model: "text-embedding-test",
+          baseUrl: "http://127.0.0.1:1234/v1"
+        },
+        ["a", "b"]
+      )
+    ).rejects.toThrow("inconsistent vector dimensions");
+  });
+
+  it("health-checks an embedding model independently of chat", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              index: 0,
+              embedding: [0.1, 0.2, 0.3, 0.4]
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    const result = await testEmbeddingCapability({
+      provider: "nvidia",
+      apiKey: "nvapi-test",
+      model: "nvidia/nv-embed-test",
+      baseUrl: "https://integrate.api.nvidia.com/v1"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.preview).toContain("4 dimensions");
+  });
+});
 
 describe("directChatCompletion", () => {
   it("uses plain chat output for NVIDIA direct chat", async () => {
