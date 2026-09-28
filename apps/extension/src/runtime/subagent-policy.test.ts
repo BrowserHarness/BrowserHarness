@@ -1,9 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
+import type {
+  ToolName,
+  ToolResult
+} from "./protocol";
+import type {
+  BrowserToolExecution
+} from "./browser-engine";
 import {
   newReadOnlyWorkerToolState,
   readOnlyWorkerToolPolicy,
   runReadOnlyWorkerTool
 } from "./subagent-policy";
+
+function genericTool(
+  mock: ReturnType<typeof vi.fn>
+) {
+  return async <T = unknown>(
+    tool: ToolName,
+    input?: Record<string, unknown>,
+    execution?: BrowserToolExecution
+  ): Promise<ToolResult<T>> =>
+    (await mock(
+      tool,
+      input,
+      execution
+    )) as ToolResult<T>;
+}
 
 describe("read-only worker tool policy", () => {
   it("allows passive reads but denies mutation and recursive agents", () => {
@@ -73,7 +95,7 @@ describe("read-only worker tool policy", () => {
       },
       undefined,
       state,
-      baseTool
+      genericTool(baseTool)
     );
 
     expect(state.owned_tab_ids.has(44)).toBe(true);
@@ -146,7 +168,7 @@ describe("read-only worker tool policy", () => {
       },
       { approvalGranted: true },
       state,
-      baseTool
+      genericTool(baseTool)
     );
 
     expect(baseTool).toHaveBeenCalledWith(
