@@ -44,6 +44,10 @@ import { evaluatePageExpression } from "./page-evaluate";
 import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
+  runSiteSkillRecipe,
+  selectSiteSkillRecipe
+} from "../runtime/site-skill-runner";
+import {
   deleteSiteSkillCandidate,
   getSiteSkillCandidate,
   listSiteSkillCandidateSummaries,
@@ -557,13 +561,17 @@ async function runTool(
       };
     }
 
-    if (action !== "create" && action !== "verify") {
+    if (
+      action !== "create" &&
+      action !== "verify" &&
+      action !== "run"
+    ) {
       return {
         ok: false,
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, verify, list, get, or delete"
+            "site_skill action must be create, verify, run, list, get, or delete"
         }
       };
     }
@@ -589,6 +597,122 @@ async function runTool(
             "Site Skill creation requires an http(s) page"
         }
       };
+    }
+
+    if (action === "run") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill run requires id"
+          }
+        };
+      }
+
+      const existing = await getSiteSkillCandidate(input.id);
+      if (!existing) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_NOT_FOUND",
+            message: "Site Skill candidate was not found"
+          }
+        };
+      }
+
+      try {
+        const recipe = selectSiteSkillRecipe(
+          existing,
+          typeof input.recipe_id === "string"
+            ? input.recipe_id
+            : undefined
+        );
+        const fresh = await collectCurrentSiteSkill({
+          tab_id: tabId,
+          url: tab.url,
+          title: tab.title || new URL(tab.url).hostname,
+          requested_name: existing.name,
+          include_network: input.include_network !== false
+        });
+        const verification = verifySiteSkillCandidate(
+          existing,
+          fresh.evidence
+        );
+        const updated = {
+          ...existing,
+          verification
+        };
+        await saveSiteSkillCandidate(updated);
+
+        if (verification.status !== "verified") {
+          return {
+            ok: false,
+            data: { verification },
+            error: {
+              code: "SITE_SKILL_VERIFICATION_FAILED",
+              message:
+                "Site Skill candidate no longer matches fresh site evidence"
+            }
+          };
+        }
+
+        const submitStep = recipe.steps.find(
+          (step) => step.kind === "submit"
+        );
+        const submitLabel =
+          submitStep?.target?.accessible_name || recipe.name;
+        const requiresApproval = Boolean(
+          submitStep &&
+            (submitStep.method.toUpperCase() !== "GET" ||
+              isRiskyTrustedLabel(submitLabel))
+        );
+
+        if (requiresApproval && !options.approvalGranted) {
+          return {
+            ok: false,
+            error: {
+              code: "APPROVAL_REQUIRED",
+              message:
+                `Run Site Skill “${existing.name}” recipe “${recipe.name}” and submit on ${new URL(tab.url).hostname}?`
+            }
+          };
+        }
+
+        const parameters =
+          input.parameters &&
+          typeof input.parameters === "object" &&
+          !Array.isArray(input.parameters)
+            ? (input.parameters as Record<string, unknown>)
+            : {};
+
+        const run = await runSiteSkillRecipe({
+          tab_id: tabId,
+          candidate: updated,
+          recipe_id: recipe.id,
+          parameters
+        });
+
+        return {
+          ok: true,
+          data: {
+            candidate_id: updated.id,
+            verification,
+            run
+          }
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_RUN_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Site Skill execution failed"
+          }
+        };
+      }
     }
 
     if (action === "verify") {
