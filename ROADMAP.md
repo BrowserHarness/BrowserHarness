@@ -165,13 +165,24 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - explicit promotion requires passing latest structural + execution evaluation for the same revision
    - explicit rollback only targets a previously active revision
    - no auto-promotion
-7. **v0.3 Memory + MCP foundation — next active engineering target**
-   - working memory for the current task/session
-   - episodic execution memory linked to task/Skill evidence
-   - semantic retrieval over reusable knowledge
-   - procedural memory linked to versioned Skills
-   - MCP client/tool bridge without weakening BrowserCrew task-session ownership
-8. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+7. **v0.3 Memory foundation — working + episodic + automatic recall verified**
+   - durable structured task episodes verified at `72c2efa34ac106c42f5dc81001002216415acce0` (CI `36375186790`)
+   - active-session working memory verified at `664ca6552c50aa51cea66c905535bc33b900bac7` (CI `36375649476`)
+   - automatic bounded recall verified at `55f17d18ecc88f8cbf79db2f984f133343642df8` (CI `36375686902`)
+   - working memory updates automatically after meaningful actions/handoffs and stores no raw tool-input payloads
+   - final task state rolls into durable episodic memory before working state is retired
+   - episodic memory keeps task outcome, sites, tools, semantic targets, handoffs and Skill/revision references while excluding typed/uploaded parameter payloads
+   - task-start recall uses current goal + hostname, returns at most three episodes and labels them historical evidence only
+   - `memory` tool exposes current-session active memory plus bounded search/list/get/delete of durable episodes
+   - Local Bridge surface: **34 tools**; BrowserCrew runtime surface: **35 tools** including orchestrator-only human handoff
+8. **Semantic + procedural memory — next active engineering target**
+   - provider-agnostic embedding interface with lexical fallback
+   - bounded semantic retrieval/reranking over durable episodes
+   - procedural memory linked to active/candidate Skill revisions and execution evidence
+   - retrieval evidence must remain inspectable and source-linked
+9. **MCP client/tool bridge — after memory retrieval**
+   - connect external MCP servers without weakening BrowserCrew task-session ownership, approval handling or evidence contracts
+10. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
