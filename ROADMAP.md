@@ -140,13 +140,18 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - candidate status is preserved after verified execution; no auto-promotion
    - Local Bridge/browser runtime surface: **27 tools**
    - CI run `36369232137`: 181/181 extension tests across 38 files + 3/3 Bridge tests, all typecheck/build/MV3/contract/package gates green
-5. **Kimi-reference interaction parity — active**
+5. **Kimi-reference interaction parity — verified**
    - hover — verified
    - drag/drop with real CDP pointer sequence + source/target delivery verification — verified at `7f3df6c3f1bbb2df440b63b0a41c2fbb70e0069c` (CI `36370487993`)
    - richer key chords/sequences/modifiers — verified at `f89e629ea4d5f14a82cc38021c9e7bbb5383ea24` (CI `36370758984`)
    - `send_keys` matches the Kimi reference surface: OS-aware `Mod`, Alt/Ctrl/Cmd/Meta/Shift, named navigation keys, F1-F12, sequences and repeat 1-100
-   - await-user-action / human handoff for login, CAPTCHA, 2FA or explicit manual step — next
-6. **Versioned Skill lifecycle + refinement — after interaction parity**
+   - `await_user_action` / human handoff — verified at `0204ecbf78b5be694267cf7a9dc0ea04afaeb9f4` (CI `36371442796`)
+   - handoff waits 10 seconds for natural navigation before showing takeover UI; navigation remains a live resume path while the card is visible
+   - takeover UI exposes “I’m done, continue” and “Cancel task”; continuation always re-observes fresh page state
+   - manual login/CAPTCHA/2FA/consent steps are recorded as non-executable evidence and never advance the learned action boundary
+   - Session → Skill compilation rejects sessions crossing manual handoffs instead of pretending the human-only precondition is automated
+   - verified gate: 201/201 extension tests across 42 files + 3/3 Bridge tests; typecheck/build/MV3/contract/package PASS
+6. **Versioned Skill lifecycle + refinement — next active engineering target**
    - candidate revision history
    - evaluation comparison against active version
    - explicit promotion
