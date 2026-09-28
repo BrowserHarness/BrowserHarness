@@ -6,6 +6,7 @@ import type {
 import type { AgentDecision } from "./model-client";
 import type { TaskEpisodeMemory } from "./task-memory";
 import type { ProceduralSearchHit } from "./procedural-memory";
+import type { BrowserCrewMcpCatalog } from "./mcp-catalog";
 import { createLoopGuard, registerDecision } from "./loop-guard";
 import {
   TabEvidenceStore,
@@ -32,6 +33,7 @@ export interface BrowserDecisionContext {
   evidence: TabEvidence[];
   recalled_memory: TaskEpisodeMemory[];
   recalled_procedures: ProceduralSearchHit[];
+  mcp_catalog: BrowserCrewMcpCatalog;
   screenshotDataUrl?: string;
   signal?: AbortSignal;
 }
@@ -82,6 +84,10 @@ export interface BrowserEngineDependencies {
     task: string,
     observation: PageObservation
   ): Promise<ProceduralSearchHit[]>;
+  discoverMcpCatalog?(
+    task: string,
+    observation: PageObservation
+  ): Promise<BrowserCrewMcpCatalog>;
   isCancelled(): boolean;
   waitWhilePaused(): Promise<void>;
   withActivity<T>(
@@ -225,6 +231,17 @@ export async function runBrowserTask(
         .recallProcedures(task, observation)
         .catch(() => [])
     : [];
+  const mcpCatalog = dependencies.discoverMcpCatalog
+    ? await dependencies
+        .discoverMcpCatalog(task, observation)
+        .catch(() => ({
+          servers_considered: 0,
+          tools: []
+        }))
+    : {
+        servers_considered: 0,
+        tools: []
+      };
 
   const sessionIdentity = dependencies.session || {
     id: "browser-task",
@@ -317,6 +334,7 @@ export async function runBrowserTask(
           evidence: evidenceStore.list(),
           recalled_memory: recalledMemory,
           recalled_procedures: recalledProcedures,
+          mcp_catalog: mcpCatalog,
           screenshotDataUrl: screenshotForDecision,
           signal
         })
