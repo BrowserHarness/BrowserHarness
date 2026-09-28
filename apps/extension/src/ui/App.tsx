@@ -65,6 +65,9 @@ import {
   searchTaskMemoryHybrid
 } from "../runtime/semantic-memory";
 import {
+  searchProceduralMemory
+} from "../runtime/procedural-memory";
+import {
   clearBrowserWorkingMemory,
   saveBrowserWorkingMemory
 } from "../runtime/working-memory";
@@ -549,6 +552,7 @@ export function App() {
             trail,
             evidence,
             recalled_memory,
+            recalled_procedures,
             screenshotDataUrl,
             signal
           }) => {
@@ -561,7 +565,8 @@ export function App() {
               signal,
               evidence,
               screenshotDataUrl,
-              recalled_memory
+              recalled_memory,
+              recalled_procedures
             );
             return {
               decision: routed.result,
@@ -600,6 +605,14 @@ export function App() {
                 3
               )
             ).map((hit) => hit.episode),
+          recallProcedures: (
+            browserTask,
+            observation
+          ) =>
+            searchProceduralMemory(
+              `${browserTask} ${safeHostname(observation.url)}`,
+              3
+            ),
           requestUserAction: async (
             reason,
             observation,
