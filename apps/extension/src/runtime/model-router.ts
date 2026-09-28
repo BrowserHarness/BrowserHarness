@@ -1,6 +1,7 @@
 import type { PageObservation } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
 import type { TaskEpisodeMemory } from "./task-memory";
+import type { ProceduralSearchHit } from "./procedural-memory";
 import {
   directChatCompletion,
   nextAgentDecision,
@@ -75,7 +76,8 @@ export async function agentDecisionWithFallback(
   signal?: AbortSignal,
   evidence: TabEvidence[] = [],
   screenshotDataUrl?: string,
-  recalledMemory: TaskEpisodeMemory[] = []
+  recalledMemory: TaskEpisodeMemory[] = [],
+  recalledProcedures: ProceduralSearchHit[] = []
 ): Promise<RoutedResult<AgentDecision>> {
   return runWithFallback(primary, fallback, (connection) =>
     nextAgentDecision(
@@ -86,7 +88,8 @@ export async function agentDecisionWithFallback(
       signal,
       evidence,
       screenshotDataUrl,
-      recalledMemory
+      recalledMemory,
+      recalledProcedures
     )
   );
 }
