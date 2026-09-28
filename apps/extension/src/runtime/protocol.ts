@@ -8,6 +8,7 @@ export type ToolName =
   | "evaluate"
   | "site_skill"
   | "memory"
+  | "mcp"
   | "select_option"
   | "hover"
   | "drag"
