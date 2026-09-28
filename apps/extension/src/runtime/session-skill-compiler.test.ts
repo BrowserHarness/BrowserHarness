@@ -354,6 +354,32 @@ describe("Browser task Session to Skill compiler", () => {
       error: "SESSION_SKILL_COMPILE_REQUIRES_COMPLETED_SESSION"
     },
     {
+      name: "session crossing a manual handoff",
+      mutate: (session: BrowserTaskSessionEvidence) => {
+        session.manual_handoffs = [
+          {
+            id: "handoff-1",
+            recorded_at: "2026-09-27T12:00:01.250Z",
+            reason: "Complete two-factor authentication",
+            status: "continued",
+            source: "user",
+            before: {
+              tab_id: 21,
+              url: "https://shop.example/login",
+              title: "Login"
+            },
+            after: {
+              tab_id: 21,
+              url: "https://shop.example/account",
+              title: "Account"
+            }
+          }
+        ];
+      },
+      error:
+        "SESSION_SKILL_COMPILE_REQUIRES_MANUAL_HANDOFF_PRECONDITION"
+    },
+    {
       name: "session without actions",
       mutate: (session: BrowserTaskSessionEvidence) => {
         session.actions = [];
