@@ -6,6 +6,7 @@ import type { BrowserCrewMcpCatalog } from "./mcp-catalog";
 import {
   directChatCompletion,
   nextAgentDecision,
+  nextReadOnlyWorkerDecision,
   type AgentDecision
 } from "./model-client";
 import type { ProviderConnection } from "../settings/provider-store";
@@ -65,6 +66,32 @@ export async function directChatWithFallback(
 ): Promise<RoutedResult<string>> {
   return runWithFallback(primary, fallback, (connection) =>
     directChatCompletion(connection, prompt, signal)
+  );
+}
+
+export async function readOnlyWorkerDecisionWithFallback(
+  primary: ProviderConnection,
+  fallback: ProviderConnection | null,
+  task: string,
+  observation: PageObservation,
+  trail: string[],
+  signal?: AbortSignal,
+  evidence: TabEvidence[] = [],
+  mcpCatalog: BrowserCrewMcpCatalog = {
+    servers_considered: 0,
+    tools: []
+  }
+): Promise<RoutedResult<AgentDecision>> {
+  return runWithFallback(primary, fallback, (connection) =>
+    nextReadOnlyWorkerDecision(
+      connection,
+      task,
+      observation,
+      trail,
+      signal,
+      evidence,
+      mcpCatalog
+    )
   );
 }
 
