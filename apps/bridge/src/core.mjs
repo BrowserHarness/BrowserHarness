@@ -62,7 +62,8 @@ export function createBridgeServer({
   host = "127.0.0.1",
   port = 10087,
   token,
-  commandTimeoutMs = 30_000
+  commandTimeoutMs = 30_000,
+  mcpManager = null
 } = {}) {
   if (!token) throw new Error("Bridge pairing token is required");
   if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
@@ -79,6 +80,12 @@ export function createBridgeServer({
       const url = new URL(req.url || "/", `http://${host}`);
 
       if (req.method === "GET" && url.pathname === "/status") {
+        const configuredMcpServers = mcpManager
+          ? await mcpManager
+              .listServers()
+              .then((servers) => servers.length)
+              .catch(() => 0)
+          : 0;
         json(res, 200, {
           running: true,
           protocol_version: BRIDGE_PROTOCOL_VERSION,
@@ -86,8 +93,169 @@ export function createBridgeServer({
           extension_connected:
             extension?.readyState === WebSocket.OPEN,
           extension_id: extensionMeta?.extension_id || "",
-          extension_version: extensionMeta?.extension_version || ""
+          extension_version: extensionMeta?.extension_version || "",
+          mcp_client_enabled: Boolean(mcpManager),
+          mcp_servers_configured: configuredMcpServers
         });
+        return;
+      }
+
+      if (
+        url.pathname.startsWith("/mcp/") &&
+        !authorized(req, token)
+      ) {
+        json(res, 401, {
+          ok: false,
+          error: {
+            code: "UNAUTHORIZED",
+            message: "Invalid BrowserCrew Bridge token"
+          }
+        });
+        return;
+      }
+
+      if (
+        req.method === "GET" &&
+        url.pathname === "/mcp/servers"
+      ) {
+        if (!mcpManager) {
+          json(res, 503, {
+            ok: false,
+            error: {
+              code: "MCP_CLIENT_UNAVAILABLE",
+              message:
+                "BrowserCrew Bridge MCP client is not enabled"
+            }
+          });
+          return;
+        }
+
+        try {
+          json(res, 200, {
+            ok: true,
+            data: {
+              servers: await mcpManager.listServers()
+            }
+          });
+        } catch (error) {
+          json(res, 502, {
+            ok: false,
+            error: {
+              code: "MCP_CLIENT_FAILED",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            }
+          });
+        }
+        return;
+      }
+
+      if (
+        req.method === "POST" &&
+        url.pathname === "/mcp/list-tools"
+      ) {
+        if (!mcpManager) {
+          json(res, 503, {
+            ok: false,
+            error: {
+              code: "MCP_CLIENT_UNAVAILABLE",
+              message:
+                "BrowserCrew Bridge MCP client is not enabled"
+            }
+          });
+          return;
+        }
+
+        try {
+          const body = await readJson(req);
+          if (
+            typeof body.server_id !== "string" ||
+            !body.server_id.trim()
+          ) {
+            throw new Error("server_id is required");
+          }
+          json(res, 200, {
+            ok: true,
+            data: await mcpManager.listTools(
+              body.server_id.trim()
+            )
+          });
+        } catch (error) {
+          json(res, 502, {
+            ok: false,
+            error: {
+              code: "MCP_CLIENT_FAILED",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            }
+          });
+        }
+        return;
+      }
+
+      if (
+        req.method === "POST" &&
+        url.pathname === "/mcp/call-tool"
+      ) {
+        if (!mcpManager) {
+          json(res, 503, {
+            ok: false,
+            error: {
+              code: "MCP_CLIENT_UNAVAILABLE",
+              message:
+                "BrowserCrew Bridge MCP client is not enabled"
+            }
+          });
+          return;
+        }
+
+        try {
+          const body = await readJson(req);
+          if (
+            typeof body.server_id !== "string" ||
+            !body.server_id.trim()
+          ) {
+            throw new Error("server_id is required");
+          }
+          if (
+            typeof body.tool !== "string" ||
+            !body.tool.trim()
+          ) {
+            throw new Error("tool is required");
+          }
+          if (
+            body.arguments !== undefined &&
+            (!body.arguments ||
+              typeof body.arguments !== "object" ||
+              Array.isArray(body.arguments))
+          ) {
+            throw new Error("arguments must be an object");
+          }
+
+          json(res, 200, {
+            ok: true,
+            data: await mcpManager.callTool(
+              body.server_id.trim(),
+              body.tool.trim(),
+              body.arguments || {}
+            )
+          });
+        } catch (error) {
+          json(res, 502, {
+            ok: false,
+            error: {
+              code: "MCP_CLIENT_FAILED",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            }
+          });
+        }
         return;
       }
 
@@ -262,6 +430,9 @@ export function createBridgeServer({
       }
       pending.clear();
       extension?.close();
+      await mcpManager?.closeAll?.().catch(
+        () => undefined
+      );
       await new Promise((resolve) => wss.close(() => resolve()));
       await new Promise((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve()))
