@@ -115,3 +115,37 @@ export async function waitForTabUsable(
     void succeed();
   });
 }
+
+
+export async function goBackAndWait(
+  tabId: number,
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<NavigationReadyResult> {
+  const before = await chrome.tabs.get(tabId);
+  const result = await chrome.tabs.goBack(tabId);
+  if (!result) {
+    throw new Error("Chrome could not navigate back");
+  }
+
+  const ready = await waitForTabUsable(tabId, timeoutMs);
+  return {
+    ...ready,
+    ...(before.url ? { previous_url: before.url } : {})
+  } as NavigationReadyResult & { previous_url?: string };
+}
+
+export async function reloadAndWait(
+  tabId: number,
+  options: {
+    bypassCache?: boolean;
+    timeoutMs?: number;
+  } = {}
+): Promise<NavigationReadyResult> {
+  await chrome.tabs.reload(tabId, {
+    bypassCache: options.bypassCache === true
+  });
+  return waitForTabUsable(
+    tabId,
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  );
+}
