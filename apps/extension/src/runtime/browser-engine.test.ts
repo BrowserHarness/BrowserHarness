@@ -452,6 +452,105 @@ describe("Browser MVP engine scenarios", () => {
     ).toHaveLength(0);
   });
 
+  it("retries a runtime-discovered approval boundary with privileged proof", async () => {
+    const h = harness({
+      observations: [
+        page(1, "Checkout", "Continue"),
+        page(1, "Done", "Completed")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "trusted_click",
+          input: { element_id: "@e1" },
+          note: "Continuing"
+        },
+        {
+          kind: "final",
+          message: "Done."
+        }
+      ],
+      toolResults: {
+        trusted_click: [
+          {
+            ok: false,
+            error: {
+              code: "APPROVAL_REQUIRED",
+              message: "Trusted click requires explicit approval"
+            }
+          },
+          {
+            ok: true,
+            data: {}
+          }
+        ]
+      }
+    });
+
+    const result = await runBrowserTask(
+      "Continue checkout",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(h.requestApproval).toHaveBeenCalledWith(
+      "Trusted click requires explicit approval"
+    );
+
+    const calls = h.toolMock.mock.calls.filter(
+      ([tool]) => tool === "trusted_click"
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0][2]).toBeUndefined();
+    expect(calls[1][2]).toEqual({
+      approvalGranted: true
+    });
+    expect(result.session_evidence.actions[0].approval).toMatchObject({
+      required: true,
+      approved: true,
+      description: "Trusted click requires explicit approval"
+    });
+  });
+
+  it("does not retry a runtime-discovered approval boundary when denied", async () => {
+    const h = harness({
+      observations: [page(1, "Checkout", "Continue")],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "trusted_click",
+          input: { element_id: "@e1" },
+          note: "Continuing"
+        }
+      ],
+      toolResults: {
+        trusted_click: [
+          {
+            ok: false,
+            error: {
+              code: "APPROVAL_REQUIRED",
+              message: "Trusted click requires explicit approval"
+            }
+          }
+        ]
+      },
+      approval: false
+    });
+
+    const result = await runBrowserTask(
+      "Continue checkout",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("approval-cancelled");
+    expect(
+      h.toolMock.mock.calls.filter(
+        ([tool]) => tool === "trusted_click"
+      )
+    ).toHaveLength(1);
+    expect(result.session_evidence.actions).toHaveLength(0);
+  });
+
   it("honors the pause gate before requesting each model decision", async () => {
     let pauseGatePassed = false;
     const h = harness({
