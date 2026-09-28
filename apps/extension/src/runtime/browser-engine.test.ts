@@ -255,7 +255,7 @@ describe("Browser MVP engine scenarios", () => {
             description: "Search saved notes",
             read_only: true,
             requires_approval: false,
-            trust_mode: "allow-read-only"
+            trust_mode: "allow-read-only" as const
           }
         ]
       })
