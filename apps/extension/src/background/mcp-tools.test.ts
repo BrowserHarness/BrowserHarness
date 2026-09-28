@@ -141,6 +141,80 @@ describe("external MCP runtime tool", () => {
     expect(requester).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks every call from a blocked MCP server", async () => {
+    const requester = vi.fn(async () => ({
+      ok: true,
+      data: {
+        tools: [
+          {
+            name: "search",
+            annotations: {
+              readOnlyHint: true,
+              destructiveHint: false
+            }
+          }
+        ]
+      }
+    }));
+
+    const result = await runExternalMcpTool(
+      {
+        action: "call_tool",
+        server_id: "notes",
+        tool: "search",
+        arguments: {}
+      },
+      {},
+      requester,
+      async () => "blocked"
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "MCP_SERVER_BLOCKED"
+      }
+    });
+    expect(requester).not.toHaveBeenCalled();
+  });
+
+  it("ask-all requires approval even for a read-only tool", async () => {
+    const requester = vi.fn(async () => ({
+      ok: true,
+      data: {
+        tools: [
+          {
+            name: "search",
+            annotations: {
+              readOnlyHint: true,
+              destructiveHint: false
+            }
+          }
+        ]
+      }
+    }));
+
+    const result = await runExternalMcpTool(
+      {
+        action: "call_tool",
+        server_id: "notes",
+        tool: "search",
+        arguments: {}
+      },
+      {},
+      requester,
+      async () => "ask-all"
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "APPROVAL_REQUIRED"
+      }
+    });
+    expect(requester).toHaveBeenCalledTimes(1);
+  });
+
   it("executes a mutating tool only on an approved retry", async () => {
     const requester = vi.fn(
       async (action: string) => {
