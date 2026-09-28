@@ -108,3 +108,34 @@ External agents use the same BrowserCrew task-session and result envelopes rathe
 - cdp
 
 The v0.1 command envelope remains stable while the tool surface expands.
+
+
+## MCP stdio server
+
+BrowserCrew Bridge can expose the same browser runtime to MCP hosts:
+
+```text
+MCP host
+   ↓ stdio MCP
+browsercrew-bridge mcp
+   ↓ authenticated loopback POST /command
+BrowserCrew Bridge daemon
+   ↓ paired WebSocket
+BrowserCrew MV3 service worker
+   ↓
+BrowserCrew browser runtime
+```
+
+Run:
+
+```bash
+browsercrew-bridge mcp
+```
+
+The MCP server uses the current v2 `@modelcontextprotocol/server` stdio path and exposes `browsercrew_status` plus one `browsercrew_<action>` tool for every Local Bridge browser action.
+
+Every browser-action tool requires a stable `session` value. Reuse the same value across calls for one task so the normal BrowserCrew task-session ownership rules remain in force.
+
+MCP does not bypass BrowserCrew approvals. A Bridge result such as `APPROVAL_REQUIRED` is returned as an MCP tool error result. Borrowed user tabs remain protected by the extension's existing ownership policy.
+
+The MCP process only accepts loopback BrowserCrew Bridge configuration. Stdout is reserved for MCP JSON-RPC; diagnostics are written to stderr.
