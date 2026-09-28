@@ -10,6 +10,7 @@ import {
 import type { PageObservation } from "./protocol";
 import type { ProviderConfig } from "../settings/provider-store";
 import type { TaskEpisodeMemory } from "./task-memory";
+import type { ProceduralSearchHit } from "./procedural-memory";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -359,6 +360,85 @@ describe("episodic memory planning", () => {
     );
     expect(userPrompt).toContain(
       "historical evidence only"
+    );
+  });
+});
+
+describe("procedural memory planning", () => {
+  it("labels retrieved procedures as non-executing revision evidence", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  kind: "final",
+                  message: "Done"
+                })
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    const recalled: ProceduralSearchHit = {
+      procedure: {
+        skill_id: "SK-SITE-CHECKOUT",
+        revision_id: "SK-SITE-CHECKOUT:r3",
+        active: true,
+        latest: true,
+        lifecycle: "active",
+        name: "Checkout",
+        slug: "checkout",
+        origin: "https://example.com",
+        entry_url: "https://example.com/checkout",
+        captured_at: "2026-09-28T12:00:00.000Z",
+        structural_verification: "passed",
+        latest_execution: "passed",
+        execution_runs: 3,
+        execution_passed: 3,
+        execution_failed: 0,
+        execution_success_rate: 1,
+        promotion_eligible: true,
+        promotion_reasons: [],
+        parameters: [],
+        recipes: []
+      },
+      score: 0.02,
+      semantic_rank: 1,
+      semantic_similarity: 0.9,
+      evidence_preference: 0.006,
+      retrieval: ["semantic"]
+    };
+
+    await nextAgentDecision(
+      nvidia,
+      "Finish checkout",
+      observation,
+      [],
+      undefined,
+      [],
+      undefined,
+      [],
+      [recalled]
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body));
+    const prompt = String(body.messages[1].content);
+
+    expect(prompt).toContain(
+      "RELEVANT PROCEDURAL SKILL CANDIDATES"
+    );
+    expect(prompt).toContain("SK-SITE-CHECKOUT:r3");
+    expect(prompt).toContain(
+      "never execute implicitly"
     );
   });
 });
