@@ -142,6 +142,27 @@ test("outbound MCP client discovers and calls a real stdio server", async () => 
       true
     );
 
+    await assert.rejects(
+      () =>
+        manager.callTool(
+          "fixture",
+          "write_note",
+          { text: "mutating" }
+        ),
+      /MCP_APPROVAL_REQUIRED/
+    );
+
+    const approved = await manager.callTool(
+      "fixture",
+      "write_note",
+      { text: "mutating" },
+      { allowMutating: true }
+    );
+    assert.equal(
+      approved.result.content[0].text,
+      "saved:mutating"
+    );
+
     const connected = await manager.listServers();
     assert.equal(connected[0].connected, true);
   } finally {
