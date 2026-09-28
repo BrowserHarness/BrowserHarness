@@ -175,12 +175,21 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - task-start recall uses current goal + hostname, returns at most three episodes and labels them historical evidence only
    - `memory` tool exposes current-session active memory plus bounded search/list/get/delete of durable episodes
    - Local Bridge surface: **34 tools**; BrowserCrew runtime surface: **35 tools** including orchestrator-only human handoff
-8. **Semantic + procedural memory — next active engineering target**
-   - provider-agnostic embedding interface with lexical fallback
-   - bounded semantic retrieval/reranking over durable episodes
-   - procedural memory linked to active/candidate Skill revisions and execution evidence
-   - retrieval evidence must remain inspectable and source-linked
-9. **MCP client/tool bridge — after memory retrieval**
+8. **Semantic episodic memory — verified at `54844255e208fccf46867d85eb3f78cacb6fb4a6` (CI `36376927539`)**
+   - dedicated first-class embedding connections with independent health/routing
+   - embedding-only models cannot accidentally become chat primary/fallback routes
+   - OpenAI/NVIDIA/OpenAI-compatible `/embeddings` support with finite-vector + consistent-dimension validation
+   - sanitized episode vector index is provider/model/content-hash aware
+   - hybrid lexical + cosine semantic retrieval with inspectable rank/similarity metadata
+   - automatic recall now uses hybrid retrieval and remains capped at three historical episodes
+   - embedding endpoint failure degrades to lexical retrieval instead of failing the browser task
+   - raw action inputs, typed values, upload paths and Skill parameter values are never embedded
+9. **Procedural memory — next active engineering target**
+   - retrieve exact immutable Site Skill revisions rather than generic summaries
+   - include lifecycle state, structural verification, execution evidence and recipe contracts
+   - hybrid lexical/semantic retrieval with active/proven procedures favored only by explicit evidence
+   - planner recall must expose exact Skill/revision provenance and never silently execute a retrieved procedure
+10. **MCP client/tool bridge — after memory retrieval**
    - connect external MCP servers without weakening BrowserCrew task-session ownership, approval handling or evidence contracts
 10. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
