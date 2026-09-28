@@ -21,10 +21,15 @@ interface AxSnapshot {
   elements: AxElement[];
 }
 
+export interface AdaptiveReplayToolExecution {
+  approvalGranted?: boolean;
+}
+
 export interface AdaptiveReplayDependencies {
   tool<T = unknown>(
     tool: ToolName,
-    input?: Record<string, unknown>
+    input?: Record<string, unknown>,
+    execution?: AdaptiveReplayToolExecution
   ): Promise<ToolResult<T>>;
   requestApproval(description: string): Promise<boolean>;
   isCancelled(): boolean;
@@ -167,9 +172,14 @@ function dataTabId(result: ToolResult): number | undefined {
 async function requireTool<T>(
   dependencies: AdaptiveReplayDependencies,
   tool: ToolName,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  execution?: AdaptiveReplayToolExecution
 ): Promise<ToolResult<T>> {
-  const result = await dependencies.tool<T>(tool, input);
+  const result = await dependencies.tool<T>(
+    tool,
+    input,
+    execution
+  );
   if (!result.ok) {
     throw new Error(
       result.error?.message ||
@@ -177,6 +187,55 @@ async function requireTool<T>(
     );
   }
   return result;
+}
+
+async function executeTrustedAction(
+  dependencies: AdaptiveReplayDependencies,
+  tool: "trusted_click" | "trusted_key",
+  input: Record<string, unknown>,
+  approvalGranted: boolean,
+  fallbackApprovalDescription: string
+): Promise<"executed" | "approval-cancelled"> {
+  let result = await dependencies.tool(
+    tool,
+    input,
+    approvalGranted ? { approvalGranted: true } : undefined
+  );
+
+  if (result.ok) return "executed";
+
+  if (result.error?.code !== "APPROVAL_REQUIRED") {
+    throw new Error(
+      result.error?.message ||
+        `Adaptive replay tool failed: ${tool}`
+    );
+  }
+
+  if (approvalGranted) {
+    throw new Error(
+      result.error?.message ||
+        `Approved trusted action was rejected: ${tool}`
+    );
+  }
+
+  const approved = await dependencies.requestApproval(
+    result.error?.message || fallbackApprovalDescription
+  );
+  if (!approved) return "approval-cancelled";
+
+  result = await dependencies.tool(
+    tool,
+    input,
+    { approvalGranted: true }
+  );
+  if (!result.ok) {
+    throw new Error(
+      result.error?.message ||
+        `Adaptive replay approved trusted action failed: ${tool}`
+    );
+  }
+
+  return "executed";
 }
 
 async function observeTab(
@@ -297,26 +356,38 @@ async function executeAction(
       )
     : null;
   const approval = approvalDescription(action, target);
+  let approvalGranted = false;
 
   if (approval) {
     const approved = await dependencies.requestApproval(approval);
     if (!approved) return "approval-cancelled";
+    approvalGranted = true;
   }
 
   if (action.action === "click") {
     if (!target) {
       throw new Error("ADAPTIVE_REPLAY_CLICK_TARGET_REQUIRED");
     }
-    await requireTool(
-      dependencies,
-      target.input_mode === "trusted"
-        ? "trusted_click"
-        : "click",
-      {
-        tab_id: tabId,
-        element_id: target.element_id
+
+    const input = {
+      tab_id: tabId,
+      element_id: target.element_id
+    };
+
+    if (target.input_mode === "trusted") {
+      const executed = await executeTrustedAction(
+        dependencies,
+        "trusted_click",
+        input,
+        approvalGranted,
+        `Activate “${action.target?.accessible_name || "this control"}”`
+      );
+      if (executed === "approval-cancelled") {
+        return executed;
       }
-    );
+    } else {
+      await requireTool(dependencies, "click", input);
+    }
   } else if (action.action === "type") {
     if (!target) {
       throw new Error("ADAPTIVE_REPLAY_TYPE_TARGET_REQUIRED");
@@ -340,13 +411,21 @@ async function executeAction(
       key: action.key
     };
     if (target) input.element_id = target.element_id;
-    await requireTool(
-      dependencies,
-      target?.input_mode === "trusted"
-        ? "trusted_key"
-        : "press_key",
-      input
-    );
+
+    if (target?.input_mode === "trusted") {
+      const executed = await executeTrustedAction(
+        dependencies,
+        "trusted_key",
+        input,
+        approvalGranted,
+        `Press ${action.key || "the recorded key"} in “${action.target?.accessible_name || "this control"}”`
+      );
+      if (executed === "approval-cancelled") {
+        return executed;
+      }
+    } else {
+      await requireTool(dependencies, "press_key", input);
+    }
   }
 
   await requireTool(dependencies, "wait", {
