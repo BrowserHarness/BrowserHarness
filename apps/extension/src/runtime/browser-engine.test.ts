@@ -1130,6 +1130,129 @@ describe("Browser MVP engine scenarios", () => {
     ).not.toContain("user@example.com");
   });
 
+  it("records bounded child-worker provenance for supervisor delegation", async () => {
+    const h = harness({
+      observations: [
+        page(14, "Research", "Current page")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "agent",
+          input: {
+            tasks: [
+              "Read source A",
+              "Read source B"
+            ]
+          },
+          note: "Delegating research"
+        },
+        {
+          kind: "final",
+          message: "Research complete."
+        }
+      ],
+      toolResults: {
+        agent: [
+          {
+            ok: true,
+            data: {
+              worker_count: 2,
+              completed_count: 1,
+              non_completed_count: 1,
+              workers: [
+                {
+                  index: 0,
+                  task: "Read source A",
+                  finding: {
+                    status: "completed",
+                    message: "Found A",
+                    steps: 2,
+                    session_id: "parent:worker:1",
+                    sources: [
+                      {
+                        url: "https://a.example/article",
+                        title: "Article A"
+                      }
+                    ],
+                    tools_used: [
+                      "open_tab",
+                      "read_page"
+                    ]
+                  }
+                },
+                {
+                  index: 1,
+                  task: "Read source B",
+                  finding: {
+                    status: "failed",
+                    message: "Unavailable",
+                    steps: 1,
+                    session_id: "parent:worker:2",
+                    sources: [],
+                    tools_used: ["read_page"]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+
+    h.dependencies.session = {
+      id: "parent",
+      title: "Parallel research"
+    };
+
+    const result = await runBrowserTask(
+      "Compare two sources",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.session_evidence.actions[0]).toMatchObject({
+      tool: "agent",
+      input: {
+        tasks: [
+          "Read source A",
+          "Read source B"
+        ]
+      },
+      delegation: {
+        worker_count: 2,
+        completed_count: 1,
+        non_completed_count: 1,
+        workers: [
+          {
+            index: 0,
+            task: "Read source A",
+            session_id: "parent:worker:1",
+            status: "completed",
+            sources: [
+              {
+                url: "https://a.example/article",
+                title: "Article A"
+              }
+            ],
+            tools_used: [
+              "open_tab",
+              "read_page"
+            ]
+          },
+          {
+            index: 1,
+            task: "Read source B",
+            session_id: "parent:worker:2",
+            status: "failed",
+            sources: [],
+            tools_used: ["read_page"]
+          }
+        ]
+      }
+    });
+  });
+
   it("redacts external MCP tool arguments from session evidence", async () => {
     const h = harness({
       observations: [
