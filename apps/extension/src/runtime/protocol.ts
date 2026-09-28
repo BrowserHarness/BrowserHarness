@@ -21,6 +21,8 @@ export type ToolName =
   | "save_pdf"
   | "cdp"
   | "navigate"
+  | "back"
+  | "reload"
   | "click"
   | "type"
   | "press_key"
@@ -31,6 +33,7 @@ export type ToolName =
   | "list_tabs"
   | "switch_tab"
   | "close_tab"
+  | "close_session"
   | "screenshot";
 
 export interface InteractiveElement {
