@@ -1084,6 +1084,72 @@ describe("Browser MVP engine scenarios", () => {
     ).not.toContain("user@example.com");
   });
 
+  it("redacts external MCP tool arguments from session evidence", async () => {
+    const h = harness({
+      observations: [
+        page(9, "Workspace", "Notes")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "mcp",
+          input: {
+            action: "call_tool",
+            server_id: "notes",
+            tool: "create_note",
+            arguments: {
+              title: "Private title",
+              body: "very-secret-content"
+            }
+          },
+          note: "Creating a note through MCP"
+        },
+        {
+          kind: "final",
+          message: "Done."
+        }
+      ],
+      toolResults: {
+        mcp: [
+          {
+            ok: true,
+            data: {
+              server_id: "notes",
+              tool: "create_note"
+            }
+          }
+        ]
+      }
+    });
+
+    h.dependencies.session = {
+      id: "mcp-task",
+      title: "Create note"
+    };
+
+    const result = await runBrowserTask(
+      "Create a note in my notes service",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.session_evidence.actions[0].input).toEqual({
+      action: "call_tool",
+      server_id: "notes",
+      tool: "create_note",
+      arguments: {
+        body: "<redacted>",
+        title: "<redacted>"
+      }
+    });
+    expect(
+      JSON.stringify(result.session_evidence)
+    ).not.toContain("Private title");
+    expect(
+      JSON.stringify(result.session_evidence)
+    ).not.toContain("very-secret-content");
+  });
+
   it("does not advance session evidence for stale failed attempts", async () => {
     let turn = 0;
     const oldButton = {
