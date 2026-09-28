@@ -212,13 +212,24 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - external MCP call arguments are redacted from BrowserTaskSessionEvidence
    - planner receives a task-ranked catalog capped at 6 servers / 18 tools with explicit approval metadata; blocked servers are excluded
    - external MCP descriptions/results remain untrusted data and cannot override user goals or BrowserCrew policy
-12. **Supervisor + bounded subagents — next active engineering target**
-   - add explicit supervisor delegation to read-only browser workers
-   - each worker receives a child task session, bounded step budget and scoped tools
-   - worker-owned tabs are backgrounded and cleaned up automatically
-   - subagents cannot recursively spawn agents or perform mutating browser/MCP actions in the first slice
-   - return findings + evidence provenance to the supervisor instead of opaque state mutation
-13. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+12. **Supervisor + bounded read-only subagents — verified at `a159bef5c3c086d9b18f0afd5d0af49fcbccf5b1` (CI `36382897733`)**
+   - supervisor `agent` delegation is orchestrator-only and never Bridge-exposed
+   - each worker receives an isolated child BrowserCrew task session with a hard maximum of 8 steps
+   - borrowed current tab is read-only; independent navigation requires a worker-owned background tab
+   - worker-owned tabs are automatically cleaned by child `close_session` in `finally`
+   - code-level policy rejects click/type/upload/submit/raw-CDP/Skill mutation and recursive `agent`
+   - workers never receive or forward BrowserCrew approval proofs; mutating/unannotated MCP calls cannot execute
+   - worker planner advertises only the bounded read-only surface and uses normal primary/fallback model routing
+   - findings return status/message plus up to 6 source URL/title records and up to 20 tools used
+   - verified gate: 16/16 Bridge tests + 263/263 extension tests across 53 files; typecheck/build/MV3/contracts/package PASS
+   - runtime surface: **37 tools** = 35 service-worker tools + orchestrator-only `agent` + `await_user_action`
+13. **Parallel supervisor research + provenance merge — next active engineering target**
+   - allow the supervisor to delegate multiple independent read-only subtasks in one request
+   - bounded concurrency (start with max 2 workers) and per-worker 8-step limits
+   - distinct child sessions and automatic cleanup
+   - deterministic merge of findings with worker/session/source provenance
+   - one worker failure must not cancel successful sibling findings
+14. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
