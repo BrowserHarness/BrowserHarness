@@ -14,6 +14,7 @@ import {
   pageContext,
   targetEvidence,
   type BrowserSessionActionEvidence,
+  type BrowserSessionManualHandoffEvidence,
   type BrowserTaskSessionEvidence,
   type BrowserTaskSessionIdentity
 } from "./session-evidence";
@@ -36,6 +37,11 @@ export interface BrowserToolExecution {
   approvalGranted?: boolean;
 }
 
+export interface BrowserUserActionOutcome {
+  status: "continue" | "cancelled";
+  source: "navigation" | "user";
+}
+
 export interface BrowserEngineDependencies {
   session?: BrowserTaskSessionIdentity;
   decide(
@@ -52,6 +58,11 @@ export interface BrowserEngineDependencies {
     input: Record<string, unknown>
   ): string | null;
   requestApproval(description: string): Promise<boolean>;
+  requestUserAction?(
+    reason: string,
+    observation: PageObservation,
+    signal?: AbortSignal
+  ): Promise<BrowserUserActionOutcome>;
   isCancelled(): boolean;
   waitWhilePaused(): Promise<void>;
   withActivity<T>(
@@ -176,6 +187,7 @@ export async function runBrowserTask(
   const sessionStartedAt = new Date().toISOString();
   const sessionStart = pageContext(observation);
   const sessionActions: BrowserSessionActionEvidence[] = [];
+  const manualHandoffs: BrowserSessionManualHandoffEvidence[] = [];
 
   const buildResult = (
     status: BrowserEngineResult["status"],
@@ -200,6 +212,17 @@ export async function runBrowserTask(
           ...action,
           input: copySessionInput(action.input)
         })),
+        ...(manualHandoffs.length
+          ? {
+              manual_handoffs: manualHandoffs.map((handoff) => ({
+                ...handoff,
+                before: { ...handoff.before },
+                ...(handoff.after
+                  ? { after: { ...handoff.after } }
+                  : {})
+              }))
+            }
+          : {}),
         ...(sessionActions.length
           ? {
               boundary_action_id:
@@ -248,6 +271,77 @@ export async function runBrowserTask(
     }
 
     const beforeObservation = observation;
+
+    if (decision.tool === "await_user_action") {
+      const reason =
+        typeof decision.input.reason === "string" &&
+        decision.input.reason.trim()
+          ? decision.input.reason.trim()
+          : "A manual step is required on this page before BrowserCrew can continue.";
+
+      if (!dependencies.requestUserAction) {
+        throw new Error(
+          "USER_ACTION_HANDOFF_UNAVAILABLE: the current BrowserCrew surface cannot request a manual step"
+        );
+      }
+
+      const outcome = await dependencies.withActivity(
+        "Waiting for your manual step",
+        () =>
+          dependencies.requestUserAction!(
+            reason,
+            beforeObservation,
+            signal
+          )
+      );
+
+      if (outcome.status === "cancelled") {
+        manualHandoffs.push({
+          id: `handoff-${manualHandoffs.length + 1}`,
+          recorded_at: new Date().toISOString(),
+          reason,
+          status: "cancelled",
+          source: outcome.source,
+          before: pageContext(beforeObservation)
+        });
+        trail.push(
+          `await_user_action: cancelled — ${reason}`
+        );
+        return buildResult(
+          "stopped",
+          `I stopped because the manual step was cancelled: ${reason}`,
+          step + 1
+        );
+      }
+
+      const verified = await dependencies.tool<PageObservation>(
+        "observe_page",
+        { tab_id: beforeObservation.tab_id }
+      );
+      if (!verified.ok || !verified.data) {
+        throw new Error(
+          verified.error?.message ||
+            "Could not re-read the page after the manual step"
+        );
+      }
+
+      observation = verified.data;
+      evidenceStore.record(observation);
+      manualHandoffs.push({
+        id: `handoff-${manualHandoffs.length + 1}`,
+        recorded_at: new Date().toISOString(),
+        reason,
+        status: "continued",
+        source: outcome.source,
+        before: pageContext(beforeObservation),
+        after: pageContext(observation)
+      });
+      trail.push(
+        `await_user_action: continued via ${outcome.source}; page=${observation.title}`
+      );
+      continue;
+    }
+
     let approval = dependencies.approvalDescription(
       beforeObservation,
       decision.tool,
