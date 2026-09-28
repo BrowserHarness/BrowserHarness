@@ -291,6 +291,25 @@
       "query": "current user goal + current hostname",
       "max_results": 3,
       "planner_semantics": "recalled episodes are labeled historical evidence only and never override current goal/fresh browser evidence"
+    },
+    "search": {
+      "input": "query, limit?",
+      "output": [
+        "hits with lexical/semantic retrieval metadata",
+        "episodes compatibility list"
+      ],
+      "ranking": "hybrid lexical + semantic reciprocal-rank fusion when a healthy embedding route exists",
+      "fallback": "lexical-only when no embedding route exists or embedding calls fail"
+    },
+    "embedding": {
+      "route": "dedicated embeddingConnectionId",
+      "provider_contract": "OpenAI-compatible /embeddings",
+      "validation": [
+        "one vector per input",
+        "finite numeric values",
+        "consistent dimensions"
+      ],
+      "privacy": "only sanitized episode fields are embedded"
     }
   }
 }
