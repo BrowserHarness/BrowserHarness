@@ -58,9 +58,12 @@ import { SettingsView } from "./SettingsView";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
 import {
-  saveTaskEpisodeMemory,
-  searchTaskEpisodeMemory
+  saveTaskEpisodeMemory
 } from "../runtime/task-memory";
+import {
+  indexTaskEpisodeMemory,
+  searchTaskMemoryHybrid
+} from "../runtime/semantic-memory";
 import {
   clearBrowserWorkingMemory,
   saveBrowserWorkingMemory
@@ -587,11 +590,16 @@ export function App() {
           },
           persistWorkingMemory: (memory) =>
             saveBrowserWorkingMemory(memory),
-          recallMemory: (browserTask, observation) =>
-            searchTaskEpisodeMemory(
-              `${browserTask} ${safeHostname(observation.url)}`,
-              3
-            ),
+          recallMemory: async (
+            browserTask,
+            observation
+          ) =>
+            (
+              await searchTaskMemoryHybrid(
+                `${browserTask} ${safeHostname(observation.url)}`,
+                3
+              )
+            ).map((hit) => hit.episode),
           requestUserAction: async (
             reason,
             observation,
@@ -645,9 +653,12 @@ export function App() {
       await saveTaskEpisodeMemory(
         result.session_evidence
       )
-        .then(() =>
-          clearBrowserWorkingMemory(taskSessionId)
-        )
+        .then(async (episode) => {
+          await indexTaskEpisodeMemory(episode).catch(
+            () => null
+          );
+          await clearBrowserWorkingMemory(taskSessionId);
+        })
         .catch(() => undefined);
       addAssistantMessage(result.message);
       if (result.status === "completed") {
