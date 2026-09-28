@@ -72,7 +72,7 @@ Escalate browser control in layers:
 7. save_pdf to export the current page through Chrome's print-to-PDF path;
 8. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
 After ax_snapshot, use only the returned @e refs for trusted_* actions. Never invent a CDP ref.
-Use screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. Core BrowserCrew can capture only the tab currently visible in its window; if a task tab is backgrounded, screenshot returns SCREENSHOT_REQUIRES_VISIBLE_TAB rather than capturing the wrong tab. Do not switch tabs merely for decoration. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
+Use screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. BrowserCrew captures the selected task tab through CDP even when it is backgrounded. Use {"full_page":true} only when the whole document is necessary, or {"element_id":"@eN"} after ax_snapshot to clip to one semantic element. Do not switch tabs merely for screenshots. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
 Do not request send, submit, publish, purchase, delete, payment, or account/security-changing actions unless necessary for the user's explicit goal; BrowserCrew applies approval policy separately.`;
 
 const CHAT_SYSTEM =
