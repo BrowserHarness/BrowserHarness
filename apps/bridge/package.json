@@ -10,10 +10,13 @@
     "stop": "node src/cli.mjs stop",
     "restart": "node src/cli.mjs restart",
     "logs": "node src/cli.mjs logs",
-    "pair": "node src/cli.mjs pair"
+    "pair": "node src/cli.mjs pair",
+    "mcp": "node src/cli.mjs mcp"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "@modelcontextprotocol/server": "^2.1.0",
+    "zod": "^4.3.6"
   },
   "bin": {
     "browsercrew-bridge": "src/cli.mjs"
