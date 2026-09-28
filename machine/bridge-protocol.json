@@ -319,5 +319,23 @@
       "ranking": "hybrid lexical + semantic RRF; explicit evidence preference only breaks near-ties",
       "execution": "retrieval never auto-runs; execution requires explicit site_skill run"
     }
+  },
+  "mcp_server": {
+    "transport": "stdio",
+    "command": "browsercrew-bridge mcp",
+    "sdk": "@modelcontextprotocol/server v2",
+    "tools": {
+      "count": 35,
+      "composition": "browsercrew_status plus browsercrew_<bridge-action> for every Local Bridge action",
+      "input": "session, optional title, optional args object"
+    },
+    "relay": "MCP tool -> authenticated loopback Bridge /command -> paired extension",
+    "safety": [
+      "same BrowserCrew task-session ownership",
+      "same approval boundaries",
+      "APPROVAL_REQUIRED returned with isError=true",
+      "non-loopback Bridge configuration rejected",
+      "stdout contains MCP protocol only"
+    ]
   }
 }
