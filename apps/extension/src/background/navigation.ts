@@ -121,17 +121,8 @@ export async function goBackAndWait(
   tabId: number,
   timeoutMs = DEFAULT_TIMEOUT_MS
 ): Promise<NavigationReadyResult> {
-  const before = await chrome.tabs.get(tabId);
-  const result = await chrome.tabs.goBack(tabId);
-  if (!result) {
-    throw new Error("Chrome could not navigate back");
-  }
-
-  const ready = await waitForTabUsable(tabId, timeoutMs);
-  return {
-    ...ready,
-    ...(before.url ? { previous_url: before.url } : {})
-  } as NavigationReadyResult & { previous_url?: string };
+  await chrome.tabs.goBack(tabId);
+  return waitForTabUsable(tabId, timeoutMs);
 }
 
 export async function reloadAndWait(
