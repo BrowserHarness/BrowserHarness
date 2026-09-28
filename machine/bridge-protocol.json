@@ -172,6 +172,7 @@
       "list",
       "get",
       "history",
+      "compare",
       "promote",
       "rollback",
       "delete"
@@ -181,7 +182,7 @@
     "run": "active revision by default -> fresh verification -> fresh semantic target resolution -> parameterized execution; records inspectable execution evidence; non-GET/risky submission requires BrowserCrew approval proof",
     "refine": "recollect fresh site evidence -> deterministic contract diff -> create a new candidate revision only when the contract changed; active revision is never mutated or moved",
     "history": "immutable revisions + structural/execution evaluations + execution evidence + lifecycle events + active pointer + promotion gate",
-    "promote": "explicit only; same revision must have passing latest structural verification and execution evaluation",
+    "promote": "explicit only; same revision must have passing latest structural verification and execution evaluation; promotion responses include the candidate-vs-active comparison snapshot",
     "rollback": "explicit revision_id; target must have been active previously",
     "lifecycle": "candidate revisions are immutable; no auto-promotion; active revision pointer changes only through explicit promotion/rollback",
     "execution_evidence": {
@@ -200,7 +201,8 @@
         "parameter values"
       ],
       "failed_run_recovery": "returns refinement_recommended and next_action=site_skill refine"
-    }
+    },
+    "compare": "compare candidate revision against explicit baseline or current active revision using structural outcome, execution counts, pass/fail rate, latest execution and deterministic regression/improvement signals"
   },
   "select_option": {
     "purpose": "choose native select options using a fresh semantic ref and page input/change events",
