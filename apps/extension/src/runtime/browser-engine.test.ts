@@ -233,6 +233,52 @@ describe("Browser MVP engine scenarios", () => {
     ]);
   });
 
+  it("supplies a bounded MCP capability catalog to planning", async () => {
+    const h = harness({
+      observations: [page(1, "Notes", "Notes")],
+      decisions: [
+        {
+          kind: "final",
+          message: "Done."
+        }
+      ]
+    });
+
+    h.dependencies.discoverMcpCatalog = vi.fn(
+      async () => ({
+        servers_considered: 1,
+        tools: [
+          {
+            server_id: "notes",
+            server_label: "Notes",
+            name: "search_notes",
+            description: "Search saved notes",
+            read_only: true,
+            requires_approval: false,
+            trust_mode: "allow-read-only"
+          }
+        ]
+      })
+    );
+
+    await runBrowserTask(
+      "Find my BrowserCrew note",
+      h.dependencies
+    );
+
+    expect(h.contexts[0].mcp_catalog).toEqual({
+      servers_considered: 1,
+      tools: [
+        expect.objectContaining({
+          server_id: "notes",
+          name: "search_notes",
+          read_only: true,
+          requires_approval: false
+        })
+      ]
+    });
+  });
+
   it("completes a current-page read without mutation", async () => {
     const h = harness({
       observations: [page(1, "Article", "AI is changing software.")],
