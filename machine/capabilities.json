@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.3-mcp-productization-verified",
+  "status": "v0.3-bounded-read-only-subagent-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -275,7 +275,7 @@
           "mcp"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 34,
+        "tools": 35,
         "planner_tools": 31,
         "orchestrator_only": [
           "await_user_action"
@@ -285,7 +285,7 @@
           "sdk": "@modelcontextprotocol/server v2",
           "transport": "stdio via serveStdio",
           "protocol": "supports current MCP v2 negotiation while preserving legacy compatibility through SDK",
-          "tool_surface": "browsercrew_status + one MCP tool for each of 34 Local Bridge actions",
+          "tool_surface": "browsercrew_status + 34 exported BrowserCrew action tools; outbound mcp is deliberately not re-exported to prevent recursive MCP chaining",
           "execution_path": "MCP -> authenticated loopback POST /command -> paired WebSocket -> BrowserCrew extension runtime",
           "session_contract": "MCP session input maps unchanged to BrowserCrew task session",
           "safety": [
@@ -644,6 +644,62 @@
     {
       "id": "security-permissions",
       "owner": "BrowserCrew/Security-Trust + BrowserCrew/browsercrew"
+    },
+    {
+      "id": "agents",
+      "owner": "BrowserCrew/browsercrew",
+      "runtime_contract": {
+        "supervisor": {
+          "tool": "agent",
+          "bridge_exposed": false,
+          "role": "orchestrator-only delegation",
+          "delegation_input": "task + optional max_steps",
+          "maximum_worker_steps": 8
+        },
+        "read_only_worker": {
+          "status": "verified",
+          "child_session": true,
+          "background_owned_tabs": true,
+          "borrowed_current_tab": "read-only",
+          "navigation": "requires a worker-owned tab",
+          "cleanup": "child close_session always runs in finally",
+          "recursive_delegation": false,
+          "approval_forwarding": false,
+          "mutating_browser_tools": false,
+          "raw_cdp": false,
+          "skill_execution_or_mutation": false,
+          "memory_actions": [
+            "active",
+            "search",
+            "list",
+            "get",
+            "procedures"
+          ],
+          "skill_actions": [
+            "list",
+            "get",
+            "history",
+            "compare"
+          ],
+          "mcp": "read-only calls only; mutating/unannotated calls cannot receive approval from a worker"
+        },
+        "finding": {
+          "status": "completed/stopped/approval-cancelled/failed",
+          "maximum_sources": 6,
+          "maximum_tools_used": 20,
+          "source_provenance": "url + title",
+          "opaque_state_mutation": false
+        },
+        "planner": {
+          "dedicated_worker_prompt": true,
+          "primary_fallback_model_routing": true,
+          "advertised_tool_scope": "read-only subset only",
+          "supervisor_prompt": "explicit no recursive agents"
+        },
+        "verified_sha": "a159bef5c3c086d9b18f0afd5d0af49fcbccf5b1",
+        "ci_run_id": 36382897733,
+        "tests": "16/16 Bridge + 263/263 extension tests across 53 files"
+      }
     }
   ],
   "latest_verified": {
