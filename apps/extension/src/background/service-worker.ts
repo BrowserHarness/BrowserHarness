@@ -18,7 +18,8 @@ import {
 } from "./cdp-manager";
 import {
   captureAxSnapshot,
-  elementForAxRef
+  elementForAxRef,
+  findAxElements
 } from "./cdp-semantic";
 import {
   trustedClick,
@@ -38,6 +39,7 @@ import {
 } from "./network-capture";
 import { shouldActivateNewTaskTab } from "./tab-policy";
 import { captureCdpScreenshot } from "./cdp-screenshot";
+import { evaluatePageExpression } from "./page-evaluate";
 import {
   extensionPageApprovalGranted,
   isRiskyTrustedLabel,
@@ -585,6 +587,94 @@ async function runTool(
     }
   }
 
+  if (tool === "find") {
+    const query =
+      typeof input.query === "string" ? input.query.trim() : "";
+    const role =
+      typeof input.role === "string" ? input.role.trim() : "";
+
+    if (!query && !role) {
+      return {
+        ok: false,
+        error: {
+          code: "FIND_QUERY_REQUIRED",
+          message: "find requires query, role, or both"
+        }
+      };
+    }
+
+    try {
+      const snapshot = await captureAxSnapshot(tabId, 1000);
+      const matches = findAxElements(snapshot, {
+        query,
+        role,
+        limit: Number(input.limit ?? 20)
+      });
+      return {
+        ok: true,
+        data: {
+          tab_id: tabId,
+          query,
+          role,
+          scanned: snapshot.elements.length,
+          matches
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "FIND_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Semantic find failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "evaluate") {
+    if (
+      typeof input.expression !== "string" ||
+      !input.expression.trim()
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "EVALUATE_EXPRESSION_REQUIRED",
+          message: "evaluate requires a non-empty expression"
+        }
+      };
+    }
+
+    try {
+      const maxChars = Math.min(
+        Math.max(Number(input.max_chars ?? 50_000), 1_000),
+        100_000
+      );
+      return {
+        ok: true,
+        data: await evaluatePageExpression(
+          tabId,
+          input.expression,
+          maxChars
+        )
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "EVALUATE_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Page evaluation failed"
+        }
+      };
+    }
+  }
+
   if (tool === "trusted_click") {
     if (typeof input.element_id !== "string") {
       return {
@@ -1032,6 +1122,8 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "observe_page",
   "read_page",
   "ax_snapshot",
+  "find",
+  "evaluate",
   "trusted_click",
   "trusted_type",
   "trusted_key",
