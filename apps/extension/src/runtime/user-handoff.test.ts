@@ -63,6 +63,16 @@ describe("user handoff", () => {
         { status: "complete" },
         {
           id: 7,
+          index: 0,
+          pinned: false,
+          highlighted: false,
+          windowId: 1,
+          active: true,
+          incognito: false,
+          selected: true,
+          discarded: false,
+          autoDiscardable: true,
+          groupId: -1,
           url: "https://example.com/account",
           status: "complete"
         }
@@ -127,6 +137,16 @@ describe("user handoff", () => {
         { status: "complete" },
         {
           id: 7,
+          index: 0,
+          pinned: false,
+          highlighted: false,
+          windowId: 1,
+          active: true,
+          incognito: false,
+          selected: true,
+          discarded: false,
+          autoDiscardable: true,
+          groupId: -1,
           url: "https://example.com/dashboard",
           status: "complete"
         }
