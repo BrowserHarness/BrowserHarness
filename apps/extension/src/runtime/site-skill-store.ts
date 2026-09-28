@@ -306,10 +306,10 @@ export async function saveSiteSkillCandidate(
   return structuredClone(revision);
 }
 
-export async function getSiteSkillCandidate(
+export async function getSiteSkillRevision(
   id: string,
   revisionIdInput?: string
-): Promise<SiteCandidateSkill | null> {
+): Promise<SiteSkillRevisionRecord | null> {
   const library = await loadStoredLibrary();
   const family = library.families.find(
     (candidate) => candidate.id === id
@@ -322,6 +322,17 @@ export async function getSiteSkillCandidate(
       ) || null
     : latestRevision(family);
 
+  return revision ? structuredClone(revision) : null;
+}
+
+export async function getSiteSkillCandidate(
+  id: string,
+  revisionIdInput?: string
+): Promise<SiteCandidateSkill | null> {
+  const revision = await getSiteSkillRevision(
+    id,
+    revisionIdInput
+  );
   return revision
     ? cloneCandidate(revision.candidate)
     : null;
@@ -337,10 +348,10 @@ export async function getSiteSkillFamily(
   return family ? structuredClone(family) : null;
 }
 
-export async function getSiteSkillExecutableCandidate(
+export async function getSiteSkillExecutableRevision(
   id: string,
   revisionIdInput?: string
-): Promise<SiteCandidateSkill | null> {
+): Promise<SiteSkillRevisionRecord | null> {
   const family = await getSiteSkillFamily(id);
   if (!family) return null;
 
@@ -354,6 +365,17 @@ export async function getSiteSkillExecutableCandidate(
       (item) => item.revision_id === revisionIdToUse
     ) || null;
 
+  return revision ? structuredClone(revision) : null;
+}
+
+export async function getSiteSkillExecutableCandidate(
+  id: string,
+  revisionIdInput?: string
+): Promise<SiteCandidateSkill | null> {
+  const revision = await getSiteSkillExecutableRevision(
+    id,
+    revisionIdInput
+  );
   return revision
     ? cloneCandidate(revision.candidate)
     : null;
@@ -373,24 +395,33 @@ export async function listSiteSkillRevisions(
 export async function listSiteSkillRevisionSummaries(
   id: string
 ): Promise<SiteSkillRevisionSummary[]> {
-  const revisions = await listSiteSkillRevisions(id);
-  return revisions.map((revision) => ({
-    revision_id: revision.revision_id,
-    ordinal: revision.ordinal,
-    created_at: revision.created_at,
-    reason: revision.reason,
-    ...(revision.parent_revision_id
-      ? { parent_revision_id: revision.parent_revision_id }
-      : {}),
-    name: revision.candidate.name,
-    status: revision.candidate.status,
-    ...(revision.candidate.verification
-      ? {
-          verification_status:
-            revision.candidate.verification.status
-        }
-      : {})
-  }));
+  const family = await getSiteSkillFamily(id);
+  if (!family) return [];
+
+  return family.revisions.map((revision) => {
+    const verification = latestEvaluation(
+      family,
+      revision.revision_id,
+      "structural-verification"
+    );
+    return {
+      revision_id: revision.revision_id,
+      ordinal: revision.ordinal,
+      created_at: revision.created_at,
+      reason: revision.reason,
+      ...(revision.parent_revision_id
+        ? {
+            parent_revision_id:
+              revision.parent_revision_id
+          }
+        : {}),
+      name: revision.candidate.name,
+      status: revision.candidate.status,
+      ...(verification
+        ? { verification_status: verification.outcome === "passed" ? "verified" : "failed" }
+        : {})
+    };
+  });
 }
 
 function nextEvaluationId(
@@ -643,8 +674,14 @@ export async function listSiteSkillCandidateSummaries(): Promise<
 
   return library.families
     .map((family) => {
-      const candidate = latestRevision(family)?.candidate;
-      if (!candidate) return null;
+      const revision = latestRevision(family);
+      const candidate = revision?.candidate;
+      if (!candidate || !revision) return null;
+      const verification = latestEvaluation(
+        family,
+        revision.revision_id,
+        "structural-verification"
+      );
 
       return {
         id: candidate.id,
@@ -661,10 +698,12 @@ export async function listSiteSkillCandidateSummaries(): Promise<
         ...(family.active_revision_id
           ? { active_revision_id: family.active_revision_id }
           : {}),
-        ...(candidate.verification
+        ...(verification
           ? {
               verification_status:
-                candidate.verification.status
+                verification.outcome === "passed"
+                  ? "verified"
+                  : "failed"
             }
           : {})
       } satisfies SiteSkillCandidateSummary;
