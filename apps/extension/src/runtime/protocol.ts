@@ -7,6 +7,7 @@ export type ToolName =
   | "find"
   | "evaluate"
   | "site_skill"
+  | "select_option"
   | "trusted_click"
   | "trusted_type"
   | "trusted_key"
