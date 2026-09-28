@@ -45,6 +45,30 @@ Input: fresh AX `element_id` plus `value` or `values`.
 
 Resolves the native select through CDP, matches by option value/text/label, updates selection and dispatches bubbling `input` + `change` events. Empty or unmatched requests fail rather than silently selecting the wrong option.
 
+### hover
+Input: fresh AX `element_id`, optional `tab_id`.
+
+Moves the real CDP pointer to the target box center. BrowserCrew rejects an occluded point and verifies the intended target enters `:hover` before reporting success.
+
+### drag
+Input: fresh `source_element_id` and `target_element_id`, optional `steps` and `tab_id`.
+
+BrowserCrew hit-tests both semantic endpoints, presses the real left mouse button, follows a bounded interpolated CDP pointer path, releases over the target, and verifies source-down/target-up delivery before reporting success.
+
+### send_keys
+Input: `keys`, optional `repeat` (1-100) and `tab_id`.
+
+Supports Alt/Ctrl/Cmd/Meta/Shift, OS-aware `Mod` (Cmd on macOS, Ctrl elsewhere), Enter/Escape/Tab/Backspace/Delete/Space, arrows, Home/End/PageUp/PageDown, F1-F12, single letters/digits, modifier chords such as `Mod+A`, and space-separated sequences such as `Enter Escape`. Sequences containing Enter preserve BrowserCrew approval rules.
+
+### await_user_action
+Planner/orchestrator-only; intentionally not exposed as a Local Bridge daemon command.
+
+Input: `reason`.
+
+Use when progress requires a human-only page step such as login/sign-in, an expired authenticated session, CAPTCHA/slider/human verification, 2FA/SMS/authenticator approval, or explicit manual consent. BrowserCrew waits up to 10 seconds for natural navigation first. If the page has not advanced, the side panel shows “Need you to take over” with “I’m done, continue” and “Cancel task”. Navigation remains a live resume path while the card is visible. Continuation always triggers a fresh page observation before planning resumes.
+
+Manual handoffs are recorded as non-executable session evidence. They do not advance `boundary_action_id`, and Session → Skill compilation rejects sessions crossing a manual-handoff precondition instead of pretending the human-only step is automated.
+
 ### trusted_click
 Input: fresh AX `element_id`, optional `tab_id`.
 
