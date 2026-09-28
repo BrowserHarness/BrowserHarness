@@ -79,6 +79,7 @@ const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
   "trusted_key",
   "select_option",
   "hover",
+  "drag",
   "dialog",
   "evaluate",
   "cdp",
