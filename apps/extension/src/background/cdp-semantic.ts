@@ -35,6 +35,12 @@ export interface AxSnapshot {
   elements: AxSemanticElement[];
 }
 
+export interface AxFindOptions {
+  query?: string;
+  role?: string;
+  limit?: number;
+}
+
 const refsByTab = new Map<number, Map<string, number>>();
 const elementsByTab = new Map<number, Map<string, AxSemanticElement>>();
 
@@ -130,6 +136,70 @@ export async function captureAxSnapshot(
       .join("\n"),
     elements
   };
+}
+
+export function findAxElements(
+  snapshot: AxSnapshot,
+  options: AxFindOptions
+): AxSemanticElement[] {
+  const query = (options.query || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  const role = (options.role || "").trim().toLowerCase();
+  const limit = Math.min(
+    Math.max(Math.round(Number(options.limit || 20)), 1),
+    100
+  );
+
+  const queryTokens = query.split(" ").filter(Boolean);
+
+  return snapshot.elements
+    .map((element, index) => {
+      const name = element.name.toLowerCase();
+      const haystack = [
+        element.role,
+        element.name,
+        element.value || "",
+        element.description || ""
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      if (role && element.role.toLowerCase() !== role) {
+        return null;
+      }
+
+      if (
+        queryTokens.length &&
+        !queryTokens.every((token) => haystack.includes(token))
+      ) {
+        return null;
+      }
+
+      let score = 0;
+      if (query && name === query) score += 100;
+      else if (query && name.includes(query)) score += 60;
+      score += queryTokens.length * 10;
+      if (role) score += 20;
+
+      return { element, score, index };
+    })
+    .filter(
+      (
+        item
+      ): item is {
+        element: AxSemanticElement;
+        score: number;
+        index: number;
+      } => Boolean(item)
+    )
+    .sort(
+      (left, right) =>
+        right.score - left.score || left.index - right.index
+    )
+    .slice(0, limit)
+    .map((item) => item.element);
 }
 
 export function backendNodeForRef(
