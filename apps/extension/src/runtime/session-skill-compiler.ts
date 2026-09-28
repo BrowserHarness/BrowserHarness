@@ -144,6 +144,12 @@ function assertCompilableSession(
     throw new Error("SESSION_SKILL_COMPILE_REQUIRES_COMPLETED_SESSION");
   }
 
+  if (session.manual_handoffs?.length) {
+    throw new Error(
+      "SESSION_SKILL_COMPILE_REQUIRES_MANUAL_HANDOFF_PRECONDITION"
+    );
+  }
+
   if (session.actions.length === 0) {
     throw new Error("SESSION_SKILL_COMPILE_REQUIRES_ACTION_EVIDENCE");
   }
