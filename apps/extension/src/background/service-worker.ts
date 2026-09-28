@@ -73,6 +73,12 @@ import {
   createRefinedSiteSkillCandidate
 } from "../runtime/site-skill-refinement";
 import {
+  deleteTaskEpisodeMemory,
+  getTaskEpisodeMemory,
+  listTaskEpisodeMemory,
+  searchTaskEpisodeMemory
+} from "../runtime/task-memory";
+import {
   extensionPageApprovalGranted,
   isRiskyTrustedLabel,
   type ToolExecutionOptions
@@ -546,6 +552,101 @@ async function runTool(
         session_id: sessionId,
         closed_owned_tabs: closedOwnedTabs,
         borrowed_tabs_preserved: session.borrowed_tab_ids.length
+      }
+    };
+  }
+
+  if (tool === "memory") {
+    const action =
+      typeof input.action === "string"
+        ? input.action
+        : "search";
+
+    if (action === "search") {
+      if (
+        typeof input.query !== "string" ||
+        !input.query.trim()
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: "MEMORY_QUERY_REQUIRED",
+            message: "memory search requires query"
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          episodes: await searchTaskEpisodeMemory(
+            input.query,
+            Number(input.limit ?? 10)
+          )
+        }
+      };
+    }
+
+    if (action === "list") {
+      return {
+        ok: true,
+        data: {
+          episodes: await listTaskEpisodeMemory(
+            Number(input.limit ?? 50)
+          )
+        }
+      };
+    }
+
+    if (action === "get") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "MEMORY_ID_REQUIRED",
+            message: "memory get requires id"
+          }
+        };
+      }
+
+      const episode = await getTaskEpisodeMemory(input.id);
+      return episode
+        ? { ok: true, data: { episode } }
+        : {
+            ok: false,
+            error: {
+              code: "MEMORY_NOT_FOUND",
+              message: "Task episode memory was not found"
+            }
+          };
+    }
+
+    if (action === "delete") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "MEMORY_ID_REQUIRED",
+            message: "memory delete requires id"
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          id: input.id,
+          deleted: await deleteTaskEpisodeMemory(input.id)
+        }
+      };
+    }
+
+    return {
+      ok: false,
+      error: {
+        code: "MEMORY_ACTION_INVALID",
+        message:
+          "memory action must be search, list, get, or delete"
       }
     };
   }
@@ -2222,6 +2323,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "find",
   "evaluate",
   "site_skill",
+  "memory",
   "select_option",
   "hover",
   "drag",
