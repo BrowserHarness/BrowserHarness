@@ -25,6 +25,8 @@ const TOOL_NAMES = new Set<ToolName>([
   "observe_page",
   "read_page",
   "ax_snapshot",
+  "find",
+  "evaluate",
   "trusted_click",
   "trusted_type",
   "trusted_key",
@@ -54,7 +56,7 @@ Do not claim an action succeeded unless tool evidence shows it.
 Return exactly one JSON object and no markdown.
 
 To use a tool:
-{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|trusted_click|trusted_type|trusted_key|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
+{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|find|evaluate|trusted_click|trusted_type|trusted_key|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
 
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
@@ -65,12 +67,14 @@ Use read_page when a research/extraction task needs content beyond the compact v
 Escalate browser control in layers:
 1. ordinary semantic observe/click/type/press_key first;
 2. ax_snapshot when DOM refs are insufficient or the site is highly dynamic;
-3. trusted_click / trusted_type / trusted_key for sites that reject synthetic DOM input;
-4. dialog for native alert/confirm/prompt state;
-5. network with action start/list/detail/stop when API/network evidence is more reliable than visual guessing;
-6. upload after ax_snapshot when the task explicitly requires selecting local file paths supplied by the user/agent runtime;
-7. save_pdf to export the current page through Chrome's print-to-PDF path;
-8. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
+3. find to search the fresh accessibility tree by semantic text/role instead of guessing refs;
+4. evaluate for bounded page-context inspection or site-structure probing when DOM/AX data is insufficient;
+5. trusted_click / trusted_type / trusted_key for sites that reject synthetic DOM input;
+6. dialog for native alert/confirm/prompt state;
+7. network with action start/list/detail/stop when API/network evidence is more reliable than visual guessing;
+8. upload after ax_snapshot when the task explicitly requires selecting local file paths supplied by the user/agent runtime;
+9. save_pdf to export the current page through Chrome's print-to-PDF path;
+10. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
 After ax_snapshot, use only the returned @e refs for trusted_* actions. Never invent a CDP ref.
 Use screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. BrowserCrew captures the selected task tab through CDP even when it is backgrounded. Use {"full_page":true} only when the whole document is necessary, or {"element_id":"@eN"} after ax_snapshot to clip to one semantic element. Do not switch tabs merely for screenshots. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
 Do not request send, submit, publish, purchase, delete, payment, or account/security-changing actions unless necessary for the user's explicit goal; BrowserCrew applies approval policy separately.`;
