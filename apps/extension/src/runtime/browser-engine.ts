@@ -87,6 +87,37 @@ const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
   "switch_tab"
 ];
 
+function sessionInputForTool(
+  tool: ToolName,
+  input: Record<string, unknown>
+): Record<string, unknown> {
+  const copied = copySessionInput(input);
+
+  if (
+    tool === "site_skill" &&
+    input.action === "run" &&
+    input.parameters &&
+    typeof input.parameters === "object" &&
+    !Array.isArray(input.parameters)
+  ) {
+    copied.parameters = Object.fromEntries(
+      Object.keys(input.parameters as Record<string, unknown>).map(
+        (name) => [name, "<redacted>"]
+      )
+    );
+  }
+
+  return copied;
+}
+
+function requiresPostActionVerification(
+  tool: ToolName,
+  input: Record<string, unknown>
+): boolean {
+  if (tool === "site_skill") return input.action === "run";
+  return MUTATING_OR_CONTEXT_CHANGING_TOOLS.includes(tool);
+}
+
 function tabIdFromResult(result: ToolResult): number | undefined {
   const data = result.data;
   if (!data || typeof data !== "object") return undefined;
@@ -278,7 +309,7 @@ export async function runBrowserTask(
         ordinal: sessionActions.length + 1,
         recorded_at: new Date().toISOString(),
         tool: decision.tool,
-        input: copySessionInput(decision.input),
+        input: sessionInputForTool(decision.tool, decision.input),
         note: decision.note,
         before: pageContext(beforeObservation),
         ...(targetEvidence(
@@ -334,7 +365,10 @@ export async function runBrowserTask(
 
     if (
       stale ||
-      MUTATING_OR_CONTEXT_CHANGING_TOOLS.includes(decision.tool)
+      requiresPostActionVerification(
+        decision.tool,
+        decision.input
+      )
     ) {
       if (!stale) {
         await dependencies.tool("wait", { milliseconds: 450 });
@@ -377,7 +411,7 @@ export async function runBrowserTask(
         ordinal: sessionActions.length + 1,
         recorded_at: new Date().toISOString(),
         tool: decision.tool,
-        input: copySessionInput(decision.input),
+        input: sessionInputForTool(decision.tool, decision.input),
         note: decision.note,
         before: pageContext(beforeObservation),
         ...(target ? { target } : {}),
