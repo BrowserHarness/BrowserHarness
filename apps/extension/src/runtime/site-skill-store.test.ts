@@ -5,6 +5,7 @@ import {
   getSiteSkillExecutableCandidate,
   getSiteSkillFamily,
   getSiteSkillPromotionGate,
+  getSiteSkillRevisionComparison,
   listSiteSkillCandidateSummaries,
   listSiteSkillRevisionSummaries,
   listSiteSkillRevisions,
@@ -370,6 +371,105 @@ describe("versioned Site Skill storage", () => {
       (await getSiteSkillFamily("SK-SITE-PINNED"))
         ?.active_revision_id
     ).toBe("SK-SITE-PINNED:r1");
+  });
+
+  it("compares candidate execution reliability against the active revision", async () => {
+    await saveSiteSkillCandidate(
+      candidate("SK-SITE-COMPARE", "Active"),
+      { reason: "create" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-COMPARE",
+      "SK-SITE-COMPARE:r1",
+      { kind: "structural-verification", outcome: "passed" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-COMPARE",
+      "SK-SITE-COMPARE:r1",
+      { kind: "execution", outcome: "passed" }
+    );
+    await recordSiteSkillExecutionEvidence(
+      "SK-SITE-COMPARE",
+      "SK-SITE-COMPARE:r1",
+      {
+        recipe_id: "recipe-form-1",
+        started_at: "2026-09-28T07:10:00.000Z",
+        outcome: "passed",
+        executed_steps: 3,
+        submitted: true
+      }
+    );
+    await promoteSiteSkillRevision(
+      "SK-SITE-COMPARE",
+      "SK-SITE-COMPARE:r1"
+    );
+
+    const refined = candidate(
+      "SK-SITE-COMPARE",
+      "Candidate"
+    );
+    refined.provenance.evidence_id = "ev-compare-2";
+    refined.provenance.captured_at =
+      "2026-09-28T07:20:00.000Z";
+    await saveSiteSkillCandidate(refined, {
+      reason: "refinement"
+    });
+    await recordSiteSkillEvaluation(
+      "SK-SITE-COMPARE",
+      "SK-SITE-COMPARE:r2",
+      { kind: "structural-verification", outcome: "passed" }
+    );
+    await recordSiteSkillEvaluation(
+      "SK-SITE-COMPARE",
+      "SK-SITE-COMPARE:r2",
+      { kind: "execution", outcome: "failed" }
+    );
+    await recordSiteSkillExecutionEvidence(
+      "SK-SITE-COMPARE",
+      "SK-SITE-COMPARE:r2",
+      {
+        recipe_id: "recipe-form-1",
+        started_at: "2026-09-28T07:21:00.000Z",
+        outcome: "failed",
+        executed_steps: 1,
+        submitted: false,
+        error_code: "SITE_SKILL_TARGET_NOT_FOUND",
+        error_message: "Target moved"
+      }
+    );
+
+    const comparison =
+      await getSiteSkillRevisionComparison(
+        "SK-SITE-COMPARE",
+        "SK-SITE-COMPARE:r2"
+      );
+
+    expect(comparison).toMatchObject({
+      candidate: {
+        revision_id: "SK-SITE-COMPARE:r2",
+        active: false,
+        execution_runs: 1,
+        execution_passed: 0,
+        execution_failed: 1,
+        execution_success_rate: 0,
+        latest_execution: "failed"
+      },
+      baseline: {
+        revision_id: "SK-SITE-COMPARE:r1",
+        active: true,
+        execution_runs: 1,
+        execution_passed: 1,
+        execution_failed: 0,
+        execution_success_rate: 1,
+        latest_execution: "passed"
+      }
+    });
+    expect(comparison?.regression_signals).toContain(
+      "candidate execution success rate is below baseline"
+    );
+    expect(comparison?.regression_signals).toContain(
+      "candidate latest execution fails while baseline latest execution passes"
+    );
   });
 
   it("uses the latest evaluation outcome and only rolls back to a previously active revision", async () => {
