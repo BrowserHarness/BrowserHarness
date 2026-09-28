@@ -9,6 +9,7 @@ export type ToolName =
   | "site_skill"
   | "memory"
   | "mcp"
+  | "agent"
   | "select_option"
   | "hover"
   | "drag"
