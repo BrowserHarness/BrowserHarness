@@ -377,6 +377,20 @@
     "recursive_agents": false,
     "approval_forwarding": false,
     "cleanup": "close_session in finally",
-    "findings": "bounded message + source URLs/titles + tools used"
+    "findings": "bounded message + source URLs/titles + tools used",
+    "parallel": {
+      "max_workers": 2,
+      "max_steps_per_worker": 8,
+      "concurrency": "parallel",
+      "merge_order": "input task order",
+      "sibling_failure": "isolated",
+      "parent_evidence": [
+        "child session id",
+        "delegated task",
+        "worker status",
+        "source URL/title",
+        "tools used"
+      ]
+    }
   }
 }
