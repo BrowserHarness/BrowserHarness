@@ -16,9 +16,7 @@ export interface BridgeCommand {
   args: Record<string, unknown>;
 }
 
-type BridgeCommandHandler = (
-  command: BridgeCommand
-) => Promise<{
+export interface BridgeRpcResult {
   ok: boolean;
   data?: unknown;
   error?: {
@@ -26,13 +24,23 @@ type BridgeCommandHandler = (
     message: string;
     details?: string;
   };
-}>;
+}
+
+type BridgeCommandHandler = (
+  command: BridgeCommand
+) => Promise<BridgeRpcResult>;
+
+interface PendingMcpRequest {
+  resolve: (result: BridgeRpcResult) => void;
+  timer: number;
+}
 
 let socket: WebSocket | null = null;
 let heartbeatTimer: number | undefined;
 let reconnectTimer: number | undefined;
 let currentSettings: BridgeSettings | null = null;
 let handler: BridgeCommandHandler | null = null;
+const pendingMcp = new Map<string, PendingMcpRequest>();
 
 function clearTimers() {
   if (heartbeatTimer !== undefined) {
@@ -47,6 +55,19 @@ function clearTimers() {
 
 function disconnect() {
   clearTimers();
+  for (const pending of pendingMcp.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({
+      ok: false,
+      error: {
+        code: "BRIDGE_DISCONNECTED",
+        message:
+          "BrowserCrew Bridge disconnected before the MCP request completed"
+      }
+    });
+  }
+  pendingMcp.clear();
+
   if (socket) {
     const existing = socket;
     socket = null;
@@ -82,6 +103,40 @@ async function handleMessage(raw: MessageEvent) {
 
   if (!message || typeof message !== "object") return;
   const value = message as Record<string, unknown>;
+
+  if (
+    value.type === "mcp_result" &&
+    typeof value.id === "string"
+  ) {
+    const pending = pendingMcp.get(value.id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingMcp.delete(value.id);
+    pending.resolve({
+      ok: value.ok === true,
+      ...(value.ok === true
+        ? { data: value.data }
+        : {
+            error: {
+              code:
+                typeof (value.error as { code?: unknown } | undefined)
+                  ?.code === "string"
+                  ? String(
+                      (value.error as { code: string }).code
+                    )
+                  : "MCP_CLIENT_FAILED",
+              message:
+                typeof (value.error as { message?: unknown } | undefined)
+                  ?.message === "string"
+                  ? String(
+                      (value.error as { message: string }).message
+                    )
+                  : "Outbound MCP request failed"
+            }
+          })
+    });
+    return;
+  }
 
   if (value.type === "hello_ack") {
     await saveBridgeStatus({
@@ -237,6 +292,70 @@ async function connectCurrent() {
       state: "error",
       message: "Could not connect to local BrowserCrew Bridge"
     });
+  });
+}
+
+export async function requestBridgeMcp(
+  action: "servers" | "list_tools" | "call_tool",
+  args: Record<string, unknown> = {},
+  approved = false
+): Promise<BridgeRpcResult> {
+  if (
+    !socket ||
+    socket.readyState !== WebSocket.OPEN ||
+    !currentSettings?.enabled
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: "BRIDGE_DISCONNECTED",
+        message:
+          "Connect BrowserCrew Bridge before using external MCP tools"
+      }
+    };
+  }
+
+  const id = crypto.randomUUID();
+
+  return new Promise<BridgeRpcResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingMcp.delete(id);
+      resolve({
+        ok: false,
+        error: {
+          code: "MCP_REQUEST_TIMEOUT",
+          message:
+            "Outbound MCP request timed out"
+        }
+      });
+    }, 40_000) as unknown as number;
+
+    pendingMcp.set(id, { resolve, timer });
+
+    try {
+      socket?.send(
+        JSON.stringify({
+          type: "mcp_request",
+          id,
+          action,
+          args,
+          approved
+        })
+      );
+    } catch (error) {
+      clearTimeout(timer);
+      pendingMcp.delete(id);
+      resolve({
+        ok: false,
+        error: {
+          code: "BRIDGE_DISCONNECTED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not send outbound MCP request"
+        }
+      });
+    }
   });
 }
 
