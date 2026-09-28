@@ -28,6 +28,29 @@ export interface BrowserSessionTargetEvidence {
   enter_requires_approval?: boolean;
 }
 
+export interface BrowserSessionDelegationWorkerEvidence {
+  index: number;
+  task: string;
+  session_id: string;
+  status:
+    | "completed"
+    | "stopped"
+    | "approval-cancelled"
+    | "failed";
+  sources: Array<{
+    url: string;
+    title: string;
+  }>;
+  tools_used: string[];
+}
+
+export interface BrowserSessionDelegationEvidence {
+  worker_count: number;
+  completed_count: number;
+  non_completed_count: number;
+  workers: BrowserSessionDelegationWorkerEvidence[];
+}
+
 export interface BrowserSessionActionEvidence {
   id: string;
   ordinal: number;
@@ -43,6 +66,7 @@ export interface BrowserSessionActionEvidence {
     description?: string;
   };
   result_tab_id?: number;
+  delegation?: BrowserSessionDelegationEvidence;
   after?: BrowserSessionPageContext;
 }
 
