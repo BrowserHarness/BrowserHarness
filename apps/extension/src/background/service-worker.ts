@@ -82,6 +82,9 @@ import {
   searchTaskMemoryHybrid
 } from "../runtime/semantic-memory";
 import {
+  searchProceduralMemory
+} from "../runtime/procedural-memory";
+import {
   clearBrowserWorkingMemory,
   getBrowserWorkingMemory
 } from "../runtime/working-memory";
@@ -633,6 +636,31 @@ async function runTool(
       };
     }
 
+    if (action === "procedures") {
+      if (
+        typeof input.query !== "string" ||
+        !input.query.trim()
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: "MEMORY_QUERY_REQUIRED",
+            message: "memory procedures requires query"
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          procedures: await searchProceduralMemory(
+            input.query,
+            Number(input.limit ?? 8)
+          )
+        }
+      };
+    }
+
     if (action === "list") {
       return {
         ok: true,
@@ -700,7 +728,7 @@ async function runTool(
       error: {
         code: "MEMORY_ACTION_INVALID",
         message:
-          "memory action must be active, search, list, get, or delete"
+          "memory action must be active, search, procedures, list, get, or delete"
       }
     };
   }
