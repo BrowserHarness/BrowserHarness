@@ -86,6 +86,7 @@
     "site_skill",
     "select_option",
     "hover",
+    "drag",
     "find",
     "navigate",
     "click",
@@ -186,6 +187,15 @@
     "verification": [
       "elementFromPoint target/descendant hit-test before dispatch",
       "target :hover state after Input.dispatchMouseEvent"
+    ]
+  },
+  "drag": {
+    "purpose": "real CDP drag/drop between two fresh semantic refs",
+    "input": "source_element_id, target_element_id, steps?, tab_id?",
+    "verification": [
+      "source and target hit-tests before dispatch",
+      "held-button pointer path",
+      "source down + target up delivery proof"
     ]
   }
 }
