@@ -76,6 +76,7 @@ export interface SaveSiteSkillCandidateOptions {
 export interface SiteSkillRevisionSummary {
   revision_id: string;
   ordinal: number;
+  active: boolean;
   created_at: string;
   reason: SiteSkillRevisionReason;
   parent_revision_id?: string;
@@ -95,6 +96,7 @@ export interface SiteSkillCandidateSummary {
   parameter_count: number;
   captured_at: string;
   verification_status?: "verified" | "failed";
+  lifecycle_status: "candidate" | "active";
   revision_count: number;
   latest_revision_id: string;
   active_revision_id?: string;
@@ -159,7 +161,23 @@ function familyFromLegacyCandidate(
     name: candidate.name,
     latest_revision_id: revision.revision_id,
     revisions: [revision],
-    evaluations: [],
+    evaluations: candidate.verification
+      ? [
+          {
+            evaluation_id: `${candidate.id}:eval-1`,
+            revision_id: revision.revision_id,
+            recorded_at:
+              candidate.verification.verified_at,
+            kind: "structural-verification",
+            outcome:
+              candidate.verification.status === "verified"
+                ? "passed"
+                : "failed",
+            detail:
+              "Migrated from legacy candidate verification"
+          }
+        ]
+      : [],
     lifecycle_events: []
   };
 }
@@ -167,14 +185,43 @@ function familyFromLegacyCandidate(
 function normalizeFamily(
   family: SiteSkillFamilyRecord
 ): SiteSkillFamilyRecord {
+  const revisions = Array.isArray(family.revisions)
+    ? structuredClone(family.revisions)
+    : [];
+  const evaluations = Array.isArray(family.evaluations)
+    ? structuredClone(family.evaluations)
+    : [];
+
+  for (const revision of revisions) {
+    if (
+      revision.candidate.verification &&
+      !evaluations.some(
+        (evaluation) =>
+          evaluation.revision_id === revision.revision_id &&
+          evaluation.kind === "structural-verification"
+      )
+    ) {
+      evaluations.push({
+        evaluation_id:
+          `${family.id}:eval-${evaluations.length + 1}`,
+        revision_id: revision.revision_id,
+        recorded_at:
+          revision.candidate.verification.verified_at,
+        kind: "structural-verification",
+        outcome:
+          revision.candidate.verification.status === "verified"
+            ? "passed"
+            : "failed",
+        detail:
+          "Migrated from pre-ledger revision verification"
+      });
+    }
+  }
+
   return {
     ...structuredClone(family),
-    revisions: Array.isArray(family.revisions)
-      ? structuredClone(family.revisions)
-      : [],
-    evaluations: Array.isArray(family.evaluations)
-      ? structuredClone(family.evaluations)
-      : [],
+    revisions,
+    evaluations,
     lifecycle_events: Array.isArray(family.lifecycle_events)
       ? structuredClone(family.lifecycle_events)
       : []
@@ -407,6 +454,8 @@ export async function listSiteSkillRevisionSummaries(
     return {
       revision_id: revision.revision_id,
       ordinal: revision.ordinal,
+      active:
+        family.active_revision_id === revision.revision_id,
       created_at: revision.created_at,
       reason: revision.reason,
       ...(revision.parent_revision_id
@@ -693,6 +742,9 @@ export async function listSiteSkillCandidateSummaries(): Promise<
         recipe_count: candidate.recipes.length,
         parameter_count: candidate.parameters.length,
         captured_at: candidate.provenance.captured_at,
+        lifecycle_status: family.active_revision_id
+          ? "active"
+          : "candidate",
         revision_count: family.revisions.length,
         latest_revision_id: family.latest_revision_id,
         ...(family.active_revision_id
