@@ -1019,6 +1019,15 @@ export async function deleteSiteSkillCandidate(
   return true;
 }
 
+export async function listSiteSkillFamilies(): Promise<
+  SiteSkillFamilyRecord[]
+> {
+  const library = await loadStoredLibrary();
+  return library.families.map((family) =>
+    structuredClone(family)
+  );
+}
+
 export async function listSiteSkillCandidateSummaries(): Promise<
   SiteSkillCandidateSummary[]
 > {
