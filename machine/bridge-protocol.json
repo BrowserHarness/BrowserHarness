@@ -85,6 +85,7 @@
     "evaluate",
     "site_skill",
     "select_option",
+    "hover",
     "find",
     "navigate",
     "click",
@@ -178,5 +179,13 @@
   "select_option": {
     "purpose": "choose native select options using a fresh semantic ref and page input/change events",
     "input": "element_id, value|string[] values, tab_id?"
+  },
+  "hover": {
+    "purpose": "move the real CDP pointer to a fresh semantic target and verify the intended element enters :hover",
+    "input": "element_id, tab_id?",
+    "verification": [
+      "elementFromPoint target/descendant hit-test before dispatch",
+      "target :hover state after Input.dispatchMouseEvent"
+    ]
   }
 }
