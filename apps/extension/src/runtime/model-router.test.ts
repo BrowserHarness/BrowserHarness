@@ -33,7 +33,8 @@ function connection(
       unknown: false
     },
     chatHealth: { status: "healthy" },
-    agentHealth: { status: "healthy" }
+    agentHealth: { status: "healthy" },
+    embeddingHealth: { status: "unknown" }
   };
 }
 
