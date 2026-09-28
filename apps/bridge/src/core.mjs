@@ -343,7 +343,7 @@ export function createBridgeServer({
   });
 
   wss.on("connection", (ws) => {
-    ws.on("message", (raw) => {
+    ws.on("message", async (raw) => {
       try {
         const message = JSON.parse(raw.toString());
 
@@ -384,6 +384,136 @@ export function createBridgeServer({
 
         if (message.type === "heartbeat") {
           ws.send(JSON.stringify({ type: "heartbeat_ack" }));
+          return;
+        }
+
+        if (
+          message.type === "mcp_request" &&
+          typeof message.id === "string"
+        ) {
+          if (extension !== ws) {
+            ws.send(
+              JSON.stringify({
+                type: "mcp_result",
+                id: message.id,
+                ok: false,
+                error: {
+                  code: "MCP_EXTENSION_REQUIRED",
+                  message:
+                    "Outbound MCP requests must come from the paired BrowserCrew extension"
+                }
+              })
+            );
+            return;
+          }
+
+          if (!mcpManager) {
+            ws.send(
+              JSON.stringify({
+                type: "mcp_result",
+                id: message.id,
+                ok: false,
+                error: {
+                  code: "MCP_CLIENT_UNAVAILABLE",
+                  message:
+                    "BrowserCrew Bridge MCP client is not enabled"
+                }
+              })
+            );
+            return;
+          }
+
+          try {
+            let data;
+            const args =
+              message.args &&
+              typeof message.args === "object" &&
+              !Array.isArray(message.args)
+                ? message.args
+                : {};
+
+            if (message.action === "servers") {
+              data = {
+                servers: await mcpManager.listServers()
+              };
+            } else if (message.action === "list_tools") {
+              if (
+                typeof args.server_id !== "string" ||
+                !args.server_id.trim()
+              ) {
+                throw new Error("server_id is required");
+              }
+              data = await mcpManager.listTools(
+                args.server_id.trim()
+              );
+            } else if (message.action === "call_tool") {
+              if (
+                typeof args.server_id !== "string" ||
+                !args.server_id.trim()
+              ) {
+                throw new Error("server_id is required");
+              }
+              if (
+                typeof args.tool !== "string" ||
+                !args.tool.trim()
+              ) {
+                throw new Error("tool is required");
+              }
+              if (
+                args.arguments !== undefined &&
+                (!args.arguments ||
+                  typeof args.arguments !== "object" ||
+                  Array.isArray(args.arguments))
+              ) {
+                throw new Error(
+                  "arguments must be an object"
+                );
+              }
+
+              data = await mcpManager.callTool(
+                args.server_id.trim(),
+                args.tool.trim(),
+                args.arguments || {},
+                {
+                  allowMutating:
+                    message.approved === true
+                }
+              );
+            } else {
+              throw new Error(
+                `Unsupported MCP request action: ${String(message.action || "")}`
+              );
+            }
+
+            ws.send(
+              JSON.stringify({
+                type: "mcp_result",
+                id: message.id,
+                ok: true,
+                data
+              })
+            );
+          } catch (error) {
+            const messageText =
+              error instanceof Error
+                ? error.message
+                : String(error);
+            ws.send(
+              JSON.stringify({
+                type: "mcp_result",
+                id: message.id,
+                ok: false,
+                error: {
+                  code: messageText.startsWith(
+                    "MCP_APPROVAL_REQUIRED"
+                  )
+                    ? "APPROVAL_REQUIRED"
+                    : "MCP_CLIENT_FAILED",
+                  message: messageText
+                }
+              })
+            );
+          }
           return;
         }
 
