@@ -7,6 +7,7 @@ import {
 } from "./model-client";
 import type { PageObservation } from "./protocol";
 import type { ProviderConfig } from "../settings/provider-store";
+import type { TaskEpisodeMemory } from "./task-memory";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -172,6 +173,84 @@ describe("nextAgentDecision", () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
     expect(body.response_format).toEqual({ type: "json_object" });
+  });
+});
+
+describe("episodic memory planning", () => {
+  it("labels recalled task episodes as historical evidence", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  kind: "final",
+                  message: "Done"
+                })
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    const recalled: TaskEpisodeMemory = {
+      schema_version: 1,
+      id: "episode:checkout-prior",
+      kind: "task_episode",
+      recorded_at: "2026-09-28T08:00:00.000Z",
+      session_id: "prior-session",
+      title: "Prior checkout",
+      task: "Finish checkout",
+      status: "completed",
+      start: {
+        tab_id: 4,
+        url: "https://example.com/checkout",
+        title: "Checkout"
+      },
+      action_count: 1,
+      manual_handoff_count: 0,
+      tools: ["site_skill"],
+      targets: ["Continue"],
+      sites: ["https://example.com"],
+      skill_refs: [
+        {
+          id: "SK-SITE-CHECKOUT",
+          action: "run"
+        }
+      ],
+      sensitive_payloads_removed: true
+    };
+
+    await nextAgentDecision(
+      nvidia,
+      "Finish checkout",
+      observation,
+      [],
+      undefined,
+      [],
+      undefined,
+      [recalled]
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body));
+    const userPrompt = String(body.messages[1].content);
+
+    expect(userPrompt).toContain(
+      "RELEVANT PAST TASK EPISODES"
+    );
+    expect(userPrompt).toContain(
+      "episode:checkout-prior"
+    );
+    expect(userPrompt).toContain(
+      "historical evidence only"
+    );
   });
 });
 
