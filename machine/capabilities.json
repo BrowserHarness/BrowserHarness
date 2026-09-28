@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.3-memory-foundation-working-episodic-recall",
+  "status": "v0.3-semantic-memory-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -244,7 +244,15 @@
         "validation": [
           "chat health probe",
           "structured agent health probe"
-        ]
+        ],
+        "embedding": {
+          "status": "verified",
+          "dedicated_route": "embeddingConnectionId",
+          "health_probe": "real /embeddings request with finite vector and consistent dimension validation",
+          "batch_limit": 64,
+          "chat_isolation": "embedding-only connections cannot become primary or fallback chat routes",
+          "local_openai_compatible": true
+        }
       }
     },
     {
@@ -500,10 +508,46 @@
           "active_scope": "current task session only"
         },
         "next": [
-          "semantic retrieval with provider-agnostic embeddings/reranking",
-          "procedural memory linked to active/candidate Skill revisions",
+          "procedural memory linked to immutable Site Skill revisions and execution evidence",
           "MCP client/tool bridge"
-        ]
+        ],
+        "semantic_retrieval": {
+          "status": "verified",
+          "connection_routing": "dedicated healthy embedding connection; never reused as chat fallback",
+          "supported_providers": [
+            "OpenAI",
+            "NVIDIA",
+            "OpenAI-compatible including local endpoints such as LM Studio"
+          ],
+          "index": {
+            "storage": "chrome.storage.local",
+            "source": "sanitized task episodes only",
+            "maximum_records": 500,
+            "active_source_window": 100,
+            "reindex_per_search": 32,
+            "keying": "episode id + embedding connection id + model + content hash"
+          },
+          "retrieval": {
+            "algorithm": "hybrid lexical + cosine semantic ranking with reciprocal-rank fusion",
+            "inspectable_fields": [
+              "retrieval sources",
+              "lexical rank",
+              "semantic rank",
+              "semantic similarity",
+              "combined score"
+            ],
+            "provider_outage": "automatic lexical fallback",
+            "automatic_recall": "hybrid search -> maximum 3 historical episodes"
+          },
+          "privacy": [
+            "raw action inputs are never embedded",
+            "typed values are never embedded",
+            "upload paths are never embedded",
+            "Site Skill parameter values are never embedded"
+          ],
+          "verified_sha": "54844255e208fccf46867d85eb3f78cacb6fb4a6",
+          "ci_run_id": 36376927539
+        }
       }
     },
     {
