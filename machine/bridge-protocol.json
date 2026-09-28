@@ -83,6 +83,7 @@
     "read_page",
     "ax_snapshot",
     "evaluate",
+    "site_skill",
     "find",
     "navigate",
     "click",
@@ -157,5 +158,16 @@
       "semantic-element"
     ],
     "background_tabs": "supported through CDP Page.captureScreenshot"
+  },
+  "site_skill": {
+    "actions": [
+      "create",
+      "list",
+      "get",
+      "delete"
+    ],
+    "create": "fresh AX + bounded form evaluate + optional active network evidence -> persisted candidate-only Site Skill",
+    "lifecycle": "candidate only; never auto-promote",
+    "persistence": "chrome.storage.local candidate library"
   }
 }
