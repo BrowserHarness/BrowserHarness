@@ -970,7 +970,10 @@ async function runTool(
             ok: false,
             data: {
               revision_id: revision.revision_id,
-              verification
+              verification,
+              evidence_id: fresh.evidence.evidence_id,
+              refinement_recommended: true,
+              next_action: "site_skill refine"
             },
             error: {
               code: "SITE_SKILL_VERIFICATION_FAILED",
@@ -1033,19 +1036,20 @@ async function runTool(
                 `Recipe ${recipe.id} completed through its verified submit boundary`
             }
           );
-          await recordSiteSkillExecutionEvidence(
-            input.id,
-            revision.revision_id,
-            {
-              recipe_id: recipe.id,
-              started_at: executionStartedAt,
-              outcome: "passed",
-              evidence_id: fresh.evidence.evidence_id,
-              executed_steps: run.executed_steps,
-              submitted: run.submitted,
-              parameter_names: parameterNames
-            }
-          );
+          const execution =
+            await recordSiteSkillExecutionEvidence(
+              input.id,
+              revision.revision_id,
+              {
+                recipe_id: recipe.id,
+                started_at: executionStartedAt,
+                outcome: "passed",
+                evidence_id: fresh.evidence.evidence_id,
+                executed_steps: run.executed_steps,
+                submitted: run.submitted,
+                parameter_names: parameterNames
+              }
+            );
 
           return {
             ok: true,
@@ -1053,7 +1057,8 @@ async function runTool(
               candidate_id: existing.id,
               revision_id: revision.revision_id,
               verification,
-              run
+              run,
+              execution
             }
           };
         } catch (error) {
@@ -1063,17 +1068,21 @@ async function runTool(
             error instanceof Error
               ? error.message
               : "Site Skill execution failed";
-          await Promise.all([
-            recordSiteSkillEvaluation(
-              input.id,
-              revision.revision_id,
-              {
-                kind: "execution",
-                outcome: "failed",
-                detail: errorMessage
-              }
-            ),
-            recordSiteSkillExecutionEvidence(
+          const errorCode =
+            runError?.code || "SITE_SKILL_RUN_FAILED";
+
+          await recordSiteSkillEvaluation(
+            input.id,
+            revision.revision_id,
+            {
+              kind: "execution",
+              outcome: "failed",
+              detail: errorMessage
+            }
+          ).catch(() => undefined);
+
+          const execution =
+            await recordSiteSkillExecutionEvidence(
               input.id,
               revision.revision_id,
               {
@@ -1085,13 +1094,26 @@ async function runTool(
                   runError?.executed_steps || 0,
                 submitted: runError?.submitted === true,
                 parameter_names: parameterNames,
-                error_code:
-                  runError?.code || "SITE_SKILL_RUN_FAILED",
+                error_code: errorCode,
                 error_message: errorMessage
               }
-            )
-          ]).catch(() => undefined);
-          throw error;
+            ).catch(() => null);
+
+          return {
+            ok: false,
+            data: {
+              candidate_id: existing.id,
+              revision_id: revision.revision_id,
+              verification,
+              execution,
+              refinement_recommended: true,
+              next_action: "site_skill refine"
+            },
+            error: {
+              code: "SITE_SKILL_RUN_FAILED",
+              message: errorMessage
+            }
+          };
         }
       } catch (error) {
         return {
