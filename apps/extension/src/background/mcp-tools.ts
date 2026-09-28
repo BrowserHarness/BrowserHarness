@@ -4,6 +4,10 @@ import {
   requestBridgeMcp,
   type BridgeRpcResult
 } from "./bridge-client";
+import {
+  getMcpServerTrustMode,
+  type McpServerTrustMode
+} from "../settings/mcp-trust-store";
 
 export interface ExternalMcpToolMetadata {
   name: string;
@@ -17,6 +21,10 @@ type McpRequester = (
   args?: Record<string, unknown>,
   approved?: boolean
 ) => Promise<BridgeRpcResult>;
+
+type TrustModeLoader = (
+  serverId: string
+) => Promise<McpServerTrustMode>;
 
 export function externalMcpToolRequiresApproval(
   tool: ExternalMcpToolMetadata
@@ -81,7 +89,9 @@ function callArguments(
 export async function runExternalMcpTool(
   input: Record<string, unknown>,
   options: ToolExecutionOptions = {},
-  requester: McpRequester = requestBridgeMcp
+  requester: McpRequester = requestBridgeMcp,
+  trustModeLoader: TrustModeLoader =
+    getMcpServerTrustMode
 ): Promise<ToolResult> {
   const action =
     typeof input.action === "string"
@@ -148,6 +158,19 @@ export async function runExternalMcpTool(
       };
     }
 
+    const trustMode = await trustModeLoader(id);
+
+    if (trustMode === "blocked") {
+      return {
+        ok: false,
+        error: {
+          code: "MCP_SERVER_BLOCKED",
+          message:
+            `External MCP server ${id} is blocked by BrowserCrew settings.`
+        }
+      };
+    }
+
     const listed = await requester("list_tools", {
       server_id: id
     });
@@ -178,8 +201,12 @@ export async function runExternalMcpTool(
       };
     }
 
+    const requiresApproval =
+      trustMode === "ask-all" ||
+      externalMcpToolRequiresApproval(tool);
+
     if (
-      externalMcpToolRequiresApproval(tool) &&
+      requiresApproval &&
       options.approvalGranted !== true
     ) {
       return {
@@ -187,7 +214,9 @@ export async function runExternalMcpTool(
         error: {
           code: "APPROVAL_REQUIRED",
           message:
-            `External MCP tool ${id}/${name} is not explicitly read-only. Approve this tool call in BrowserCrew before execution.`
+            trustMode === "ask-all"
+              ? `External MCP server ${id} is configured to ask before every tool call. Approve ${name} in BrowserCrew before execution.`
+              : `External MCP tool ${id}/${name} is not explicitly read-only. Approve this tool call in BrowserCrew before execution.`
         }
       };
     }
