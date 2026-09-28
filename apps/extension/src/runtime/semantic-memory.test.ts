@@ -240,6 +240,63 @@ describe("semantic task memory", () => {
     });
   });
 
+  it("embeds delegated tasks and source provenance", () => {
+    const episode: TaskEpisodeMemory = {
+      schema_version: 1,
+      id: "episode-delegated",
+      kind: "task_episode",
+      recorded_at: "2026-09-28T10:30:00.000Z",
+      session_id: "session-delegated",
+      title: "Compare research",
+      task: "Compare sources",
+      status: "completed",
+      start: {
+        tab_id: 1,
+        url: "https://example.com",
+        title: "Example"
+      },
+      action_count: 1,
+      manual_handoff_count: 0,
+      tools: ["agent"],
+      targets: [],
+      sites: [
+        "https://example.com",
+        "https://research.example"
+      ],
+      skill_refs: [],
+      delegations: [
+        {
+          action_id: "action-1",
+          worker_index: 0,
+          task: "Read independent report",
+          session_id: "worker-1",
+          status: "completed",
+          sources: [
+            {
+              url:
+                "https://research.example/report",
+              title: "Independent Report"
+            }
+          ],
+          tools_used: ["read_page"]
+        }
+      ],
+      sensitive_payloads_removed: true
+    };
+
+    const text = taskEpisodeEmbeddingText(episode);
+
+    expect(text).toContain(
+      "Read independent report"
+    );
+    expect(text).toContain(
+      "https://research.example/report"
+    );
+    expect(text).toContain(
+      "Independent Report"
+    );
+  });
+
   it("builds embedding text only from episode fields", () => {
     const episode: TaskEpisodeMemory = {
       schema_version: 1,
