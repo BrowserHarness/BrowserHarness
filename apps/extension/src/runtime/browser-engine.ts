@@ -82,6 +82,8 @@ export interface BrowserEngineResult {
 
 const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
   "navigate",
+  "back",
+  "reload",
   "click",
   "type",
   "press_key",
