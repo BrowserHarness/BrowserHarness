@@ -337,5 +337,23 @@
       "non-loopback Bridge configuration rejected",
       "stdout contains MCP protocol only"
     ]
+  },
+  "outbound_mcp": {
+    "extension_tool": {
+      "name": "mcp",
+      "actions": [
+        "servers",
+        "list_tools",
+        "call_tool"
+      ]
+    },
+    "trust_modes": {
+      "allow-read-only": "freshly annotated read-only/non-destructive tools may run without approval; everything else asks",
+      "ask-all": "all calls require BrowserCrew approval",
+      "blocked": "server cannot execute through BrowserCrew"
+    },
+    "call_contract": "fresh list_tools immediately before execution; trust/annotations evaluated before call",
+    "evidence": "external MCP arguments redacted from BrowserTaskSessionEvidence",
+    "planner_catalog": "up to 18 task-ranked tools across up to 6 non-blocked enabled servers"
   }
 }
