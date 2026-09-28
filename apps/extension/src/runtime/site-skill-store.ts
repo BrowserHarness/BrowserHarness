@@ -36,6 +36,21 @@ export interface SiteSkillEvaluationRecord {
   detail?: string;
 }
 
+export interface SiteSkillExecutionEvidenceRecord {
+  execution_id: string;
+  revision_id: string;
+  recipe_id: string;
+  started_at: string;
+  finished_at: string;
+  outcome: SiteSkillEvaluationOutcome;
+  evidence_id?: string;
+  executed_steps: number;
+  submitted: boolean;
+  parameter_names: string[];
+  error_code?: string;
+  error_message?: string;
+}
+
 export interface SiteSkillLifecycleEvent {
   event_id: string;
   recorded_at: string;
@@ -60,6 +75,7 @@ export interface SiteSkillFamilyRecord {
   active_revision_id?: string;
   revisions: SiteSkillRevisionRecord[];
   evaluations: SiteSkillEvaluationRecord[];
+  executions?: SiteSkillExecutionEvidenceRecord[];
   lifecycle_events: SiteSkillLifecycleEvent[];
 }
 
@@ -178,6 +194,7 @@ function familyFromLegacyCandidate(
           }
         ]
       : [],
+    executions: [],
     lifecycle_events: []
   };
 }
@@ -222,6 +239,9 @@ function normalizeFamily(
     ...structuredClone(family),
     revisions,
     evaluations,
+    executions: Array.isArray(family.executions)
+      ? structuredClone(family.executions)
+      : [],
     lifecycle_events: Array.isArray(family.lifecycle_events)
       ? structuredClone(family.lifecycle_events)
       : []
@@ -308,6 +328,7 @@ export async function saveSiteSkillCandidate(
       latest_revision_id: "",
       revisions: [],
       evaluations: [],
+      executions: [],
       lifecycle_events: []
     };
     library.families.unshift(family);
@@ -479,6 +500,12 @@ function nextEvaluationId(
   return `${family.id}:eval-${family.evaluations.length + 1}`;
 }
 
+function nextExecutionId(
+  family: SiteSkillFamilyRecord
+): string {
+  return `${family.id}:execution-${(family.executions?.length || 0) + 1}`;
+}
+
 function nextLifecycleEventId(
   family: SiteSkillFamilyRecord
 ): string {
@@ -579,6 +606,86 @@ export async function recordSiteSkillEvaluation(
   family.evaluations.push(evaluation);
   await persistLibrary(library);
   return structuredClone(evaluation);
+}
+
+export async function recordSiteSkillExecutionEvidence(
+  id: string,
+  revisionIdInput: string,
+  input: {
+    recipe_id: string;
+    started_at: string;
+    finished_at?: string;
+    outcome: SiteSkillEvaluationOutcome;
+    evidence_id?: string;
+    executed_steps?: number;
+    submitted?: boolean;
+    parameter_names?: string[];
+    error_code?: string;
+    error_message?: string;
+  }
+): Promise<SiteSkillExecutionEvidenceRecord> {
+  const library = await loadStoredLibrary();
+  const family = library.families.find(
+    (item) => item.id === id
+  );
+  if (!family) {
+    throw new Error("SITE_SKILL_NOT_FOUND");
+  }
+  if (
+    !family.revisions.some(
+      (revision) =>
+        revision.revision_id === revisionIdInput
+    )
+  ) {
+    throw new Error("SITE_SKILL_REVISION_NOT_FOUND");
+  }
+
+  const execution: SiteSkillExecutionEvidenceRecord = {
+    execution_id: nextExecutionId(family),
+    revision_id: revisionIdInput,
+    recipe_id: input.recipe_id,
+    started_at: input.started_at,
+    finished_at: input.finished_at || new Date().toISOString(),
+    outcome: input.outcome,
+    ...(input.evidence_id
+      ? { evidence_id: input.evidence_id }
+      : {}),
+    executed_steps: Math.max(
+      0,
+      Math.round(Number(input.executed_steps || 0))
+    ),
+    submitted: input.submitted === true,
+    parameter_names: [...new Set(input.parameter_names || [])].sort(),
+    ...(input.error_code
+      ? { error_code: input.error_code }
+      : {}),
+    ...(input.error_message
+      ? { error_message: input.error_message.slice(0, 1000) }
+      : {})
+  };
+
+  family.executions = [
+    ...(family.executions || []),
+    execution
+  ].slice(-500);
+  await persistLibrary(library);
+  return structuredClone(execution);
+}
+
+export async function listSiteSkillExecutionEvidence(
+  id: string,
+  revisionIdInput?: string
+): Promise<SiteSkillExecutionEvidenceRecord[]> {
+  const family = await getSiteSkillFamily(id);
+  if (!family) return [];
+
+  return (family.executions || [])
+    .filter(
+      (execution) =>
+        !revisionIdInput ||
+        execution.revision_id === revisionIdInput
+    )
+    .map((execution) => structuredClone(execution));
 }
 
 export async function getSiteSkillPromotionGate(
