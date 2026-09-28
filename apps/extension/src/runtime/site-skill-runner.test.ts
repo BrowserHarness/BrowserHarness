@@ -27,7 +27,8 @@ vi.mock("../background/file-tools", () => ({
 
 import {
   resolveSiteSkillTarget,
-  runSiteSkillRecipe
+  runSiteSkillRecipe,
+  SiteSkillRunError
 } from "./site-skill-runner";
 
 function candidate(): SiteCandidateSkill {
@@ -216,6 +217,36 @@ describe("Site Skill recipe runner", () => {
       ["IN"]
     );
     expect(mocks.trustedClick).toHaveBeenCalledWith(7, "@e3");
+  });
+
+  it("preserves partial execution evidence when a later step fails", async () => {
+    mocks.selectOptions.mockRejectedValueOnce(
+      new Error("SELECT_OPTION_FAILED: option disappeared")
+    );
+
+    let caught: unknown;
+    try {
+      await runSiteSkillRecipe({
+        tab_id: 7,
+        candidate: candidate(),
+        parameters: {
+          email: "user@example.com",
+          country: "IN"
+        }
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SiteSkillRunError);
+    expect(caught).toMatchObject({
+      code: "SELECT_OPTION_FAILED",
+      executed_steps: 1,
+      submitted: false
+    });
+    expect((caught as Error).message).toContain(
+      "option disappeared"
+    );
   });
 
   it("rejects ambiguous fresh targets instead of guessing", () => {
