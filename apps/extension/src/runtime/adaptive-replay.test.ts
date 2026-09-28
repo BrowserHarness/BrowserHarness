@@ -156,6 +156,7 @@ function skill(): CandidateSkill {
 function harness(options: {
   initialUrl?: string;
   approve?: boolean;
+  trustedApprovalRequired?: boolean;
   productElements?: PageObservation["elements"];
   searchElements?: PageObservation["elements"];
   axElements?: Array<{
@@ -168,6 +169,7 @@ function harness(options: {
   const calls: Array<{
     tool: ToolName;
     input: Record<string, unknown>;
+    execution?: { approvalGranted?: boolean };
   }> = [];
 
   const searchElements =
@@ -202,9 +204,14 @@ function harness(options: {
   const tool = vi.fn(
     async (
       name: ToolName,
-      input: Record<string, unknown> = {}
+      input: Record<string, unknown> = {},
+      execution?: { approvalGranted?: boolean }
     ): Promise<ToolResult> => {
-      calls.push({ tool: name, input: structuredClone(input) });
+      calls.push({
+        tool: name,
+        input: structuredClone(input),
+        ...(execution ? { execution: structuredClone(execution) } : {})
+      });
 
       if (name === "observe_page") {
         const tabId =
@@ -248,6 +255,20 @@ function harness(options: {
           ok: true,
           data: {
             elements: options.axElements || []
+          }
+        };
+      }
+
+      if (
+        options.trustedApprovalRequired &&
+        (name === "trusted_click" || name === "trusted_key") &&
+        execution?.approvalGranted !== true
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: "APPROVAL_REQUIRED",
+            message: "Trusted action requires explicit approval"
           }
         };
       }
@@ -400,6 +421,117 @@ describe("adaptive candidate Skill replay", () => {
       tab_id: 101,
       element_id: "@e9"
     });
+  });
+
+  it("retries a newly risky AX trusted action only after explicit approval", async () => {
+    const candidate = skill();
+    candidate.plan.steps = [
+      {
+        kind: "action",
+        source_step_id: "step-2",
+        tab_ref: "tab_1",
+        action: "click",
+        description: "Click Continue",
+        target: {
+          tag: "button",
+          role: "button",
+          accessible_name: "Continue",
+          recorded_semantic_ref: "@old"
+        },
+        approval: {
+          required: false
+        }
+      }
+    ];
+    candidate.safety = {
+      ...candidate.safety,
+      boundary_step_id: "step-2",
+      maximum_demonstrated_action_ordinal: 1,
+      maximum_demonstrated_plan_index: 0
+    };
+
+    const h = harness({
+      approve: true,
+      trustedApprovalRequired: true,
+      searchElements: [],
+      axElements: [
+        {
+          element_id: "@e9",
+          role: "button",
+          name: "Continue"
+        }
+      ]
+    });
+
+    const result = await replayCandidateSkill(
+      candidate,
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(h.requestApproval).toHaveBeenCalledWith(
+      "Trusted action requires explicit approval"
+    );
+
+    const trustedCalls = h.calls.filter(
+      (call) => call.tool === "trusted_click"
+    );
+    expect(trustedCalls).toHaveLength(2);
+    expect(trustedCalls[0].execution).toBeUndefined();
+    expect(trustedCalls[1].execution).toEqual({
+      approvalGranted: true
+    });
+  });
+
+  it("does not retry a newly risky AX trusted action when approval is denied", async () => {
+    const candidate = skill();
+    candidate.plan.steps = [
+      {
+        kind: "action",
+        source_step_id: "step-2",
+        tab_ref: "tab_1",
+        action: "click",
+        description: "Click Continue",
+        target: {
+          tag: "button",
+          role: "button",
+          accessible_name: "Continue",
+          recorded_semantic_ref: "@old"
+        },
+        approval: {
+          required: false
+        }
+      }
+    ];
+    candidate.safety = {
+      ...candidate.safety,
+      boundary_step_id: "step-2",
+      maximum_demonstrated_action_ordinal: 1,
+      maximum_demonstrated_plan_index: 0
+    };
+
+    const h = harness({
+      approve: false,
+      trustedApprovalRequired: true,
+      searchElements: [],
+      axElements: [
+        {
+          element_id: "@e9",
+          role: "button",
+          name: "Continue"
+        }
+      ]
+    });
+
+    const result = await replayCandidateSkill(
+      candidate,
+      h.dependencies
+    );
+
+    expect(result.status).toBe("approval-cancelled");
+    expect(
+      h.calls.filter((call) => call.tool === "trusted_click")
+    ).toHaveLength(1);
   });
 
   it("does not execute a recorded consequential action when approval is denied", async () => {
