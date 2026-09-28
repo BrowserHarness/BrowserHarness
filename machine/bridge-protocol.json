@@ -95,6 +95,7 @@
     "trusted_type",
     "press_key",
     "trusted_key",
+    "send_keys",
     "scroll",
     "wait",
     "open_tab",
@@ -197,5 +198,18 @@
       "held-button pointer path",
       "source down + target up delivery proof"
     ]
+  },
+  "send_keys": {
+    "purpose": "dispatch real CDP keyboard chords/sequences at the current focus",
+    "input": "keys, repeat? (1-100), tab_id?",
+    "examples": [
+      "Enter",
+      "Mod+A",
+      "Shift+Tab",
+      "ArrowDown F5",
+      "Enter Escape"
+    ],
+    "mod_resolution": "Cmd on macOS; Ctrl on Windows/Linux/ChromeOS",
+    "approval": "Enter-containing sequences preserve BrowserCrew approval policy"
   }
 }
