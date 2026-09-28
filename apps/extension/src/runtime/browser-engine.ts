@@ -21,6 +21,7 @@ import {
   pageContext,
   targetEvidence,
   type BrowserSessionActionEvidence,
+  type BrowserSessionDelegationEvidence,
   type BrowserSessionManualHandoffEvidence,
   type BrowserTaskSessionEvidence,
   type BrowserTaskSessionIdentity
@@ -178,6 +179,149 @@ function tabIdFromResult(result: ToolResult): number | undefined {
   if (!data || typeof data !== "object") return undefined;
   const tabId = (data as { tab_id?: unknown }).tab_id;
   return typeof tabId === "number" ? tabId : undefined;
+}
+
+function delegationEvidenceFromResult(
+  tool: ToolName,
+  result: ToolResult
+): BrowserSessionDelegationEvidence | undefined {
+  if (
+    tool !== "agent" ||
+    !result.ok ||
+    !result.data ||
+    typeof result.data !== "object" ||
+    Array.isArray(result.data)
+  ) {
+    return undefined;
+  }
+
+  const data = result.data as {
+    worker_count?: unknown;
+    completed_count?: unknown;
+    non_completed_count?: unknown;
+    workers?: unknown;
+  };
+  if (!Array.isArray(data.workers)) return undefined;
+
+  const workers = data.workers
+    .slice(0, 2)
+    .map((raw, fallbackIndex) => {
+      if (
+        !raw ||
+        typeof raw !== "object" ||
+        Array.isArray(raw)
+      ) {
+        return null;
+      }
+      const worker = raw as {
+        index?: unknown;
+        task?: unknown;
+        finding?: unknown;
+      };
+      if (
+        typeof worker.task !== "string" ||
+        !worker.finding ||
+        typeof worker.finding !== "object" ||
+        Array.isArray(worker.finding)
+      ) {
+        return null;
+      }
+
+      const finding = worker.finding as {
+        status?: unknown;
+        session_id?: unknown;
+        sources?: unknown;
+        tools_used?: unknown;
+      };
+      const status =
+        finding.status === "completed" ||
+        finding.status === "stopped" ||
+        finding.status === "approval-cancelled" ||
+        finding.status === "failed"
+          ? finding.status
+          : "failed";
+
+      const sources = Array.isArray(finding.sources)
+        ? finding.sources
+            .slice(0, 6)
+            .flatMap((source) => {
+              if (
+                !source ||
+                typeof source !== "object" ||
+                Array.isArray(source)
+              ) {
+                return [];
+              }
+              const item = source as {
+                url?: unknown;
+                title?: unknown;
+              };
+              return typeof item.url === "string"
+                ? [
+                    {
+                      url: item.url,
+                      title:
+                        typeof item.title === "string"
+                          ? item.title
+                          : ""
+                    }
+                  ]
+                : [];
+            })
+        : [];
+
+      const toolsUsed = Array.isArray(
+        finding.tools_used
+      )
+        ? finding.tools_used
+            .filter(
+              (item): item is string =>
+                typeof item === "string"
+            )
+            .slice(0, 20)
+        : [];
+
+      return {
+        index:
+          typeof worker.index === "number"
+            ? worker.index
+            : fallbackIndex,
+        task: worker.task.slice(0, 1000),
+        session_id:
+          typeof finding.session_id === "string"
+            ? finding.session_id
+            : "",
+        status,
+        sources,
+        tools_used: toolsUsed
+      };
+    })
+    .filter(
+      (
+        worker
+      ): worker is BrowserSessionDelegationEvidence["workers"][number] =>
+        Boolean(worker)
+    );
+
+  return {
+    worker_count:
+      typeof data.worker_count === "number"
+        ? data.worker_count
+        : workers.length,
+    completed_count:
+      typeof data.completed_count === "number"
+        ? data.completed_count
+        : workers.filter(
+            (worker) => worker.status === "completed"
+          ).length,
+    non_completed_count:
+      typeof data.non_completed_count === "number"
+        ? data.non_completed_count
+        : workers.filter(
+            (worker) => worker.status !== "completed"
+          ).length,
+    workers
+  };
 }
 
 function observationInputFor(
@@ -606,6 +750,17 @@ export async function runBrowserTask(
           ...(approval ? { description: approval } : {})
         },
         ...(resultTabId ? { result_tab_id: resultTabId } : {}),
+        ...(delegationEvidenceFromResult(
+          decision.tool,
+          result
+        )
+          ? {
+              delegation: delegationEvidenceFromResult(
+                decision.tool,
+                result
+              )
+            }
+          : {}),
         ...(verifiedContext ? { after: verifiedContext } : {})
       });
       await persistWorkingMemory();
