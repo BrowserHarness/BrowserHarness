@@ -28,6 +28,7 @@ export interface AxSemanticElement {
   description?: string;
   disabled: boolean;
   focused: boolean;
+  checked?: boolean | "mixed";
 }
 
 export interface AxSnapshot {
@@ -76,6 +77,19 @@ function propertyBoolean(
   return Boolean(property?.value?.value);
 }
 
+function propertyChecked(
+  node: AxNode
+): boolean | "mixed" | undefined {
+  const raw = node.properties?.find(
+    (item) => item.name === "checked"
+  )?.value?.value;
+
+  if (raw === "mixed") return "mixed";
+  if (raw === true || raw === "true") return true;
+  if (raw === false || raw === "false") return false;
+  return undefined;
+}
+
 export async function captureAxSnapshot(
   tabId: number,
   maxElements = 300
@@ -110,7 +124,10 @@ export async function captureAxSnapshot(
       ...(value ? { value } : {}),
       ...(description ? { description } : {}),
       disabled: propertyBoolean(node, "disabled"),
-      focused: propertyBoolean(node, "focused")
+      focused: propertyBoolean(node, "focused"),
+      ...(propertyChecked(node) !== undefined
+        ? { checked: propertyChecked(node) }
+        : {})
     });
   }
 
@@ -127,7 +144,14 @@ export async function captureAxSnapshot(
         const value = element.value ? ` value="${element.value}"` : "";
         const flags = [
           element.disabled ? "disabled" : "",
-          element.focused ? "focused" : ""
+          element.focused ? "focused" : "",
+          element.checked === true
+            ? "checked"
+            : element.checked === false
+              ? "unchecked"
+              : element.checked === "mixed"
+                ? "mixed"
+                : ""
         ]
           .filter(Boolean)
           .join(",");
