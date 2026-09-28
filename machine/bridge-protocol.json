@@ -162,12 +162,14 @@
   "site_skill": {
     "actions": [
       "create",
+      "verify",
       "list",
       "get",
       "delete"
     ],
     "create": "fresh AX + bounded form evaluate + optional active network evidence -> persisted candidate-only Site Skill",
     "lifecycle": "candidate only; never auto-promote",
-    "persistence": "chrome.storage.local candidate library"
+    "persistence": "chrome.storage.local candidate library",
+    "verify": "recollect fresh site evidence and persist explicit origin/form/field/submit verification result"
   }
 }
