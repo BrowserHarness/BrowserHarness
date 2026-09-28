@@ -46,6 +46,16 @@ export interface BrowserSessionActionEvidence {
   after?: BrowserSessionPageContext;
 }
 
+export interface BrowserSessionManualHandoffEvidence {
+  id: string;
+  recorded_at: string;
+  reason: string;
+  status: "continued" | "cancelled";
+  source: "navigation" | "user";
+  before: BrowserSessionPageContext;
+  after?: BrowserSessionPageContext;
+}
+
 export interface BrowserTaskSessionEvidence {
   version: 1;
   session_id: string;
@@ -55,6 +65,7 @@ export interface BrowserTaskSessionEvidence {
   status: "completed" | "stopped" | "approval-cancelled";
   start: BrowserSessionPageContext;
   actions: BrowserSessionActionEvidence[];
+  manual_handoffs?: BrowserSessionManualHandoffEvidence[];
   boundary_action_id?: string;
   tab_evidence: TabEvidence[];
 }
