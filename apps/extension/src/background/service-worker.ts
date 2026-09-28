@@ -41,6 +41,7 @@ import { shouldActivateNewTaskTab } from "./tab-policy";
 import { captureCdpScreenshot } from "./cdp-screenshot";
 import { evaluatePageExpression } from "./page-evaluate";
 import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
+import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
   deleteSiteSkillCandidate,
   getSiteSkillCandidate,
@@ -555,12 +556,13 @@ async function runTool(
       };
     }
 
-    if (action !== "create") {
+    if (action !== "create" && action !== "verify") {
       return {
         ok: false,
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
-          message: "site_skill action must be create, list, get, or delete"
+          message:
+            "site_skill action must be create, verify, list, get, or delete"
         }
       };
     }
@@ -572,6 +574,11 @@ async function runTool(
   const tabId = tab.id!;
 
   if (tool === "site_skill") {
+    const action =
+      typeof input.action === "string"
+        ? input.action
+        : "create";
+
     if (!tab.url || !isInjectableUrl(tab.url)) {
       return {
         ok: false,
@@ -581,6 +588,76 @@ async function runTool(
             "Site Skill creation requires an http(s) page"
         }
       };
+    }
+
+    if (action === "verify") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill verify requires id"
+          }
+        };
+      }
+
+      const existing = await getSiteSkillCandidate(input.id);
+      if (!existing) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_NOT_FOUND",
+            message: "Site Skill candidate was not found"
+          }
+        };
+      }
+
+      try {
+        const fresh = await collectCurrentSiteSkill({
+          tab_id: tabId,
+          url: tab.url,
+          title: tab.title || new URL(tab.url).hostname,
+          requested_name: existing.name,
+          include_network: input.include_network !== false
+        });
+        const verification = verifySiteSkillCandidate(
+          existing,
+          fresh.evidence
+        );
+        const updated = {
+          ...existing,
+          verification
+        };
+        await saveSiteSkillCandidate(updated);
+
+        return {
+          ok: verification.status === "verified",
+          data: {
+            candidate: updated,
+            verification
+          },
+          ...(verification.status === "failed"
+            ? {
+                error: {
+                  code: "SITE_SKILL_VERIFICATION_FAILED",
+                  message:
+                    "Site Skill candidate no longer matches fresh site evidence"
+                }
+              }
+            : {})
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_VERIFICATION_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Site Skill verification failed"
+          }
+        };
+      }
     }
 
     try {
