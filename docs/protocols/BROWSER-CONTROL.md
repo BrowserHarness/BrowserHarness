@@ -19,10 +19,11 @@
 `find` captures a fresh AX tree and searches it by semantic text and/or role. It never asks the model to invent refs.
 
 ## Tool surface
-The primary runtime and authenticated Local Bridge expose 26 tools:
+The primary runtime and authenticated Local Bridge expose 27 tools:
 
 - Observation/inspection: `observe_page`, `read_page`, `ax_snapshot`, `find`, `evaluate`, `screenshot`
-- Learning: `site_skill` (`create`, `list`, `get`, `delete` candidate Skills)
+- Learning: `site_skill` (`create`, `verify`, `run`, `list`, `get`, `delete` candidate Skills)
+- Native form control: `select_option`
 - DOM/browser actions: `navigate`, `click`, `type`, `press_key`, `scroll`, `wait`
 - Trusted CDP input: `trusted_click`, `trusted_type`, `trusted_key`
 - Tabs/sessions: `open_tab`, `find_tab`, `list_tabs`, `switch_tab`, `close_tab`
@@ -33,7 +34,16 @@ The primary runtime and authenticated Local Bridge expose 26 tools:
 ### site_skill
 `create` inspects the selected http(s) task tab with fresh AX evidence and bounded form structure evaluation. If network capture is already active, bounded request evidence is summarized without retaining header/body secret values. BrowserCrew compiles and persists an inspectable candidate Skill with inferred parameters, fresh-resolution targets, recipe verification checks and runtime approval policy.
 
-`list`, `get` and `delete` manage the local candidate library. Site analysis never auto-promotes a candidate and structural analysis is not treated as execution proof.
+`verify` recollects live origin/form/field/submit evidence and persists an explicit verified/failed result.
+
+`run` re-verifies immediately before execution, resolves every recipe target from a fresh AX snapshot, rejects ambiguous matches, binds user parameters, and executes text/select/upload/toggle + submit steps. Non-GET or risky submission returns `APPROVAL_REQUIRED`; only the BrowserCrew extension UI can provide the one-shot approval proof. Run parameter values are redacted from session evidence.
+
+`list`, `get` and `delete` manage the local candidate library. Site Skills remain candidate status; verified execution does not auto-promote them.
+
+### select_option
+Input: fresh AX `element_id` plus `value` or `values`.
+
+Resolves the native select through CDP, matches by option value/text/label, updates selection and dispatches bubbling `input` + `change` events. Empty or unmatched requests fail rather than silently selecting the wrong option.
 
 ### trusted_click
 Input: fresh AX `element_id`, optional `tab_id`.
