@@ -36,7 +36,10 @@ import {
 } from "../runtime/model-router";
 import { runBrowserTask } from "../runtime/browser-engine";
 import { replaySavedWorkflowAdaptive } from "../runtime/workflow-adaptive-replay";
-import type { AdaptiveReplayDependencies } from "../runtime/adaptive-replay";
+import type {
+  AdaptiveReplayDependencies,
+  AdaptiveReplayToolExecution
+} from "../runtime/adaptive-replay";
 import { classifyTaskIntent } from "../runtime/intent";
 import type { PageObservation, ToolName, ToolResult } from "../runtime/protocol";
 import {
@@ -267,14 +270,16 @@ export function App() {
         const dependencies: AdaptiveReplayDependencies = {
           tool: <T = unknown>(
             tool: ToolName,
-            input: Record<string, unknown> = {}
+            input: Record<string, unknown> = {},
+            execution?: AdaptiveReplayToolExecution
           ) =>
             extensionMessage<T>({
               type: "BROWSER_TOOL",
               tool,
               input,
               session_id: taskSessionId,
-              session_title: taskSessionTitle
+              session_title: taskSessionTitle,
+              approval_granted: execution?.approvalGranted
             }),
           requestApproval: async (description) => {
             const approved = await requestApproval(description);
