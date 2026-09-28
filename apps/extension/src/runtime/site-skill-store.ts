@@ -13,6 +13,7 @@ export interface SiteSkillCandidateSummary {
   recipe_count: number;
   parameter_count: number;
   captured_at: string;
+  verification_status?: "verified" | "failed";
 }
 
 export async function loadSiteSkillCandidates(): Promise<
@@ -68,7 +69,10 @@ export async function listSiteSkillCandidateSummaries(): Promise<
     entry_url: candidate.site.entry_url,
     recipe_count: candidate.recipes.length,
     parameter_count: candidate.parameters.length,
-    captured_at: candidate.provenance.captured_at
+    captured_at: candidate.provenance.captured_at,
+    ...(candidate.verification
+      ? { verification_status: candidate.verification.status }
+      : {})
   }));
 }
 
