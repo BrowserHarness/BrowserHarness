@@ -12,6 +12,7 @@ import type {
 import type { AgentDecision } from "./model-client";
 import type { BrowserWorkingMemory } from "./working-memory";
 import type { TaskEpisodeMemory } from "./task-memory";
+import type { ProceduralSearchHit } from "./procedural-memory";
 
 function page(
   tabId: number,
@@ -173,6 +174,61 @@ describe("Browser MVP engine scenarios", () => {
     );
 
     expect(h.contexts[0].recalled_memory).toEqual([
+      recalled
+    ]);
+  });
+
+  it("supplies recalled procedures with exact revision provenance", async () => {
+    const h = harness({
+      observations: [page(1, "Checkout", "Continue")],
+      decisions: [
+        {
+          kind: "final",
+          message: "Done."
+        }
+      ]
+    });
+
+    const recalled: ProceduralSearchHit = {
+      procedure: {
+        skill_id: "SK-SITE-CHECKOUT",
+        revision_id: "SK-SITE-CHECKOUT:r3",
+        active: true,
+        latest: true,
+        lifecycle: "active",
+        name: "Checkout",
+        slug: "checkout",
+        origin: "https://example.com",
+        entry_url: "https://example.com/checkout",
+        captured_at: "2026-09-28T12:00:00.000Z",
+        structural_verification: "passed",
+        latest_execution: "passed",
+        execution_runs: 3,
+        execution_passed: 3,
+        execution_failed: 0,
+        execution_success_rate: 1,
+        promotion_eligible: true,
+        promotion_reasons: [],
+        parameters: [],
+        recipes: []
+      },
+      score: 0.02,
+      semantic_rank: 1,
+      semantic_similarity: 0.9,
+      evidence_preference: 0.006,
+      retrieval: ["semantic"]
+    };
+
+    h.dependencies.recallProcedures = vi.fn(
+      async () => [recalled]
+    );
+
+    await runBrowserTask(
+      "Finish checkout",
+      h.dependencies
+    );
+
+    expect(h.contexts[0].recalled_procedures).toEqual([
       recalled
     ]);
   });
