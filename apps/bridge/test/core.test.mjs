@@ -20,6 +20,25 @@ async function start(options = {}) {
   return { bridge, token, base, port: address.port };
 }
 
+function waitForWsMessage(ws, predicate, timeoutMs = 1000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.off("message", onMessage);
+      reject(new Error("WebSocket message timeout"));
+    }, timeoutMs);
+
+    function onMessage(raw) {
+      const message = JSON.parse(raw.toString());
+      if (!predicate(message)) return;
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      resolve(message);
+    }
+
+    ws.on("message", onMessage);
+  });
+}
+
 test("status reports disconnected extension", async () => {
   const env = await start();
   try {
@@ -287,4 +306,151 @@ test("Bridge exposes authenticated outbound MCP discovery and calls", async () =
   }
 
   assert.equal(closed, true);
+});
+
+
+test("paired extension reverse MCP RPC preserves approval boundary", async () => {
+  const mcpManager = {
+    listServers: async () => [],
+    listTools: async () => ({
+      server: {
+        id: "notes",
+        label: "Notes",
+        enabled: true,
+        transport: "stdio",
+        connected: true,
+        env_keys: []
+      },
+      tools: [
+        {
+          name: "write_note",
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: true
+          }
+        }
+      ]
+    }),
+    callTool: async (
+      serverId,
+      tool,
+      args,
+      { allowMutating = false } = {}
+    ) => {
+      assert.equal(serverId, "notes");
+      assert.equal(tool, "write_note");
+      assert.deepEqual(args, { text: "hello" });
+
+      if (!allowMutating) {
+        throw new Error(
+          "MCP_APPROVAL_REQUIRED: notes/write_note"
+        );
+      }
+
+      return {
+        server_id: serverId,
+        tool,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true
+        },
+        result: {
+          content: [
+            {
+              type: "text",
+              text: "saved"
+            }
+          ]
+        }
+      };
+    },
+    closeAll: async () => undefined
+  };
+
+  const env = await start({ mcpManager });
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${env.port}/ws?token=${env.token}`
+  );
+
+  try {
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+
+    const hello = waitForWsMessage(
+      ws,
+      (message) => message.type === "hello_ack"
+    );
+    ws.send(
+      JSON.stringify({
+        type: "hello",
+        protocol_version: BRIDGE_PROTOCOL_VERSION,
+        extension_id: "test-extension",
+        extension_version: "0.3.0"
+      })
+    );
+    await hello;
+
+    const denied = waitForWsMessage(
+      ws,
+      (message) =>
+        message.type === "mcp_result" &&
+        message.id === "mcp-denied"
+    );
+    ws.send(
+      JSON.stringify({
+        type: "mcp_request",
+        id: "mcp-denied",
+        action: "call_tool",
+        approved: false,
+        args: {
+          server_id: "notes",
+          tool: "write_note",
+          arguments: {
+            text: "hello"
+          }
+        }
+      })
+    );
+
+    const deniedResult = await denied;
+    assert.equal(deniedResult.ok, false);
+    assert.equal(
+      deniedResult.error.code,
+      "APPROVAL_REQUIRED"
+    );
+
+    const approved = waitForWsMessage(
+      ws,
+      (message) =>
+        message.type === "mcp_result" &&
+        message.id === "mcp-approved"
+    );
+    ws.send(
+      JSON.stringify({
+        type: "mcp_request",
+        id: "mcp-approved",
+        action: "call_tool",
+        approved: true,
+        args: {
+          server_id: "notes",
+          tool: "write_note",
+          arguments: {
+            text: "hello"
+          }
+        }
+      })
+    );
+
+    const approvedResult = await approved;
+    assert.equal(approvedResult.ok, true);
+    assert.equal(
+      approvedResult.data.result.content[0].text,
+      "saved"
+    );
+  } finally {
+    ws.close();
+    await env.bridge.close();
+  }
 });
