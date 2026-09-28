@@ -1,6 +1,5 @@
 import { embedTexts } from "./model-client";
 import {
-  getTaskEpisodeMemory,
   listTaskEpisodeMemory,
   searchTaskEpisodeMemory,
   type TaskEpisodeMemory
