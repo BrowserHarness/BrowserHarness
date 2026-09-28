@@ -43,7 +43,11 @@ function page(
 describe("read-only subagent runner", () => {
   it("returns bounded findings and always cleans the child session", async () => {
     const baseTool = vi.fn(
-      async (tool: ToolName) => {
+      async (
+        tool: ToolName,
+        _input?: Record<string, unknown>,
+        _execution?: BrowserToolExecution
+      ) => {
         if (tool === "observe_page") {
           return {
             ok: true,
@@ -118,7 +122,11 @@ describe("read-only subagent runner", () => {
 
   it("turns a disallowed worker action into a failed finding instead of mutating", async () => {
     const baseTool = vi.fn(
-      async (tool: ToolName) =>
+      async (
+        tool: ToolName,
+        _input?: Record<string, unknown>,
+        _execution?: BrowserToolExecution
+      ) =>
         tool === "observe_page"
           ? {
               ok: true,
