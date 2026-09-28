@@ -3,6 +3,7 @@ import {
   directChatCompletion,
   embedTexts,
   nextAgentDecision,
+  nextReadOnlyWorkerDecision,
   parseAgentDecision,
   testEmbeddingCapability,
   testModelConnection
@@ -510,6 +511,114 @@ describe("MCP capability planning", () => {
     );
     expect(prompt).toContain(
       "requires_approval:true"
+    );
+  });
+});
+
+describe("bounded subagent planning", () => {
+  it("advertises agent delegation only to the supervisor planner", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    kind: "final",
+                    message: "Done"
+                  })
+                }
+              }
+            ]
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          }
+        )
+      );
+
+    await nextAgentDecision(
+      nvidia,
+      "Research two independent sources",
+      observation,
+      []
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body));
+    const system = String(body.messages[0].content);
+
+    expect(system).toContain(
+      'tool":"observe_page|read_page'
+    );
+    expect(system).toContain("|agent|");
+    expect(system).toContain(
+      'Use agent with {"task":"..."}'
+    );
+    expect(system).toContain(
+      "cannot recursively spawn agents"
+    );
+  });
+
+  it("worker planner advertises only the bounded read-only surface", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    kind: "final",
+                    message: "Evidence found"
+                  })
+                }
+              }
+            ]
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          }
+        )
+      );
+
+    await nextReadOnlyWorkerDecision(
+      nvidia,
+      "Read the article",
+      observation,
+      []
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body));
+    const system = String(body.messages[0].content);
+
+    expect(system).toContain(
+      "bounded BrowserCrew read-only worker"
+    );
+    expect(system).toContain(
+      "Never click, type, press keys, upload files"
+    );
+    expect(system).toContain(
+      "or spawn another agent"
+    );
+    expect(system).toContain(
+      "observe_page|read_page|ax_snapshot|find|screenshot"
+    );
+    expect(system).not.toContain(
+      'tool":"click'
+    );
+    expect(system).not.toContain(
+      "|agent|"
     );
   });
 });
