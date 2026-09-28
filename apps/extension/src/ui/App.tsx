@@ -57,6 +57,7 @@ import {
 import { SettingsView } from "./SettingsView";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
+import { saveTaskEpisodeMemory } from "../runtime/task-memory";
 import { waitForUserAction } from "../runtime/user-handoff";
 
 type Message = { id: string; role: "user" | "assistant"; text: string };
@@ -625,6 +626,9 @@ export function App() {
       );
 
       requestAbort.current = null;
+      await saveTaskEpisodeMemory(
+        result.session_evidence
+      ).catch(() => undefined);
       addAssistantMessage(result.message);
       if (result.status === "completed") {
         await saveHistory(task, result.message);
