@@ -41,6 +41,17 @@ export interface SaveSiteSkillCandidateOptions {
   created_at?: string;
 }
 
+export interface SiteSkillRevisionSummary {
+  revision_id: string;
+  ordinal: number;
+  created_at: string;
+  reason: SiteSkillRevisionReason;
+  parent_revision_id?: string;
+  name: string;
+  status: "candidate";
+  verification_status?: "verified" | "failed";
+}
+
 export interface SiteSkillCandidateSummary {
   id: string;
   name: string;
@@ -279,6 +290,29 @@ export async function listSiteSkillRevisions(
         structuredClone(revision)
       )
     : [];
+}
+
+export async function listSiteSkillRevisionSummaries(
+  id: string
+): Promise<SiteSkillRevisionSummary[]> {
+  const revisions = await listSiteSkillRevisions(id);
+  return revisions.map((revision) => ({
+    revision_id: revision.revision_id,
+    ordinal: revision.ordinal,
+    created_at: revision.created_at,
+    reason: revision.reason,
+    ...(revision.parent_revision_id
+      ? { parent_revision_id: revision.parent_revision_id }
+      : {}),
+    name: revision.candidate.name,
+    status: revision.candidate.status,
+    ...(revision.candidate.verification
+      ? {
+          verification_status:
+            revision.candidate.verification.status
+        }
+      : {})
+  }));
 }
 
 export async function deleteSiteSkillCandidate(
