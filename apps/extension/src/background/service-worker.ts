@@ -570,11 +570,7 @@ async function runTool(
         : "search";
 
     if (action === "active") {
-      const sessionId =
-        typeof input.session_id === "string" &&
-        input.session_id.trim()
-          ? input.session_id.trim()
-          : session?.id;
+      const sessionId = session?.id;
 
       if (!sessionId) {
         return {
