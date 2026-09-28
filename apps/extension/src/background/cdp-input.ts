@@ -137,6 +137,53 @@ async function collectDeliveryProof(
   return result.result?.value === true;
 }
 
+async function targetIsHovered(
+  tabId: number,
+  objectId: string
+): Promise<boolean> {
+  const result = await cdpCommand<RuntimeValue<boolean>>(
+    tabId,
+    "Runtime.callFunctionOn",
+    {
+      objectId,
+      functionDeclaration:
+        "function(){return Boolean(this.matches&&this.matches(':hover'));}",
+      returnByValue: true
+    }
+  );
+  return result.result?.value === true;
+}
+
+export async function trustedHover(
+  tabId: number,
+  ref: string
+): Promise<{ x: number; y: number }> {
+  await enableFocusEmulation(tabId);
+  const { x, y, backendNodeId } = await pointForRef(tabId, ref);
+  const objectId = await resolvedObjectId(tabId, backendNodeId);
+
+  if (!(await targetOwnsPoint(tabId, objectId, x, y))) {
+    throw new Error(
+      "Hover target is occluded at the calculated pointer point"
+    );
+  }
+
+  await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x,
+    y,
+    button: "none"
+  });
+
+  if (!(await targetIsHovered(tabId, objectId))) {
+    throw new Error(
+      "Hover input was not delivered to the intended target"
+    );
+  }
+
+  return { x, y };
+}
+
 export async function trustedClick(
   tabId: number,
   ref: string
