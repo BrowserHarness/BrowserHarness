@@ -58,6 +58,10 @@ import { SettingsView } from "./SettingsView";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
 import { saveTaskEpisodeMemory } from "../runtime/task-memory";
+import {
+  clearBrowserWorkingMemory,
+  saveBrowserWorkingMemory
+} from "../runtime/working-memory";
 import { waitForUserAction } from "../runtime/user-handoff";
 
 type Message = { id: string; role: "user" | "assistant"; text: string };
@@ -576,6 +580,8 @@ export function App() {
             setApproval(null);
             return approved;
           },
+          persistWorkingMemory: (memory) =>
+            saveBrowserWorkingMemory(memory),
           requestUserAction: async (
             reason,
             observation,
@@ -628,7 +634,11 @@ export function App() {
       requestAbort.current = null;
       await saveTaskEpisodeMemory(
         result.session_evidence
-      ).catch(() => undefined);
+      )
+        .then(() =>
+          clearBrowserWorkingMemory(taskSessionId)
+        )
+        .catch(() => undefined);
       addAssistantMessage(result.message);
       if (result.status === "completed") {
         await saveHistory(task, result.message);
