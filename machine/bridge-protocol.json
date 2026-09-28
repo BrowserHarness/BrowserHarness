@@ -84,6 +84,7 @@
     "ax_snapshot",
     "evaluate",
     "site_skill",
+    "select_option",
     "find",
     "navigate",
     "click",
@@ -163,6 +164,7 @@
     "actions": [
       "create",
       "verify",
+      "run",
       "list",
       "get",
       "delete"
@@ -170,6 +172,11 @@
     "create": "fresh AX + bounded form evaluate + optional active network evidence -> persisted candidate-only Site Skill",
     "lifecycle": "candidate only; never auto-promote",
     "persistence": "chrome.storage.local candidate library",
-    "verify": "recollect fresh site evidence and persist explicit origin/form/field/submit verification result"
+    "verify": "recollect fresh site evidence and persist explicit origin/form/field/submit verification result",
+    "run": "fresh verification -> fresh semantic target resolution -> parameterized execution; non-GET/risky submission requires BrowserCrew approval proof"
+  },
+  "select_option": {
+    "purpose": "choose native select options using a fresh semantic ref and page input/change events",
+    "input": "element_id, value|string[] values, tab_id?"
   }
 }
