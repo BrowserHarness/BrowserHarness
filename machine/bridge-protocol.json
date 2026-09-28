@@ -168,15 +168,39 @@
       "create",
       "verify",
       "run",
+      "refine",
       "list",
       "get",
+      "history",
+      "promote",
+      "rollback",
       "delete"
     ],
-    "create": "fresh AX + bounded form evaluate + optional active network evidence -> persisted candidate-only Site Skill",
-    "lifecycle": "candidate only; never auto-promote",
-    "persistence": "chrome.storage.local candidate library",
-    "verify": "recollect fresh site evidence and persist explicit origin/form/field/submit verification result",
-    "run": "fresh verification -> fresh semantic target resolution -> parameterized execution; non-GET/risky submission requires BrowserCrew approval proof"
+    "create": "fresh AX + bounded form evaluate + optional active network evidence -> persisted immutable candidate revision",
+    "verify": "append fresh structural evaluation evidence to a specific immutable revision",
+    "run": "active revision by default -> fresh verification -> fresh semantic target resolution -> parameterized execution; records inspectable execution evidence; non-GET/risky submission requires BrowserCrew approval proof",
+    "refine": "recollect fresh site evidence -> deterministic contract diff -> create a new candidate revision only when the contract changed; active revision is never mutated or moved",
+    "history": "immutable revisions + structural/execution evaluations + execution evidence + lifecycle events + active pointer + promotion gate",
+    "promote": "explicit only; same revision must have passing latest structural verification and execution evaluation",
+    "rollback": "explicit revision_id; target must have been active previously",
+    "lifecycle": "candidate revisions are immutable; no auto-promotion; active revision pointer changes only through explicit promotion/rollback",
+    "execution_evidence": {
+      "persists": [
+        "revision_id",
+        "recipe_id",
+        "start/finish time",
+        "fresh evidence_id",
+        "outcome",
+        "executed step count",
+        "submitted flag",
+        "parameter names",
+        "bounded error code/message"
+      ],
+      "never_persists": [
+        "parameter values"
+      ],
+      "failed_run_recovery": "returns refinement_recommended and next_action=site_skill refine"
+    }
   },
   "select_option": {
     "purpose": "choose native select options using a fresh semantic ref and page input/change events",
