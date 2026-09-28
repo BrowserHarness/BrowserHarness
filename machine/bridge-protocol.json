@@ -82,6 +82,8 @@
     "observe_page",
     "read_page",
     "ax_snapshot",
+    "evaluate",
+    "find",
     "navigate",
     "click",
     "trusted_click",
@@ -121,7 +123,9 @@
       "trusted_key"
     ],
     "dialogs": "dialog",
-    "raw": "cdp"
+    "raw": "cdp",
+    "screenshot": "screenshot",
+    "evaluate": "evaluate"
   },
   "network": {
     "tool": "network",
@@ -135,5 +139,23 @@
   "files": {
     "upload": "upload",
     "pdf": "save_pdf"
+  },
+  "find": {
+    "purpose": "fresh accessibility-tree search without guessing semantic refs",
+    "input": "query?, role?, limit?, tab_id?"
+  },
+  "evaluate": {
+    "purpose": "bounded page-context JavaScript inspection/probing",
+    "input": "expression, max_chars?, tab_id?",
+    "result_limit_chars": 100000
+  },
+  "screenshot": {
+    "tool": "screenshot",
+    "modes": [
+      "viewport",
+      "full-page",
+      "semantic-element"
+    ],
+    "background_tabs": "supported through CDP Page.captureScreenshot"
   }
 }
