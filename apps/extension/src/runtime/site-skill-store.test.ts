@@ -94,6 +94,7 @@ describe("versioned Site Skill storage", () => {
         id: "SK-SITE-1",
         status: "candidate",
         origin: "https://example.com",
+        lifecycle_status: "candidate",
         revision_count: 1,
         latest_revision_id: "SK-SITE-1:r1"
       })
@@ -104,6 +105,7 @@ describe("versioned Site Skill storage", () => {
       {
         revision_id: "SK-SITE-1:r1",
         ordinal: 1,
+        active: false,
         created_at: "2026-09-28T03:00:00.000Z",
         reason: "create",
         name: "Example",
@@ -293,6 +295,26 @@ describe("versioned Site Skill storage", () => {
       (await getSiteSkillFamily("SK-SITE-PROMOTE"))
         ?.active_revision_id
     ).toBe("SK-SITE-PROMOTE:r1");
+    expect(
+      await listSiteSkillCandidateSummaries()
+    ).toEqual([
+      expect.objectContaining({
+        id: "SK-SITE-PROMOTE",
+        lifecycle_status: "active",
+        active_revision_id: "SK-SITE-PROMOTE:r1"
+      })
+    ]);
+    expect(
+      await listSiteSkillRevisionSummaries(
+        "SK-SITE-PROMOTE"
+      )
+    ).toEqual([
+      expect.objectContaining({
+        revision_id: "SK-SITE-PROMOTE:r1",
+        active: true,
+        verification_status: "verified"
+      })
+    ]);
   });
 
   it("keeps execution pinned to the active revision when a newer candidate is created", async () => {
