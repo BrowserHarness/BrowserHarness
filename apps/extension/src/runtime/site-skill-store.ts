@@ -67,6 +67,33 @@ export interface SiteSkillPromotionGate {
   reasons: string[];
 }
 
+export interface SiteSkillRevisionPerformance {
+  revision_id: string;
+  active: boolean;
+  structural_verification:
+    | SiteSkillEvaluationOutcome
+    | "missing";
+  latest_execution:
+    | SiteSkillEvaluationOutcome
+    | "missing";
+  execution_runs: number;
+  execution_passed: number;
+  execution_failed: number;
+  execution_success_rate: number | null;
+  last_failure?: {
+    finished_at: string;
+    error_code?: string;
+    error_message?: string;
+  };
+}
+
+export interface SiteSkillRevisionComparison {
+  candidate: SiteSkillRevisionPerformance;
+  baseline: SiteSkillRevisionPerformance | null;
+  regression_signals: string[];
+  improvement_signals: string[];
+}
+
 export interface SiteSkillFamilyRecord {
   id: string;
   slug: string;
@@ -525,6 +552,175 @@ function latestEvaluation(
           evaluation.revision_id === revisionIdInput &&
           evaluation.kind === kind
       ) || null
+  );
+}
+
+function revisionPerformance(
+  family: SiteSkillFamilyRecord,
+  revisionIdInput: string
+): SiteSkillRevisionPerformance {
+  if (
+    !family.revisions.some(
+      (revision) =>
+        revision.revision_id === revisionIdInput
+    )
+  ) {
+    throw new Error("SITE_SKILL_REVISION_NOT_FOUND");
+  }
+
+  const structural = latestEvaluation(
+    family,
+    revisionIdInput,
+    "structural-verification"
+  );
+  const execution = latestEvaluation(
+    family,
+    revisionIdInput,
+    "execution"
+  );
+  const executions = (family.executions || []).filter(
+    (item) => item.revision_id === revisionIdInput
+  );
+  const executionPassed = executions.filter(
+    (item) => item.outcome === "passed"
+  ).length;
+  const executionFailed = executions.filter(
+    (item) => item.outcome === "failed"
+  ).length;
+  const total = executions.length;
+  const lastFailure = [...executions]
+    .reverse()
+    .find((item) => item.outcome === "failed");
+
+  return {
+    revision_id: revisionIdInput,
+    active: family.active_revision_id === revisionIdInput,
+    structural_verification:
+      structural?.outcome || "missing",
+    latest_execution: execution?.outcome || "missing",
+    execution_runs: total,
+    execution_passed: executionPassed,
+    execution_failed: executionFailed,
+    execution_success_rate:
+      total > 0 ? executionPassed / total : null,
+    ...(lastFailure
+      ? {
+          last_failure: {
+            finished_at: lastFailure.finished_at,
+            ...(lastFailure.error_code
+              ? { error_code: lastFailure.error_code }
+              : {}),
+            ...(lastFailure.error_message
+              ? { error_message: lastFailure.error_message }
+              : {})
+          }
+        }
+      : {})
+  };
+}
+
+export function compareSiteSkillRevisions(
+  family: SiteSkillFamilyRecord,
+  candidateRevisionId: string,
+  baselineRevisionId?: string
+): SiteSkillRevisionComparison {
+  const candidate = revisionPerformance(
+    family,
+    candidateRevisionId
+  );
+  const baseline =
+    baselineRevisionId &&
+    baselineRevisionId !== candidateRevisionId
+      ? revisionPerformance(family, baselineRevisionId)
+      : null;
+
+  const regressionSignals: string[] = [];
+  const improvementSignals: string[] = [];
+
+  if (candidate.structural_verification === "failed") {
+    regressionSignals.push(
+      "candidate structural verification is failing"
+    );
+  }
+  if (candidate.latest_execution === "failed") {
+    regressionSignals.push(
+      "candidate latest execution is failing"
+    );
+  }
+  if (candidate.execution_runs === 0) {
+    regressionSignals.push(
+      "candidate has no execution evidence"
+    );
+  }
+
+  if (baseline) {
+    if (
+      candidate.execution_success_rate !== null &&
+      baseline.execution_success_rate !== null
+    ) {
+      if (
+        candidate.execution_success_rate <
+        baseline.execution_success_rate
+      ) {
+        regressionSignals.push(
+          "candidate execution success rate is below baseline"
+        );
+      } else if (
+        candidate.execution_success_rate >
+        baseline.execution_success_rate
+      ) {
+        improvementSignals.push(
+          "candidate execution success rate is above baseline"
+        );
+      }
+    }
+
+    if (
+      candidate.latest_execution === "passed" &&
+      baseline.latest_execution === "failed"
+    ) {
+      improvementSignals.push(
+        "candidate latest execution passes while baseline latest execution fails"
+      );
+    }
+    if (
+      candidate.latest_execution === "failed" &&
+      baseline.latest_execution === "passed"
+    ) {
+      regressionSignals.push(
+        "candidate latest execution fails while baseline latest execution passes"
+      );
+    }
+  }
+
+  return {
+    candidate,
+    baseline,
+    regression_signals: [...new Set(regressionSignals)],
+    improvement_signals: [...new Set(improvementSignals)]
+  };
+}
+
+export async function getSiteSkillRevisionComparison(
+  id: string,
+  candidateRevisionId?: string,
+  baselineRevisionId?: string
+): Promise<SiteSkillRevisionComparison | null> {
+  const family = await getSiteSkillFamily(id);
+  if (!family) return null;
+
+  const candidateId =
+    candidateRevisionId || family.latest_revision_id;
+  const baselineId =
+    baselineRevisionId ||
+    (family.active_revision_id !== candidateId
+      ? family.active_revision_id
+      : undefined);
+
+  return compareSiteSkillRevisions(
+    family,
+    candidateId,
+    baselineId
   );
 }
 
