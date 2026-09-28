@@ -40,6 +40,13 @@ import {
 import { shouldActivateNewTaskTab } from "./tab-policy";
 import { captureCdpScreenshot } from "./cdp-screenshot";
 import { evaluatePageExpression } from "./page-evaluate";
+import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
+import {
+  deleteSiteSkillCandidate,
+  getSiteSkillCandidate,
+  listSiteSkillCandidateSummaries,
+  saveSiteSkillCandidate
+} from "../runtime/site-skill-store";
 import {
   extensionPageApprovalGranted,
   isRiskyTrustedLabel,
@@ -492,10 +499,126 @@ async function runTool(
     return { ok: true, data: { tab_id: input.tab_id } };
   }
 
+  if (tool === "site_skill") {
+    const action =
+      typeof input.action === "string"
+        ? input.action
+        : "create";
+
+    if (action === "list") {
+      return {
+        ok: true,
+        data: {
+          candidates: await listSiteSkillCandidateSummaries()
+        }
+      };
+    }
+
+    if (action === "get") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill get requires id"
+          }
+        };
+      }
+      const candidate = await getSiteSkillCandidate(input.id);
+      return candidate
+        ? { ok: true, data: { candidate } }
+        : {
+            ok: false,
+            error: {
+              code: "SITE_SKILL_NOT_FOUND",
+              message: "Site Skill candidate was not found"
+            }
+          };
+    }
+
+    if (action === "delete") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill delete requires id"
+          }
+        };
+      }
+      return {
+        ok: true,
+        data: {
+          id: input.id,
+          deleted: await deleteSiteSkillCandidate(input.id)
+        }
+      };
+    }
+
+    if (action !== "create") {
+      return {
+        ok: false,
+        error: {
+          code: "SITE_SKILL_ACTION_INVALID",
+          message: "site_skill action must be create, list, get, or delete"
+        }
+      };
+    }
+  }
+
   const resolved = await targetTab(input, session);
   const tab = resolved.tab;
   session = resolved.session;
   const tabId = tab.id!;
+
+  if (tool === "site_skill") {
+    if (!tab.url || !isInjectableUrl(tab.url)) {
+      return {
+        ok: false,
+        error: {
+          code: "SITE_SKILL_UNSUPPORTED_PAGE",
+          message:
+            "Site Skill creation requires an http(s) page"
+        }
+      };
+    }
+
+    try {
+      const created = await collectCurrentSiteSkill({
+        tab_id: tabId,
+        url: tab.url,
+        title: tab.title || new URL(tab.url).hostname,
+        requested_name:
+          typeof input.name === "string" ? input.name : undefined,
+        include_network: input.include_network !== false
+      });
+      await saveSiteSkillCandidate(created.candidate);
+
+      return {
+        ok: true,
+        data: {
+          candidate: created.candidate,
+          evidence_summary: {
+            ax_target_count: created.evidence.ax.target_count,
+            form_count: created.evidence.forms.length,
+            network_request_count: created.evidence.network.length
+          },
+          persisted: true
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "SITE_SKILL_CREATE_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Site Skill creation failed"
+        }
+      };
+    }
+  }
 
   if (tool === "navigate") {
     if (typeof input.url !== "string") {
@@ -1124,6 +1247,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "ax_snapshot",
   "find",
   "evaluate",
+  "site_skill",
   "trusted_click",
   "trusted_type",
   "trusted_key",
