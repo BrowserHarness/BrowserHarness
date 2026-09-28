@@ -19,15 +19,21 @@
 `find` captures a fresh AX tree and searches it by semantic text and/or role. It never asks the model to invent refs.
 
 ## Tool surface
-The primary runtime and authenticated Local Bridge expose 25 tools:
+The primary runtime and authenticated Local Bridge expose 26 tools:
 
 - Observation/inspection: `observe_page`, `read_page`, `ax_snapshot`, `find`, `evaluate`, `screenshot`
+- Learning: `site_skill` (`create`, `list`, `get`, `delete` candidate Skills)
 - DOM/browser actions: `navigate`, `click`, `type`, `press_key`, `scroll`, `wait`
 - Trusted CDP input: `trusted_click`, `trusted_type`, `trusted_key`
 - Tabs/sessions: `open_tab`, `find_tab`, `list_tabs`, `switch_tab`, `close_tab`
 - Browser/platform: `dialog`, `network`, `upload`, `save_pdf`, `cdp`
 
 ## High-value contracts
+
+### site_skill
+`create` inspects the selected http(s) task tab with fresh AX evidence and bounded form structure evaluation. If network capture is already active, bounded request evidence is summarized without retaining header/body secret values. BrowserCrew compiles and persists an inspectable candidate Skill with inferred parameters, fresh-resolution targets, recipe verification checks and runtime approval policy.
+
+`list`, `get` and `delete` manage the local candidate library. Site analysis never auto-promotes a candidate and structural analysis is not treated as execution proof.
 
 ### trusted_click
 Input: fresh AX `element_id`, optional `tab_id`.
