@@ -93,6 +93,7 @@ import {
   isRiskyTrustedLabel,
   type ToolExecutionOptions
 } from "./approval-grant";
+import { runExternalMcpTool } from "./mcp-tools";
 import {
   goBackAndWait,
   reloadAndWait,
@@ -293,6 +294,10 @@ async function runTool(
       setTimeout(resolve, milliseconds)
     );
     return { ok: true, data: { milliseconds } };
+  }
+
+  if (tool === "mcp") {
+    return runExternalMcpTool(input, options);
   }
 
   if (tool === "open_tab") {
@@ -2406,6 +2411,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "evaluate",
   "site_skill",
   "memory",
+  "mcp",
   "select_option",
   "hover",
   "drag",
