@@ -39,6 +39,7 @@ import {
 } from "./network-capture";
 import { shouldActivateNewTaskTab } from "./tab-policy";
 import { captureCdpScreenshot } from "./cdp-screenshot";
+import { selectOptions } from "./cdp-select";
 import { evaluatePageExpression } from "./page-evaluate";
 import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
@@ -875,6 +876,56 @@ async function runTool(
     }
   }
 
+  if (tool === "select_option") {
+    if (typeof input.element_id !== "string") {
+      return {
+        ok: false,
+        error: {
+          code: "ELEMENT_NOT_FOUND",
+          message: "select_option requires element_id"
+        }
+      };
+    }
+
+    const rawValues = Array.isArray(input.values)
+      ? input.values
+      : typeof input.value === "string"
+        ? [input.value]
+        : [];
+
+    if (rawValues.some((value) => typeof value !== "string")) {
+      return {
+        ok: false,
+        error: {
+          code: "SELECT_OPTION_INPUT_INVALID",
+          message: "select_option values must be strings"
+        }
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        data: await selectOptions(
+          tabId,
+          input.element_id,
+          rawValues as string[]
+        )
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "SELECT_OPTION_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Select option failed"
+        }
+      };
+    }
+  }
+
   if (tool === "trusted_click") {
     if (typeof input.element_id !== "string") {
       return {
@@ -1325,6 +1376,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "find",
   "evaluate",
   "site_skill",
+  "select_option",
   "trusted_click",
   "trusted_type",
   "trusted_key",
