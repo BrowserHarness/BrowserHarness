@@ -22,6 +22,29 @@ export interface SiteSkillRunResult {
   submitted: boolean;
 }
 
+export class SiteSkillRunError extends Error {
+  readonly executed_steps: number;
+  readonly submitted: boolean;
+  readonly code?: string;
+
+  constructor(
+    cause: unknown,
+    executedSteps: number,
+    submitted: boolean
+  ) {
+    const message =
+      cause instanceof Error
+        ? cause.message
+        : String(cause || "Site Skill execution failed");
+    super(message);
+    this.name = "SiteSkillRunError";
+    this.executed_steps = executedSteps;
+    this.submitted = submitted;
+    const match = message.match(/^([A-Z][A-Z0-9_]+)(?::|$)/);
+    this.code = match?.[1];
+  }
+}
+
 function normalized(value: string | undefined): string {
   return (value || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -190,22 +213,23 @@ export async function runSiteSkillRecipe(input: {
   recipe_id?: string;
   parameters: Record<string, unknown>;
 }): Promise<SiteSkillRunResult> {
-  const recipe = selectSiteSkillRecipe(
-    input.candidate,
-    input.recipe_id
-  );
+  let executedSteps = 0;
+  let submitted = false;
 
-  for (const parameterName of recipe.parameters) {
+  try {
+    const recipe = selectSiteSkillRecipe(
+      input.candidate,
+      input.recipe_id
+    );
+
+    for (const parameterName of recipe.parameters) {
     validateParameterValue(
       parameterDefinition(input.candidate, parameterName),
       input.parameters[parameterName]
     );
   }
 
-  let executedSteps = 0;
-  let submitted = false;
-
-  for (const step of recipe.steps) {
+    for (const step of recipe.steps) {
     if (step.kind === "input") {
       const parameter = parameterDefinition(
         input.candidate,
@@ -270,9 +294,17 @@ export async function runSiteSkillRecipe(input: {
     submitted = true;
   }
 
-  return {
-    recipe_id: recipe.id,
-    executed_steps: executedSteps,
-    submitted
-  };
+    return {
+      recipe_id: recipe.id,
+      executed_steps: executedSteps,
+      submitted
+    };
+  } catch (error) {
+    if (error instanceof SiteSkillRunError) throw error;
+    throw new SiteSkillRunError(
+      error,
+      executedSteps,
+      submitted
+    );
+  }
 }
