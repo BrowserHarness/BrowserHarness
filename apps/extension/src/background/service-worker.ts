@@ -23,6 +23,7 @@ import {
 } from "./cdp-semantic";
 import {
   trustedClick,
+  trustedDrag,
   trustedHover,
   trustedKey,
   trustedType
@@ -1081,6 +1082,45 @@ async function runTool(
     }
   }
 
+  if (tool === "drag") {
+    if (
+      typeof input.source_element_id !== "string" ||
+      typeof input.target_element_id !== "string"
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "ELEMENT_NOT_FOUND",
+          message:
+            "drag requires source_element_id and target_element_id"
+        }
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        data: await trustedDrag(
+          tabId,
+          input.source_element_id,
+          input.target_element_id,
+          Number(input.steps ?? 8)
+        )
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "DRAG_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Drag failed"
+        }
+      };
+    }
+  }
+
   if (tool === "trusted_click") {
     if (typeof input.element_id !== "string") {
       return {
@@ -1533,6 +1573,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "site_skill",
   "select_option",
   "hover",
+  "drag",
   "trusted_click",
   "trusted_type",
   "trusted_key",
