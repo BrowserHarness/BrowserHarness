@@ -113,7 +113,8 @@
           "trusted_click_verification": [
             "elementFromPoint occlusion check at calculated target point",
             "pointerdown/mousedown delivery proof before success"
-          ]
+          ],
+          "select_option": "fresh @e ref -> resolved native select -> input/change events"
         },
         "network": {
           "tool": "network",
@@ -190,7 +191,7 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 26
+        "tools": 27
       }
     },
     {
@@ -204,10 +205,12 @@
         "session_to_skill": "verified pure compiler",
         "next": "Site -> Skill v1 evidence/recipe compiler and user-facing persistence; never auto-promote",
         "site_to_skill": {
-          "status": "active-v1",
+          "status": "active-v1-create-verify-run",
           "tool": "site_skill",
           "actions": [
             "create",
+            "verify",
+            "run",
             "list",
             "get",
             "delete"
@@ -218,7 +221,15 @@
             "optional active network request summary"
           ],
           "persistence": "local candidate library",
-          "promotion": "candidate only; evaluation required"
+          "promotion": "candidate only; evaluation required",
+          "execution": [
+            "fresh origin/form/field/submit verification",
+            "fresh AX target resolution per step",
+            "text/select/upload/toggle parameter execution",
+            "ambiguous targets rejected",
+            "non-GET/risky submit requires privileged BrowserCrew approval",
+            "run parameters redacted from session evidence"
+          ]
         }
       }
     },
