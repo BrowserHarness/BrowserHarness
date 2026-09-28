@@ -188,6 +188,32 @@ describe("semantic task memory", () => {
     ).toBe(true);
   });
 
+  it("falls back to lexical retrieval when the embedding endpoint fails", async () => {
+    const episode = await saveTaskEpisodeMemory(
+      session(
+        "session-1",
+        "Check account billing",
+        "https://example.com/billing",
+        "Billing"
+      )
+    );
+
+    vi.spyOn(modelClient, "embedTexts").mockRejectedValue(
+      new Error("Embedding request failed (503)")
+    );
+
+    const hits = await searchTaskMemoryHybrid(
+      "billing",
+      3
+    );
+
+    expect(hits[0]).toMatchObject({
+      episode: { id: episode.id },
+      retrieval: ["lexical"],
+      lexical_rank: 1
+    });
+  });
+
   it("falls back to lexical retrieval without embeddings", async () => {
     vi.mocked(
       providerStore.loadEmbeddingConnection
