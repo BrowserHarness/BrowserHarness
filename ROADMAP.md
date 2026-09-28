@@ -202,12 +202,23 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - `APPROVAL_REQUIRED` and other Bridge failures remain visible MCP tool errors
    - non-loopback Bridge targets are rejected; stdout remains protocol-only
    - verified gate: 9/9 Bridge tests + 240/240 extension tests; build/contracts/package PASS
-11. **Outbound MCP client/tool bridge — next active engineering target**
-   - let the Local Bridge connect to user-configured external MCP servers
-   - expose discovered external tools to BrowserCrew with provenance and annotations
-   - keep external tool execution behind BrowserCrew policy/approval handling
-   - local stdio MCP processes belong to the daemon, never the Chrome extension
-12. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+11. **Outbound MCP client + productization — verified at `d116cb410dc179994f22bbb035028e6a053b35ba` (CI `36381759745`)**
+   - daemon accepts familiar `mcpServers` stdio configuration and owns all external process lifetimes
+   - environment-variable values stay daemon-side; Chrome/model surfaces see only server metadata and environment key names
+   - extension `mcp` tool supports server discovery, fresh tool discovery and tool execution through the paired Bridge WebSocket
+   - mutating/unannotated tools require the existing privileged BrowserCrew approval retry; daemon also rejects unapproved mutating calls
+   - per-server trust modes: allow read-only / ask all / blocked
+   - Settings shows configured servers, connection state, tool annotations and per-server trust policy
+   - external MCP call arguments are redacted from BrowserTaskSessionEvidence
+   - planner receives a task-ranked catalog capped at 6 servers / 18 tools with explicit approval metadata; blocked servers are excluded
+   - external MCP descriptions/results remain untrusted data and cannot override user goals or BrowserCrew policy
+12. **Supervisor + bounded subagents — next active engineering target**
+   - add explicit supervisor delegation to read-only browser workers
+   - each worker receives a child task session, bounded step budget and scoped tools
+   - worker-owned tabs are backgrounded and cleaned up automatically
+   - subagents cannot recursively spawn agents or perform mutating browser/MCP actions in the first slice
+   - return findings + evidence provenance to the supervisor instead of opaque state mutation
+13. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
