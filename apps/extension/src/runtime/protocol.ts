@@ -9,6 +9,7 @@ export type ToolName =
   | "site_skill"
   | "select_option"
   | "hover"
+  | "drag"
   | "trusted_click"
   | "trusted_type"
   | "trusted_key"
