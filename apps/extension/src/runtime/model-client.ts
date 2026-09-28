@@ -27,6 +27,7 @@ const TOOL_NAMES = new Set<ToolName>([
   "ax_snapshot",
   "find",
   "evaluate",
+  "site_skill",
   "trusted_click",
   "trusted_type",
   "trusted_key",
@@ -56,7 +57,7 @@ Do not claim an action succeeded unless tool evidence shows it.
 Return exactly one JSON object and no markdown.
 
 To use a tool:
-{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|find|evaluate|trusted_click|trusted_type|trusted_key|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
+{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|find|evaluate|site_skill|trusted_click|trusted_type|trusted_key|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
 
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
@@ -75,6 +76,7 @@ Escalate browser control in layers:
 8. upload after ax_snapshot when the task explicitly requires selecting local file paths supplied by the user/agent runtime;
 9. save_pdf to export the current page through Chrome's print-to-PDF path;
 10. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
+Use site_skill with action "create" when the user asks BrowserCrew to learn/save the current site as a reusable Skill candidate. It inspects fresh AX/form structure, optionally includes already-captured network evidence, persists a candidate-only Skill, and never auto-promotes it. Use action "list", "get", or "delete" to manage Site Skill candidates. Structural Site Skill analysis is not execution proof; generated recipes must still resolve fresh targets and preserve BrowserCrew approval rules.
 After ax_snapshot, use only the returned @e refs for trusted_* actions. Never invent a CDP ref.
 Use screenshot only when VISION AVAILABLE is true and DOM/text evidence is insufficient. BrowserCrew captures the selected task tab through CDP even when it is backgrounded. Use {"full_page":true} only when the whole document is necessary, or {"element_id":"@eN"} after ax_snapshot to clip to one semantic element. Do not switch tabs merely for screenshots. A screenshot is visual evidence only; browser mutations still require semantic element IDs from the page observation.
 Do not request send, submit, publish, purchase, delete, payment, or account/security-changing actions unless necessary for the user's explicit goal; BrowserCrew applies approval policy separately.`;
