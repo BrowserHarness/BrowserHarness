@@ -73,6 +73,9 @@ function harness(options: {
   const requestApproval = vi.fn(async () => options.approval ?? true);
   const waitWhilePaused = vi.fn(async () => undefined);
   const onFallback = vi.fn();
+  const persistWorkingMemory = vi.fn(
+    async () => undefined
+  );
 
   const dependencies: BrowserEngineDependencies = {
     decide: async (context) => {
@@ -98,6 +101,7 @@ function harness(options: {
         : null;
     },
     requestApproval,
+    persistWorkingMemory,
     isCancelled: options.cancelled || (() => false),
     waitWhilePaused,
     withActivity: async (_label, operation) => operation(),
@@ -111,7 +115,8 @@ function harness(options: {
     contexts,
     requestApproval,
     waitWhilePaused,
-    onFallback
+    onFallback,
+    persistWorkingMemory
   };
 }
 
@@ -227,6 +232,61 @@ describe("Browser MVP engine scenarios", () => {
       expect.arrayContaining(["type", "press_key"])
     );
     expect(h.contexts.at(-1)?.observation.title).toBe("Results");
+  });
+
+  it("persists sanitized working memory as browser state changes", async () => {
+    const inputElement = {
+      element_id: "bc-email",
+      tag: "input",
+      role: "textbox",
+      accessible_name: "Email",
+      visible: true,
+      disabled: false
+    };
+    const h = harness({
+      observations: [
+        page(1, "Form", "Email", [inputElement]),
+        page(1, "Form", "Email entered", [inputElement])
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "type",
+          input: {
+            element_id: "bc-email",
+            text: "private@example.com"
+          },
+          note: "Entering email"
+        },
+        {
+          kind: "final",
+          message: "Done."
+        }
+      ]
+    });
+
+    await runBrowserTask("Enter my email", h.dependencies);
+
+    expect(h.persistWorkingMemory.mock.calls.length).toBeGreaterThanOrEqual(
+      2
+    );
+    const latest =
+      h.persistWorkingMemory.mock.calls.at(-1)?.[0];
+
+    expect(latest).toMatchObject({
+      status: "active",
+      action_count: 1,
+      recent_actions: [
+        {
+          ordinal: 1,
+          tool: "type",
+          target: "Email"
+        }
+      ]
+    });
+    expect(JSON.stringify(latest)).not.toContain(
+      "private@example.com"
+    );
   });
 
   it("fills a form field without submitting", async () => {
