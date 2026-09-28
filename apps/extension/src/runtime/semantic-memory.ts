@@ -53,7 +53,23 @@ export function taskEpisodeEmbeddingText(
           .filter(Boolean)
           .join(" ")
       )
-      .join(" ")}`
+      .join(" ")}`,
+    `delegations: ${(episode.delegations || [])
+      .map((delegation) =>
+        [
+          delegation.task,
+          delegation.status,
+          delegation.session_id,
+          ...delegation.tools_used,
+          ...delegation.sources.flatMap((source) => [
+            source.url,
+            source.title
+          ])
+        ]
+          .filter(Boolean)
+          .join(" ")
+      )
+      .join(" | ")}`
   ].join("\n");
 }
 
