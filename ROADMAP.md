@@ -194,11 +194,20 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - `memory procedures` exposes the same revision-aware retrieval to Bridge/external agents
    - procedural retrieval must never execute implicitly; the planner must explicitly call `site_skill run` with the exact revision after checking the current goal and fresh page
    - CI: 240/240 extension tests across 48 files; typecheck/build/MV3/contract/package PASS
-10. **MCP client/tool bridge — next active engineering target**
-   - expose BrowserCrew through a local stdio MCP server backed by the existing authenticated Local Bridge
-   - preserve BrowserCrew task-session ownership, approval handling and evidence contracts; MCP must not become a second browser executor
-   - then add outbound MCP client support for external MCP servers
-11. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+10. **MCP stdio server — verified at `ea4433d7efacb760bf5aab060a9f96b9e72c3b25` (CI `36377928834`)**
+   - `browsercrew-bridge mcp` serves MCP over stdio using the current v2 server SDK
+   - exposes `browsercrew_status` plus all 34 Local Bridge browser actions as MCP tools
+   - every action relays through authenticated loopback `POST /command` and the paired extension; MCP is not a second browser executor
+   - stable MCP session id maps directly to BrowserCrew task-session ownership
+   - `APPROVAL_REQUIRED` and other Bridge failures remain visible MCP tool errors
+   - non-loopback Bridge targets are rejected; stdout remains protocol-only
+   - verified gate: 9/9 Bridge tests + 240/240 extension tests; build/contracts/package PASS
+11. **Outbound MCP client/tool bridge — next active engineering target**
+   - let the Local Bridge connect to user-configured external MCP servers
+   - expose discovered external tools to BrowserCrew with provenance and annotations
+   - keep external tool execution behind BrowserCrew policy/approval handling
+   - local stdio MCP processes belong to the daemon, never the Chrome extension
+12. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
