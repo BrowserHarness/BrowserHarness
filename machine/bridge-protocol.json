@@ -85,6 +85,7 @@
     "evaluate",
     "site_skill",
     "memory",
+    "mcp",
     "select_option",
     "hover",
     "drag",
@@ -326,7 +327,7 @@
     "sdk": "@modelcontextprotocol/server v2",
     "tools": {
       "count": 35,
-      "composition": "browsercrew_status plus browsercrew_<bridge-action> for every Local Bridge action",
+      "composition": "browsercrew_status plus 34 exported action tools; outbound mcp is intentionally omitted to prevent recursive MCP chaining",
       "input": "session, optional title, optional args object"
     },
     "relay": "MCP tool -> authenticated loopback Bridge /command -> paired extension",
@@ -355,5 +356,27 @@
     "call_contract": "fresh list_tools immediately before execution; trust/annotations evaluated before call",
     "evidence": "external MCP arguments redacted from BrowserTaskSessionEvidence",
     "planner_catalog": "up to 18 task-ranked tools across up to 6 non-blocked enabled servers"
+  },
+  "orchestrator_only": {
+    "tools": [
+      "agent",
+      "await_user_action"
+    ],
+    "bridge_exposed": false,
+    "notes": {
+      "agent": "bounded supervisor delegation; worker authority enforced before service-worker tools",
+      "await_user_action": "UI-mediated human handoff"
+    }
+  },
+  "subagents": {
+    "first_slice": "read-only worker",
+    "max_steps": 8,
+    "child_task_session": true,
+    "background_owned_tabs": true,
+    "borrowed_tabs": "read-only and preserved",
+    "recursive_agents": false,
+    "approval_forwarding": false,
+    "cleanup": "close_session in finally",
+    "findings": "bounded message + source URLs/titles + tools used"
   }
 }
