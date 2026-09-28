@@ -34,7 +34,10 @@ import {
   directChatWithFallback,
   agentDecisionWithFallback
 } from "../runtime/model-router";
-import { runBrowserTask } from "../runtime/browser-engine";
+import {
+  runBrowserTask,
+  type BrowserToolExecution
+} from "../runtime/browser-engine";
 import { replaySavedWorkflowAdaptive } from "../runtime/workflow-adaptive-replay";
 import type {
   AdaptiveReplayDependencies,
@@ -541,13 +544,18 @@ export function App() {
               usedFallback: routed.usedFallback
             };
           },
-          tool: (tool, input = {}) =>
+          tool: (
+            tool,
+            input = {},
+            execution?: BrowserToolExecution
+          ) =>
             extensionMessage({
               type: "BROWSER_TOOL",
               tool,
               input,
               session_id: taskSessionId,
-              session_title: taskSessionTitle
+              session_title: taskSessionTitle,
+              approval_granted: execution?.approvalGranted
             }),
           approvalDescription: (observation, tool, input) =>
             approvalDescription(observation, tool, input),
