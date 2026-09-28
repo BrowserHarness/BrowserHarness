@@ -98,6 +98,20 @@ describe("CDP semantic and trusted-input runtime", () => {
           }
         };
       }
+      if (method === "DOM.resolveNode") {
+        return {
+          object: {
+            objectId: "target-1"
+          }
+        };
+      }
+      if (method === "Runtime.callFunctionOn") {
+        return {
+          result: {
+            value: true
+          }
+        };
+      }
       return {};
     });
 
@@ -119,6 +133,108 @@ describe("CDP semantic and trusted-input runtime", () => {
         button: "left"
       })
     );
+  });
+
+  it("refuses trusted mouse input when the calculated point is occluded", async () => {
+    mocks.cdpCommand.mockResolvedValueOnce({
+      nodes: [
+        {
+          nodeId: "1",
+          backendDOMNodeId: 202,
+          role: { value: "button" },
+          name: { value: "Continue" }
+        }
+      ]
+    });
+    await captureAxSnapshot(12);
+
+    mocks.cdpCommand.mockReset();
+    mocks.cdpCommand.mockImplementation(async (_tab, method) => {
+      if (method === "DOM.getBoxModel") {
+        return {
+          model: {
+            content: [0, 0, 100, 0, 100, 40, 0, 40]
+          }
+        };
+      }
+      if (method === "DOM.resolveNode") {
+        return {
+          object: {
+            objectId: "target-2"
+          }
+        };
+      }
+      if (method === "Runtime.callFunctionOn") {
+        return {
+          result: {
+            value: false
+          }
+        };
+      }
+      return {};
+    });
+
+    await expect(
+      trustedClick(12, "@e1")
+    ).rejects.toThrow("occluded");
+
+    expect(
+      mocks.cdpCommand.mock.calls.some(
+        ([, method]) => method === "Input.dispatchMouseEvent"
+      )
+    ).toBe(false);
+  });
+
+  it("fails trusted click when CDP input is not delivered to the intended target", async () => {
+    mocks.cdpCommand.mockResolvedValueOnce({
+      nodes: [
+        {
+          nodeId: "1",
+          backendDOMNodeId: 203,
+          role: { value: "button" },
+          name: { value: "Continue" }
+        }
+      ]
+    });
+    await captureAxSnapshot(13);
+
+    mocks.cdpCommand.mockReset();
+    let runtimeCalls = 0;
+    mocks.cdpCommand.mockImplementation(async (_tab, method) => {
+      if (method === "DOM.getBoxModel") {
+        return {
+          model: {
+            content: [0, 0, 100, 0, 100, 40, 0, 40]
+          }
+        };
+      }
+      if (method === "DOM.resolveNode") {
+        return {
+          object: {
+            objectId: "target-3"
+          }
+        };
+      }
+      if (method === "Runtime.callFunctionOn") {
+        runtimeCalls += 1;
+        return {
+          result: {
+            value: runtimeCalls < 3
+          }
+        };
+      }
+      return {};
+    });
+
+    await expect(
+      trustedClick(13, "@e1")
+    ).rejects.toThrow("not delivered");
+
+    expect(
+      mocks.cdpCommand.mock.calls.filter(
+        ([, method]) => method === "Input.dispatchMouseEvent"
+      )
+    ).toHaveLength(3);
   });
 
   it("uses DOM.focus plus Input.insertText for trusted text", async () => {
