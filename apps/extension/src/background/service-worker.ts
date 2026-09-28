@@ -23,6 +23,7 @@ import {
 } from "./cdp-semantic";
 import {
   trustedClick,
+  trustedHover,
   trustedKey,
   trustedType
 } from "./cdp-input";
@@ -1050,6 +1051,36 @@ async function runTool(
     }
   }
 
+  if (tool === "hover") {
+    if (typeof input.element_id !== "string") {
+      return {
+        ok: false,
+        error: {
+          code: "ELEMENT_NOT_FOUND",
+          message: "hover requires element_id"
+        }
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        data: await trustedHover(tabId, input.element_id)
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "HOVER_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Hover failed"
+        }
+      };
+    }
+  }
+
   if (tool === "trusted_click") {
     if (typeof input.element_id !== "string") {
       return {
@@ -1501,6 +1532,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "evaluate",
   "site_skill",
   "select_option",
+  "hover",
   "trusted_click",
   "trusted_type",
   "trusted_key",
