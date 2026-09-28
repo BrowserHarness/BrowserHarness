@@ -6,6 +6,7 @@ export type ToolName =
   | "ax_snapshot"
   | "find"
   | "evaluate"
+  | "site_skill"
   | "trusted_click"
   | "trusted_type"
   | "trusted_key"
