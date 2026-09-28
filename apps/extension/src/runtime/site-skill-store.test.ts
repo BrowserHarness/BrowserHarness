@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   deleteSiteSkillCandidate,
   getSiteSkillCandidate,
+  getSiteSkillFamily,
   listSiteSkillCandidateSummaries,
+  listSiteSkillRevisions,
   loadSiteSkillCandidates,
-  saveSiteSkillCandidate
+  saveSiteSkillCandidate,
+  SITE_SKILL_CANDIDATES_KEY,
+  SITE_SKILL_LIBRARY_KEY
 } from "./site-skill-store";
 import type { SiteCandidateSkill } from "./site-skill";
 
@@ -55,7 +59,7 @@ beforeEach(() => {
         local: {
           get: async (key: string) => ({ [key]: store[key] }),
           set: async (value: Record<string, unknown>) => {
-            Object.assign(store, value);
+            Object.assign(store, structuredClone(value));
           }
         }
       }
@@ -63,31 +67,157 @@ beforeEach(() => {
   });
 });
 
-describe("Site Skill candidate storage", () => {
-  it("persists and lists candidate metadata", async () => {
-    await saveSiteSkillCandidate(candidate("SK-SITE-1"));
+describe("versioned Site Skill storage", () => {
+  it("persists the first candidate as immutable revision r1", async () => {
+    const saved = await saveSiteSkillCandidate(
+      candidate("SK-SITE-1"),
+      {
+        reason: "create",
+        created_at: "2026-09-28T03:00:00.000Z"
+      }
+    );
 
+    expect(saved).toMatchObject({
+      revision_id: "SK-SITE-1:r1",
+      ordinal: 1,
+      reason: "create"
+    });
     expect(await loadSiteSkillCandidates()).toHaveLength(1);
     expect(await listSiteSkillCandidateSummaries()).toEqual([
       expect.objectContaining({
         id: "SK-SITE-1",
         status: "candidate",
-        origin: "https://example.com"
+        origin: "https://example.com",
+        revision_count: 1,
+        latest_revision_id: "SK-SITE-1:r1"
+      })
+    ]);
+
+    const family = await getSiteSkillFamily("SK-SITE-1");
+    expect(family?.active_revision_id).toBeUndefined();
+  });
+
+  it("appends a child revision instead of destructively replacing the prior snapshot", async () => {
+    await saveSiteSkillCandidate(
+      candidate("SK-SITE-1", "Old"),
+      {
+        reason: "create",
+        created_at: "2026-09-28T03:00:00.000Z"
+      }
+    );
+
+    const updated = candidate("SK-SITE-1", "Updated");
+    updated.provenance.evidence_id = "ev-2";
+    updated.provenance.captured_at = "2026-09-28T03:05:00.000Z";
+
+    await saveSiteSkillCandidate(updated, {
+      reason: "refinement",
+      created_at: "2026-09-28T03:05:00.000Z"
+    });
+
+    const revisions = await listSiteSkillRevisions("SK-SITE-1");
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0]).toMatchObject({
+      revision_id: "SK-SITE-1:r1",
+      ordinal: 1,
+      reason: "create",
+      candidate: {
+        name: "Old"
+      }
+    });
+    expect(revisions[1]).toMatchObject({
+      revision_id: "SK-SITE-1:r2",
+      ordinal: 2,
+      parent_revision_id: "SK-SITE-1:r1",
+      reason: "refinement",
+      candidate: {
+        name: "Updated"
+      }
+    });
+
+    expect(
+      (await getSiteSkillCandidate("SK-SITE-1"))?.name
+    ).toBe("Updated");
+    expect(
+      (
+        await getSiteSkillCandidate(
+          "SK-SITE-1",
+          "SK-SITE-1:r1"
+        )
+      )?.name
+    ).toBe("Old");
+  });
+
+  it("does not create a duplicate revision for an identical snapshot", async () => {
+    const value = candidate("SK-SITE-1");
+    const first = await saveSiteSkillCandidate(value, {
+      reason: "create"
+    });
+    const second = await saveSiteSkillCandidate(
+      structuredClone(value),
+      {
+        reason: "snapshot"
+      }
+    );
+
+    expect(second.revision_id).toBe(first.revision_id);
+    expect(
+      await listSiteSkillRevisions("SK-SITE-1")
+    ).toHaveLength(1);
+  });
+
+  it("reads legacy v1 candidates and migrates them into revision history on the next write", async () => {
+    store[SITE_SKILL_CANDIDATES_KEY] = [
+      candidate("SK-SITE-LEGACY", "Legacy")
+    ];
+
+    expect(
+      (await loadSiteSkillCandidates())[0]?.name
+    ).toBe("Legacy");
+    expect(
+      await listSiteSkillRevisions("SK-SITE-LEGACY")
+    ).toEqual([
+      expect.objectContaining({
+        revision_id: "SK-SITE-LEGACY:r1",
+        reason: "migration",
+        candidate: {
+          name: "Legacy"
+        }
+      })
+    ]);
+
+    const updated = candidate(
+      "SK-SITE-LEGACY",
+      "Legacy updated"
+    );
+    updated.provenance.evidence_id = "ev-2";
+    updated.provenance.captured_at =
+      "2026-09-28T04:00:00.000Z";
+
+    await saveSiteSkillCandidate(updated, {
+      reason: "refinement"
+    });
+
+    expect(store[SITE_SKILL_LIBRARY_KEY]).toBeDefined();
+    expect(
+      await listSiteSkillRevisions("SK-SITE-LEGACY")
+    ).toEqual([
+      expect.objectContaining({
+        revision_id: "SK-SITE-LEGACY:r1",
+        reason: "migration"
+      }),
+      expect.objectContaining({
+        revision_id: "SK-SITE-LEGACY:r2",
+        parent_revision_id: "SK-SITE-LEGACY:r1",
+        reason: "refinement"
       })
     ]);
   });
 
-  it("replaces a candidate by id instead of duplicating it", async () => {
-    await saveSiteSkillCandidate(candidate("SK-SITE-1", "Old"));
-    await saveSiteSkillCandidate(candidate("SK-SITE-1", "Updated"));
-
-    const saved = await loadSiteSkillCandidates();
-    expect(saved).toHaveLength(1);
-    expect(saved[0].name).toBe("Updated");
-  });
-
-  it("gets and deletes candidates", async () => {
-    await saveSiteSkillCandidate(candidate("SK-SITE-2"));
+  it("gets and deletes the full Skill family", async () => {
+    await saveSiteSkillCandidate(candidate("SK-SITE-2"), {
+      reason: "create"
+    });
 
     expect((await getSiteSkillCandidate("SK-SITE-2"))?.id).toBe(
       "SK-SITE-2"
@@ -98,6 +228,9 @@ describe("Site Skill candidate storage", () => {
     await expect(
       getSiteSkillCandidate("SK-SITE-2")
     ).resolves.toBeNull();
+    await expect(
+      listSiteSkillRevisions("SK-SITE-2")
+    ).resolves.toEqual([]);
     await expect(
       deleteSiteSkillCandidate("missing")
     ).resolves.toBe(false);
