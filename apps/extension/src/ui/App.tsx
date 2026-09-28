@@ -82,6 +82,10 @@ import { waitForUserAction } from "../runtime/user-handoff";
 import {
   runReadOnlySubagent
 } from "../runtime/subagent-runner";
+import {
+  parseReadOnlySubagentTasks,
+  runReadOnlySubagentBatch
+} from "../runtime/subagent-supervisor";
 
 type Message = { id: string; role: "user" | "assistant"; text: string };
 type Activity = { id: string; text: string; state: "working" | "done" | "error" };
@@ -591,136 +595,139 @@ export function App() {
             execution?: BrowserToolExecution
           ): Promise<ToolResult<T>> => {
             if (tool === "agent") {
-              const workerTask =
-                typeof input.task === "string"
-                  ? input.task.trim()
-                  : "";
-              if (!workerTask) {
+              const parsed =
+                parseReadOnlySubagentTasks(input);
+              if (!parsed.ok) {
                 return {
                   ok: false,
-                  error: {
-                    code: "SUBAGENT_TASK_REQUIRED",
-                    message:
-                      "agent requires a non-empty task"
-                  }
+                  error: parsed.error
                 } as ToolResult<T>;
               }
 
-              const workerSessionId =
-                `${taskSessionId}:worker:${crypto.randomUUID()}`;
-              const workerSessionTitle =
-                workerTask.length > 48
-                  ? `Worker: ${workerTask.slice(0, 41)}…`
-                  : `Worker: ${workerTask}`;
-              const maxSteps = Math.min(
-                Math.max(
-                  Math.round(
-                    Number(input.max_steps ?? 8)
-                  ) || 8,
-                  1
-                ),
-                8
-              );
+              const batch =
+                await runReadOnlySubagentBatch(
+                  parsed.tasks,
+                  async (spec, index) => {
+                    const workerTask = spec.task;
+                    const workerSessionId =
+                      `${taskSessionId}:worker:${index + 1}:${crypto.randomUUID()}`;
+                    const workerSessionTitle =
+                      workerTask.length > 48
+                        ? `Worker ${index + 1}: ${workerTask.slice(0, 37)}…`
+                        : `Worker ${index + 1}: ${workerTask}`;
 
-              const finding = await runReadOnlySubagent(
-                workerTask,
-                {
-                  session: {
-                    id: workerSessionId,
-                    title: workerSessionTitle
-                  },
-                  decide: async ({
-                    task: subtask,
-                    observation,
-                    trail,
-                    evidence,
-                    mcp_catalog,
-                    signal: workerSignal
-                  }) => {
-                    const routed =
-                      await readOnlyWorkerDecisionWithFallback(
-                        agentPrimary,
-                        agentFallback,
-                        subtask,
-                        observation,
-                        trail,
-                        workerSignal,
-                        evidence,
-                        mcp_catalog
-                      );
-                    return {
-                      decision: routed.result,
-                      usedFallback: routed.usedFallback
-                    };
-                  },
-                  baseTool: (
-                    workerTool,
-                    workerInput = {}
-                  ) =>
-                    extensionMessage({
-                      type: "BROWSER_TOOL",
-                      tool: workerTool,
-                      input: workerInput,
-                      session_id: workerSessionId,
-                      session_title: workerSessionTitle
-                    }),
-                  recallMemory: async (
-                    subtask,
-                    observation
-                  ) =>
-                    (
-                      await searchTaskMemoryHybrid(
-                        `${subtask} ${safeHostname(observation.url)}`,
-                        3
-                      )
-                    ).map((hit) => hit.episode),
-                  recallProcedures: (
-                    subtask,
-                    observation
-                  ) =>
-                    searchProceduralMemory(
-                      `${subtask} ${safeHostname(observation.url)}`,
-                      3
-                    ),
-                  discoverMcpCatalog: (
-                    subtask,
-                    observation
-                  ) =>
-                    buildMcpCatalog(
-                      `${subtask} ${safeHostname(observation.url)}`,
-                      (mcpInput) =>
-                        extensionMessage({
-                          type: "BROWSER_TOOL",
-                          tool: "mcp",
-                          input: mcpInput
-                        }),
-                      getMcpServerTrustMode
-                    ),
-                  isCancelled: () => cancelled.current,
-                  waitWhilePaused: async () => {
-                    while (
-                      pausedRef.current &&
-                      !cancelled.current
-                    ) {
-                      await new Promise((resolve) =>
-                        window.setTimeout(resolve, 150)
-                      );
-                    }
-                  },
-                  onFallback: () => {
-                    addActivity(
-                      "Worker used fallback model",
-                      "done"
+                    return runReadOnlySubagent(
+                      workerTask,
+                      {
+                        session: {
+                          id: workerSessionId,
+                          title: workerSessionTitle
+                        },
+                        decide: async ({
+                          task: subtask,
+                          observation,
+                          trail,
+                          evidence,
+                          mcp_catalog,
+                          signal: workerSignal
+                        }) => {
+                          const routed =
+                            await readOnlyWorkerDecisionWithFallback(
+                              agentPrimary,
+                              agentFallback,
+                              subtask,
+                              observation,
+                              trail,
+                              workerSignal,
+                              evidence,
+                              mcp_catalog
+                            );
+                          return {
+                            decision: routed.result,
+                            usedFallback:
+                              routed.usedFallback
+                          };
+                        },
+                        baseTool: (
+                          workerTool,
+                          workerInput = {}
+                        ) =>
+                          extensionMessage({
+                            type: "BROWSER_TOOL",
+                            tool: workerTool,
+                            input: workerInput,
+                            session_id:
+                              workerSessionId,
+                            session_title:
+                              workerSessionTitle
+                          }),
+                        recallMemory: async (
+                          subtask,
+                          observation
+                        ) =>
+                          (
+                            await searchTaskMemoryHybrid(
+                              `${subtask} ${safeHostname(observation.url)}`,
+                              3
+                            )
+                          ).map(
+                            (hit) => hit.episode
+                          ),
+                        recallProcedures: (
+                          subtask,
+                          observation
+                        ) =>
+                          searchProceduralMemory(
+                            `${subtask} ${safeHostname(observation.url)}`,
+                            3
+                          ),
+                        discoverMcpCatalog: (
+                          subtask,
+                          observation
+                        ) =>
+                          buildMcpCatalog(
+                            `${subtask} ${safeHostname(observation.url)}`,
+                            (mcpInput) =>
+                              extensionMessage({
+                                type: "BROWSER_TOOL",
+                                tool: "mcp",
+                                input: mcpInput
+                              }),
+                            getMcpServerTrustMode
+                          ),
+                        isCancelled: () =>
+                          cancelled.current,
+                        waitWhilePaused: async () => {
+                          while (
+                            pausedRef.current &&
+                            !cancelled.current
+                          ) {
+                            await new Promise(
+                              (resolve) =>
+                                window.setTimeout(
+                                  resolve,
+                                  150
+                                )
+                            );
+                          }
+                        },
+                        onFallback: () => {
+                          addActivity(
+                            `Worker ${index + 1} used fallback model`,
+                            "done"
+                          );
+                        }
+                      },
+                      controller.signal,
+                      spec.max_steps
                     );
-                  }
-                },
-                controller.signal,
-                maxSteps
-              );
+                  },
+                  controller.signal
+                );
 
               return {
                 ok: true,
-                data: finding as T
+                data: batch as T
               };
             }
 
