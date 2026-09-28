@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-kimi-interaction-parity-verified-skill-lifecycle-next",
+  "status": "v0.2-kimi-parity-plus-versioned-skill-refinement-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -22,7 +22,11 @@
         ],
         "cdp_strategy": "primary BrowserCrew capability",
         "session_storage": "serialized read-modify-write mutations",
-        "navigation": "bounded usable-document wait with final redirected URL",
+        "navigation": {
+          "navigate": "bounded usable-document wait with final redirected URL",
+          "back": "browser-history back with bounded usable-document verification",
+          "reload": "reload with optional cache bypass and bounded usable-document verification"
+        },
         "page_reading": {
           "tool": "read_page",
           "default_max_chars": 12000,
@@ -196,6 +200,12 @@
           ],
           "verified_sha": "0204ecbf78b5be694267cf7a9dc0ea04afaeb9f4",
           "ci_run_id": 36371442796
+        },
+        "session_cleanup": {
+          "tool": "close_session",
+          "closes": "task-owned tabs only",
+          "preserves": "borrowed user tabs",
+          "removes": "task-session state"
         }
       }
     },
@@ -256,7 +266,7 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 30,
+        "tools": 33,
         "planner_tools": 31,
         "orchestrator_only": [
           "await_user_action"
@@ -272,7 +282,7 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "versioned candidate revisions, evaluation comparison, explicit promotion and rollback",
+        "next": "v0.3 memory + MCP foundation; SK-BROWSER-001 cross-runtime evaluation remains a parallel external-runtime blocker",
         "site_to_skill": {
           "status": "verified-v1",
           "tool": "site_skill",
@@ -280,8 +290,13 @@
             "create",
             "verify",
             "run",
+            "refine",
             "list",
             "get",
+            "history",
+            "compare",
+            "promote",
+            "rollback",
             "delete"
           ],
           "evidence": [
@@ -301,6 +316,28 @@
           ],
           "verified_sha": "bbfed3443eea22df9b0115407519836263032469",
           "ci_run_id": 36369232137
+        },
+        "versioned_lifecycle": {
+          "status": "verified",
+          "revision_model": "immutable candidate revisions with explicit parent links",
+          "active_pointer": "moves only through explicit promotion or rollback",
+          "execution_evidence": [
+            "revision + recipe identity",
+            "start/finish timestamps",
+            "fresh evidence id",
+            "pass/fail outcome",
+            "partial executed-step count",
+            "submitted flag",
+            "parameter names only",
+            "bounded error code/message"
+          ],
+          "parameter_values": "never persisted in execution evidence",
+          "refinement": "fresh Site evidence -> deterministic contract diff -> new candidate revision only when contract changed",
+          "comparison": "candidate vs active structural outcome, execution counts, success rates, latest outcomes and regression/improvement signals",
+          "promotion_gate": "latest structural verification and latest execution evaluation for the same revision must pass",
+          "failed_run_recovery": "returns refinement_recommended plus next_action=site_skill refine",
+          "verified_sha": "e23be905d190f60aaecee916dc031eaa0c1a1380",
+          "ci_run_id": 36374874922
         }
       }
     },
@@ -315,7 +352,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "versioned Skill refinement/promotion/rollback; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
+        "next": "v0.3 memory + MCP foundation; SK-BROWSER-001 cross-runtime evaluation remains blocked until a real external runtime is paired",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
