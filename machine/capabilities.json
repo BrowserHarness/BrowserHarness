@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-site-skill-v1-verified-interaction-parity-next",
+  "status": "v0.2-site-skill-v1-verified-interaction-parity-active",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -114,7 +114,17 @@
             "elementFromPoint occlusion check at calculated target point",
             "pointerdown/mousedown delivery proof before success"
           ],
-          "select_option": "fresh @e ref -> resolved native select -> input/change events"
+          "select_option": "fresh @e ref -> resolved native select -> input/change events",
+          "drag": {
+            "tool": "drag",
+            "source_target": "fresh semantic @e refs",
+            "verification": [
+              "elementFromPoint hit-test at source and target before dispatch",
+              "held left-button CDP pointer path",
+              "pointer/mouse down on source and up on target delivery proof",
+              "fresh page observation after action"
+            ]
+          }
         },
         "network": {
           "tool": "network",
@@ -191,7 +201,7 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 27
+        "tools": 29
       }
     },
     {
@@ -203,7 +213,7 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "Kimi-reference interaction parity, then versioned Skill refinement/promotion",
+        "next": "richer key chords/sequences/modifiers, await-user-action, then versioned Skill refinement/promotion",
         "site_to_skill": {
           "status": "verified-v1",
           "tool": "site_skill",
@@ -246,7 +256,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "Kimi-reference interaction parity; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
+        "next": "richer key chords/sequences/modifiers and await-user-action; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
