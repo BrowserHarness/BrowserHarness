@@ -8,6 +8,7 @@ export type ToolName =
   | "evaluate"
   | "site_skill"
   | "select_option"
+  | "hover"
   | "trusted_click"
   | "trusted_type"
   | "trusted_key"
