@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.3-semantic-memory-verified",
+  "status": "v0.3-procedural-memory-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -290,7 +290,7 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "v0.3 memory + MCP foundation; SK-BROWSER-001 cross-runtime evaluation remains a parallel external-runtime blocker",
+        "next": "MCP client/tool bridge; SK-BROWSER-001 cross-runtime evaluation remains a parallel external-runtime blocker",
         "site_to_skill": {
           "status": "verified-v1",
           "tool": "site_skill",
@@ -508,7 +508,6 @@
           "active_scope": "current task session only"
         },
         "next": [
-          "procedural memory linked to immutable Site Skill revisions and execution evidence",
           "MCP client/tool bridge"
         ],
         "semantic_retrieval": {
@@ -547,6 +546,30 @@
           ],
           "verified_sha": "54844255e208fccf46867d85eb3f78cacb6fb4a6",
           "ci_run_id": 36376927539
+        },
+        "procedural_retrieval": {
+          "status": "verified",
+          "source": "immutable Site Skill families",
+          "revision_scope": "active revision plus latest candidate when different",
+          "retained": [
+            "exact skill_id and revision_id",
+            "active/latest lifecycle state",
+            "structural verification outcome",
+            "latest execution outcome",
+            "execution counts and success rate",
+            "promotion eligibility and reasons",
+            "parameter contract without values",
+            "recipe/step contract"
+          ],
+          "retrieval": {
+            "algorithm": "hybrid lexical + cosine semantic reciprocal-rank fusion",
+            "evidence_preference": "explicit tiny near-tie preference only; relevance rank dominates",
+            "fallback": "lexical-only when embedding unavailable/fails",
+            "automatic_recall": "maximum 3 procedures at task start"
+          },
+          "execution_boundary": "retrieval never executes implicitly; planner must explicitly call site_skill run with exact revision after fresh-page fit check",
+          "verified_sha": "aa0cc7e64bbcbaa0eaef53b92687acb05710fe84",
+          "ci_run_id": 36377638107
         }
       }
     },
