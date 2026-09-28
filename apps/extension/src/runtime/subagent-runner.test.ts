@@ -174,7 +174,11 @@ describe("read-only subagent runner", () => {
 
   it("does not forward worker approval to MCP writes", async () => {
     const baseTool = vi.fn(
-      async (tool: ToolName) => {
+      async (
+        tool: ToolName,
+        _input?: Record<string, unknown>,
+        _execution?: BrowserToolExecution
+      ) => {
         if (tool === "observe_page") {
           return {
             ok: true,
