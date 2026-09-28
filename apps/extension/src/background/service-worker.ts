@@ -782,8 +782,13 @@ async function runTool(
         };
       }
 
-      const existing = await getSiteSkillCandidate(input.id);
-      if (!existing) {
+      const revision = await getSiteSkillExecutableRevision(
+        input.id,
+        typeof input.revision_id === "string"
+          ? input.revision_id
+          : undefined
+      );
+      if (!revision) {
         return {
           ok: false,
           error: {
@@ -792,6 +797,7 @@ async function runTool(
           }
         };
       }
+      const existing = revision.candidate;
 
       try {
         const recipe = selectSiteSkillRecipe(
@@ -811,22 +817,34 @@ async function runTool(
           existing,
           fresh.evidence
         );
-        const updated = {
-          ...existing,
-          verification
-        };
-        const revision = await saveSiteSkillCandidate(updated, {
-          reason: "run-verification"
-        });
+
+        await recordSiteSkillEvaluation(
+          input.id,
+          revision.revision_id,
+          {
+            kind: "structural-verification",
+            outcome:
+              verification.status === "verified"
+                ? "passed"
+                : "failed",
+            detail:
+              verification.status === "verified"
+                ? "Fresh site structure matched the revision contract"
+                : "Fresh site structure did not match the revision contract"
+          }
+        );
 
         if (verification.status !== "verified") {
           return {
             ok: false,
-            data: { verification },
+            data: {
+              revision_id: revision.revision_id,
+              verification
+            },
             error: {
               code: "SITE_SKILL_VERIFICATION_FAILED",
               message:
-                "Site Skill candidate no longer matches fresh site evidence"
+                "Site Skill revision no longer matches fresh site evidence"
             }
           };
         }
@@ -845,6 +863,10 @@ async function runTool(
         if (requiresApproval && !options.approvalGranted) {
           return {
             ok: false,
+            data: {
+              revision_id: revision.revision_id,
+              verification
+            },
             error: {
               code: "APPROVAL_REQUIRED",
               message:
@@ -860,22 +882,49 @@ async function runTool(
             ? (input.parameters as Record<string, unknown>)
             : {};
 
-        const run = await runSiteSkillRecipe({
-          tab_id: tabId,
-          candidate: updated,
-          recipe_id: recipe.id,
-          parameters
-        });
+        try {
+          const run = await runSiteSkillRecipe({
+            tab_id: tabId,
+            candidate: existing,
+            recipe_id: recipe.id,
+            parameters
+          });
 
-        return {
-          ok: true,
-          data: {
-            candidate_id: updated.id,
-            revision_id: revision.revision_id,
-            verification,
-            run
-          }
-        };
+          await recordSiteSkillEvaluation(
+            input.id,
+            revision.revision_id,
+            {
+              kind: "execution",
+              outcome: "passed",
+              detail:
+                `Recipe ${recipe.id} completed through its verified submit boundary`
+            }
+          );
+
+          return {
+            ok: true,
+            data: {
+              candidate_id: existing.id,
+              revision_id: revision.revision_id,
+              verification,
+              run
+            }
+          };
+        } catch (error) {
+          await recordSiteSkillEvaluation(
+            input.id,
+            revision.revision_id,
+            {
+              kind: "execution",
+              outcome: "failed",
+              detail:
+                error instanceof Error
+                  ? error.message
+                  : "Site Skill execution failed"
+            }
+          ).catch(() => undefined);
+          throw error;
+        }
       } catch (error) {
         return {
           ok: false,
@@ -901,8 +950,13 @@ async function runTool(
         };
       }
 
-      const existing = await getSiteSkillCandidate(input.id);
-      if (!existing) {
+      const revision = await getSiteSkillRevision(
+        input.id,
+        typeof input.revision_id === "string"
+          ? input.revision_id
+          : undefined
+      );
+      if (!revision) {
         return {
           ok: false,
           error: {
@@ -911,6 +965,7 @@ async function runTool(
           }
         };
       }
+      const existing = revision.candidate;
 
       try {
         const fresh = await collectCurrentSiteSkill({
@@ -924,18 +979,30 @@ async function runTool(
           existing,
           fresh.evidence
         );
-        const updated = {
-          ...existing,
-          verification
-        };
-        const revision = await saveSiteSkillCandidate(updated, {
-          reason: "verify"
-        });
+
+        await recordSiteSkillEvaluation(
+          input.id,
+          revision.revision_id,
+          {
+            kind: "structural-verification",
+            outcome:
+              verification.status === "verified"
+                ? "passed"
+                : "failed",
+            detail:
+              verification.status === "verified"
+                ? "Fresh site structure matched the revision contract"
+                : "Fresh site structure did not match the revision contract"
+          }
+        );
 
         return {
           ok: verification.status === "verified",
           data: {
-            candidate: updated,
+            candidate: {
+              ...existing,
+              verification
+            },
             revision_id: revision.revision_id,
             verification
           },
@@ -944,7 +1011,7 @@ async function runTool(
                 error: {
                   code: "SITE_SKILL_VERIFICATION_FAILED",
                   message:
-                    "Site Skill candidate no longer matches fresh site evidence"
+                    "Site Skill revision no longer matches fresh site evidence"
                 }
               }
             : {})
