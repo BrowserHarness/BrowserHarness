@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-kimi-parity-plus-versioned-skill-refinement-verified",
+  "status": "v0.3-memory-foundation-working-episodic-recall",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -266,7 +266,7 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 33,
+        "tools": 34,
         "planner_tools": 31,
         "orchestrator_only": [
           "await_user_action"
@@ -430,7 +430,81 @@
     },
     {
       "id": "memory",
-      "owner": "BrowserCrew/browsercrew"
+      "owner": "BrowserCrew/browsercrew",
+      "runtime_contract": {
+        "working_memory": {
+          "status": "verified",
+          "storage": "chrome.storage.session",
+          "scope": "one active BrowserCrew task session",
+          "automatic_updates": [
+            "initial browser state",
+            "successful browser actions",
+            "manual handoffs"
+          ],
+          "retained": [
+            "task/session identity",
+            "current page",
+            "recent tool names/notes/semantic targets",
+            "visited site origins",
+            "Site Skill references"
+          ],
+          "excluded": [
+            "tool input payloads",
+            "typed text",
+            "upload paths",
+            "Site Skill parameter values"
+          ],
+          "retirement": "clear only after durable final episode save succeeds or close_session explicitly closes the task",
+          "verified_sha": "664ca6552c50aa51cea66c905535bc33b900bac7",
+          "ci_run_id": 36375649476
+        },
+        "episodic_memory": {
+          "status": "verified",
+          "storage": "chrome.storage.local",
+          "maximum_episodes": 500,
+          "source": "BrowserTaskSessionEvidence",
+          "retained": [
+            "task/title/outcome",
+            "start/end page context",
+            "action/handoff counts",
+            "tool names",
+            "semantic target names",
+            "site origins",
+            "Site Skill/revision references",
+            "demonstrated boundary"
+          ],
+          "excluded": "raw browser action input payloads",
+          "retrieval": "bounded deterministic lexical scoring over task/title/sites/tools/targets/Skill references",
+          "verified_sha": "72c2efa34ac106c42f5dc81001002216415acce0",
+          "ci_run_id": 36375186790
+        },
+        "automatic_recall": {
+          "status": "verified",
+          "trigger": "once at browser task start",
+          "query": "current user goal + current hostname",
+          "maximum_results": 3,
+          "planner_contract": "recalled episodes are explicitly historical evidence; current user goal and fresh browser evidence remain authoritative",
+          "verified_sha": "55f17d18ecc88f8cbf79db2f984f133343642df8",
+          "ci_run_id": 36375686902
+        },
+        "tool": {
+          "name": "memory",
+          "bridge_exposed": true,
+          "actions": [
+            "active",
+            "search",
+            "list",
+            "get",
+            "delete"
+          ],
+          "active_scope": "current task session only"
+        },
+        "next": [
+          "semantic retrieval with provider-agnostic embeddings/reranking",
+          "procedural memory linked to active/candidate Skill revisions",
+          "MCP client/tool bridge"
+        ]
+      }
     },
     {
       "id": "mcp-integrations",
