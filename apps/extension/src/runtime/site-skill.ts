@@ -156,6 +156,18 @@ export interface SiteCandidateSkill {
     form_count: number;
     network_request_count: number;
   };
+  verification?: {
+    status: "verified" | "failed";
+    verified_at: string;
+    evidence_id: string;
+    url: string;
+    checks: Array<{
+      id: string;
+      passed: boolean;
+      kind: "origin" | "form" | "field" | "submit";
+      detail: string;
+    }>;
+  };
 }
 
 function slug(value: string): string {
