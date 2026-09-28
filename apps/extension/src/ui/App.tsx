@@ -68,6 +68,12 @@ import {
   searchProceduralMemory
 } from "../runtime/procedural-memory";
 import {
+  discoverMcpCatalog as buildMcpCatalog
+} from "../runtime/mcp-catalog";
+import {
+  getMcpServerTrustMode
+} from "../settings/mcp-trust-store";
+import {
   clearBrowserWorkingMemory,
   saveBrowserWorkingMemory
 } from "../runtime/working-memory";
@@ -553,6 +559,7 @@ export function App() {
             evidence,
             recalled_memory,
             recalled_procedures,
+            mcp_catalog,
             screenshotDataUrl,
             signal
           }) => {
@@ -566,7 +573,8 @@ export function App() {
               evidence,
               screenshotDataUrl,
               recalled_memory,
-              recalled_procedures
+              recalled_procedures,
+              mcp_catalog
             );
             return {
               decision: routed.result,
@@ -612,6 +620,20 @@ export function App() {
             searchProceduralMemory(
               `${browserTask} ${safeHostname(observation.url)}`,
               3
+            ),
+          discoverMcpCatalog: (
+            browserTask,
+            observation
+          ) =>
+            buildMcpCatalog(
+              `${browserTask} ${safeHostname(observation.url)}`,
+              (input) =>
+                extensionMessage({
+                  type: "BROWSER_TOOL",
+                  tool: "mcp",
+                  input
+                }),
+              getMcpServerTrustMode
             ),
           requestUserAction: async (
             reason,
