@@ -78,6 +78,8 @@ import {
   type ToolExecutionOptions
 } from "./approval-grant";
 import {
+  goBackAndWait,
+  reloadAndWait,
   waitForTabUsable,
   type NavigationReadyResult
 } from "./navigation";
@@ -522,6 +524,30 @@ async function runTool(
       await removeSessionTab(session, input.tab_id);
     }
     return { ok: true, data: { tab_id: input.tab_id } };
+  }
+
+  if (tool === "close_session") {
+    if (!session) {
+      return {
+        ok: false,
+        error: {
+          code: "SESSION_REQUIRED",
+          message:
+            "close_session requires a BrowserCrew task session"
+        }
+      };
+    }
+
+    const sessionId = session.id;
+    const closedOwnedTabs = await closeTaskSession(session);
+    return {
+      ok: true,
+      data: {
+        session_id: sessionId,
+        closed_owned_tabs: closedOwnedTabs,
+        borrowed_tabs_preserved: session.borrowed_tab_ids.length
+      }
+    };
   }
 
   if (tool === "site_skill") {
@@ -1324,6 +1350,54 @@ async function runTool(
             error instanceof Error
               ? error.message
               : "Site Skill creation failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "back") {
+    try {
+      return {
+        ok: true,
+        data: {
+          ...(await goBackAndWait(tabId)),
+          session_id: session?.id
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "BACK_NAVIGATION_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Back navigation failed"
+        }
+      };
+    }
+  }
+
+  if (tool === "reload") {
+    try {
+      return {
+        ok: true,
+        data: {
+          ...(await reloadAndWait(tabId, {
+            bypassCache: input.bypass_cache === true
+          })),
+          session_id: session?.id
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "RELOAD_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Reload failed"
         }
       };
     }
@@ -2161,6 +2235,8 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "save_pdf",
   "cdp",
   "navigate",
+  "back",
+  "reload",
   "click",
   "type",
   "press_key",
@@ -2171,6 +2247,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "list_tabs",
   "switch_tab",
   "close_tab",
+  "close_session",
   "screenshot"
 ]);
 
