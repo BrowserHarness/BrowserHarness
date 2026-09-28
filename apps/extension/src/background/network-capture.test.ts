@@ -79,6 +79,69 @@ describe("CDP network capture", () => {
     ]);
   });
 
+  it("merges requestWillBeSentExtraInfo headers into the request record", async () => {
+    await startNetworkCapture(4, 100);
+
+    emit(4, "Network.requestWillBeSent", {
+      requestId: "r4",
+      request: {
+        url: "https://example.com/api",
+        method: "GET",
+        headers: {
+          accept: "application/json"
+        }
+      }
+    });
+
+    emit(4, "Network.requestWillBeSentExtraInfo", {
+      requestId: "r4",
+      headers: {
+        cookie: "session=abc",
+        "x-csrf-token": "token-1"
+      }
+    });
+
+    expect(listNetworkRecords(4)[0].request_headers).toEqual({
+      accept: "application/json",
+      cookie: "session=abc",
+      "x-csrf-token": "token-1"
+    });
+  });
+
+  it("retrieves request post data when the initial event omits it", async () => {
+    await startNetworkCapture(5, 100);
+
+    mocks.cdpCommand.mockImplementation(async (_tab, method) => {
+      if (method === "Network.getRequestPostData") {
+        return {
+          postData: "email=user%40example.com"
+        };
+      }
+      return {};
+    });
+
+    emit(5, "Network.requestWillBeSent", {
+      requestId: "r5",
+      request: {
+        url: "https://example.com/submit",
+        method: "POST",
+        hasPostData: true
+      }
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(listNetworkRecords(5)[0].post_data).toBe(
+      "email=user%40example.com"
+    );
+    expect(mocks.cdpCommand).toHaveBeenCalledWith(
+      5,
+      "Network.getRequestPostData",
+      { requestId: "r5" }
+    );
+  });
+
   it("retrieves a finished response body through CDP", async () => {
     await startNetworkCapture(2, 100);
     emit(2, "Network.requestWillBeSent", {
