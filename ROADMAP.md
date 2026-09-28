@@ -121,30 +121,39 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - generated Skills remain candidate-only; evaluation is required before promotion
 2. **Watch Me v3 adaptive workflow replay — verified**
    - SavedWorkflow v3 compiles before replay, remaps logical tabs into a fresh task session, resolves fresh DOM/AX targets and stops at the demonstrated boundary
-   - privileged trusted-input approval proof is now wired from the extension UI; newly risky AX-only targets can be approved and retried once without exposing the approval channel to Local Bridge callers
-3. **Kimi-reference browser reliability hardening — verified at `3b6c7567f5f20124bedbe30abdac45005c777756`**
-   - trusted clicks reject occluded targets using a fresh hit test
-   - trusted clicks verify pointer/mouse delivery to the intended target before reporting success
-   - screenshots use CDP for background viewport, full-page and semantic-element capture
-   - `find` searches a fresh AX tree by semantic query/role
-   - `evaluate` provides bounded JSON-safe page-context inspection
-   - network evidence merges `Network.requestWillBeSentExtraInfo` headers and recovers omitted POST bodies with `Network.getRequestPostData`
-   - Local Bridge/browser runtime surface is now 25 tools
-   - CI run `36367934722`: 160/160 extension tests across 32 files + 3/3 Bridge tests, all build/validation/package gates green
-4. **Site → Skill v1 — active engineering target**
-   - use AX + `find` + bounded `evaluate` + high-fidelity network evidence to discover stable site workflows
-   - emit inspectable candidate Skill recipes with parameters, provenance, verification evidence and explicit safety boundaries
-   - never auto-promote generated Skills
-5. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+   - privileged trusted-input approval proof is wired from the extension UI and cannot be minted by normal web/Bridge callers
+3. **Kimi-reference browser reliability hardening — verified**
+   - trusted-click occlusion + input-delivery proof
+   - background/full-page/semantic-element CDP screenshots
+   - semantic AX `find` + bounded page `evaluate`
+   - high-fidelity network headers/POST-data recovery
+4. **Site → Skill v1 — verified at `bbfed3443eea22df9b0115407519836263032469`**
+   - `site_skill create`: fresh AX + bounded form inspection + optional active network evidence → persisted candidate Skill
+   - deterministic parameter inference for text/select/upload/toggle fields
+   - secret request/header values are not persisted in Site Skill evidence
+   - `site_skill verify`: fresh origin/form/field/submit contract checks with explicit drift result
+   - `site_skill run`: re-verifies immediately before execution, resolves fresh AX targets per step and rejects ambiguous matches
+   - native `select_option` tool added; runner supports text/select/upload/toggle + submit
+   - non-GET/risky submission returns `APPROVAL_REQUIRED` and retries only with extension-page approval proof
+   - Site Skill run parameter values are redacted from BrowserTaskSessionEvidence
+   - `list/get/delete` candidate library operations
+   - candidate status is preserved after verified execution; no auto-promotion
+   - Local Bridge/browser runtime surface: **27 tools**
+   - CI run `36369232137`: 181/181 extension tests across 38 files + 3/3 Bridge tests, all typecheck/build/MV3/contract/package gates green
+5. **Kimi-reference interaction parity — next active engineering target**
+   - hover
+   - drag/drop with real CDP pointer sequence + verification
+   - richer key chords/sequences/modifiers
+   - await-user-action / human handoff for login, CAPTCHA, 2FA or explicit manual step
+6. **Versioned Skill lifecycle + refinement — after interaction parity**
+   - candidate revision history
+   - evaluation comparison against active version
+   - explicit promotion
+   - rollback
+   - use successful/failed executions as inspectable refinement evidence rather than opaque self-modification
+7. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
    - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
-6. Remaining Kimi-reference parity after Site → Skill
-   - hover / drag / select-option
-   - richer key chords/sequences
-   - await-user-action / human handoff
-   - user-facing Session → Skill runner and parameter editing
-   - saved Skill library/run/version/delete/refine
-   - subagents + context compaction
 
 ### Verified full browser-control parity
 - debugger/CDP attach manager
