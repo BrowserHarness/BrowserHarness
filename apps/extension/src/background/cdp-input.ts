@@ -28,6 +28,365 @@ interface RuntimeValue<T> {
   };
 }
 
+interface TrustedModifierSpec {
+  bit: number;
+  key: string;
+  code: string;
+  windowsVirtualKeyCode: number;
+}
+
+interface TrustedKeySpec {
+  key: string;
+  code: string;
+  windowsVirtualKeyCode: number;
+  text?: string;
+}
+
+export interface TrustedKeyChord {
+  modifierBits: number;
+  modifiers: TrustedModifierSpec[];
+  key: TrustedKeySpec;
+}
+
+const TRUSTED_MODIFIERS: Record<string, TrustedModifierSpec> = {
+  alt: {
+    bit: 1,
+    key: "Alt",
+    code: "AltLeft",
+    windowsVirtualKeyCode: 18
+  },
+  ctrl: {
+    bit: 2,
+    key: "Control",
+    code: "ControlLeft",
+    windowsVirtualKeyCode: 17
+  },
+  control: {
+    bit: 2,
+    key: "Control",
+    code: "ControlLeft",
+    windowsVirtualKeyCode: 17
+  },
+  cmd: {
+    bit: 4,
+    key: "Meta",
+    code: "MetaLeft",
+    windowsVirtualKeyCode: 91
+  },
+  meta: {
+    bit: 4,
+    key: "Meta",
+    code: "MetaLeft",
+    windowsVirtualKeyCode: 91
+  },
+  shift: {
+    bit: 8,
+    key: "Shift",
+    code: "ShiftLeft",
+    windowsVirtualKeyCode: 16
+  }
+};
+
+const TRUSTED_NAMED_KEYS: Record<string, TrustedKeySpec> = {
+  enter: {
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+    text: "\r"
+  },
+  return: {
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+    text: "\r"
+  },
+  escape: {
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27
+  },
+  esc: {
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27
+  },
+  tab: {
+    key: "Tab",
+    code: "Tab",
+    windowsVirtualKeyCode: 9
+  },
+  backspace: {
+    key: "Backspace",
+    code: "Backspace",
+    windowsVirtualKeyCode: 8
+  },
+  delete: {
+    key: "Delete",
+    code: "Delete",
+    windowsVirtualKeyCode: 46
+  },
+  space: {
+    key: " ",
+    code: "Space",
+    windowsVirtualKeyCode: 32,
+    text: " "
+  },
+  arrowup: {
+    key: "ArrowUp",
+    code: "ArrowUp",
+    windowsVirtualKeyCode: 38
+  },
+  arrowdown: {
+    key: "ArrowDown",
+    code: "ArrowDown",
+    windowsVirtualKeyCode: 40
+  },
+  arrowleft: {
+    key: "ArrowLeft",
+    code: "ArrowLeft",
+    windowsVirtualKeyCode: 37
+  },
+  arrowright: {
+    key: "ArrowRight",
+    code: "ArrowRight",
+    windowsVirtualKeyCode: 39
+  },
+  home: {
+    key: "Home",
+    code: "Home",
+    windowsVirtualKeyCode: 36
+  },
+  end: {
+    key: "End",
+    code: "End",
+    windowsVirtualKeyCode: 35
+  },
+  pageup: {
+    key: "PageUp",
+    code: "PageUp",
+    windowsVirtualKeyCode: 33
+  },
+  pagedown: {
+    key: "PageDown",
+    code: "PageDown",
+    windowsVirtualKeyCode: 34
+  }
+};
+
+function trustedBaseKey(token: string): TrustedKeySpec {
+  const lowered = token.toLowerCase();
+  const named = TRUSTED_NAMED_KEYS[lowered];
+  if (named) return named;
+
+  const functionKey = /^f(\d{1,2})$/i.exec(token);
+  if (functionKey) {
+    const number = Number(functionKey[1]);
+    if (number >= 1 && number <= 12) {
+      return {
+        key: `F${number}`,
+        code: `F${number}`,
+        windowsVirtualKeyCode: 111 + number
+      };
+    }
+  }
+
+  if (/^[a-zA-Z]$/.test(token)) {
+    const upper = token.toUpperCase();
+    return {
+      key: token.toLowerCase(),
+      code: `Key${upper}`,
+      windowsVirtualKeyCode: upper.charCodeAt(0),
+      text: token.toLowerCase()
+    };
+  }
+
+  if (/^[0-9]$/.test(token)) {
+    return {
+      key: token,
+      code: `Digit${token}`,
+      windowsVirtualKeyCode: token.charCodeAt(0),
+      text: token
+    };
+  }
+
+  throw new Error(
+    `send_keys: unknown key "${token}". Supported named keys: ${Object.keys(
+      TRUSTED_NAMED_KEYS
+    ).join(", ")}, F1-F12, single letters/digits.`
+  );
+}
+
+export function parseTrustedKeySequence(
+  keys: string,
+  platform: string
+): TrustedKeyChord[] {
+  const source = keys.trim();
+  if (!source) {
+    throw new Error(
+      'send_keys: keys is required, e.g. "Enter", "Mod+A", "Shift+Tab", or "Enter Escape"'
+    );
+  }
+
+  const mod =
+    platform === "mac"
+      ? TRUSTED_MODIFIERS.cmd
+      : TRUSTED_MODIFIERS.ctrl;
+
+  return source.split(/\s+/).map((segment) => {
+    const tokens = segment
+      .split("+")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (!tokens.length) {
+      throw new Error("send_keys: empty key segment");
+    }
+
+    let modifierBits = 0;
+    const modifiers: TrustedModifierSpec[] = [];
+
+    for (const token of tokens.slice(0, -1)) {
+      const lowered = token.toLowerCase();
+      const modifier =
+        lowered === "mod" ? mod : TRUSTED_MODIFIERS[lowered];
+      if (!modifier) {
+        throw new Error(
+          `send_keys: "${token}" is not a modifier; use Alt/Ctrl/Cmd/Meta/Shift or Mod`
+        );
+      }
+      modifierBits |= modifier.bit;
+      modifiers.push(modifier);
+    }
+
+    return {
+      modifierBits,
+      modifiers,
+      key: trustedBaseKey(tokens[tokens.length - 1])
+    };
+  });
+}
+
+function shiftedTrustedKey(
+  key: TrustedKeySpec,
+  shift: boolean
+): TrustedKeySpec {
+  if (
+    !shift ||
+    key.key.length !== 1 ||
+    !/^[a-z]$/.test(key.key)
+  ) {
+    return key;
+  }
+
+  const upper = key.key.toUpperCase();
+  return {
+    ...key,
+    key: upper,
+    text: upper
+  };
+}
+
+export async function trustedSendKeys(
+  tabId: number,
+  keys: string,
+  repeat: number,
+  platform: string
+): Promise<{
+  keys: string;
+  repeat: number;
+  dispatched: number;
+  platform: string;
+}> {
+  const boundedRepeat = Number(repeat);
+  if (
+    !Number.isInteger(boundedRepeat) ||
+    boundedRepeat < 1 ||
+    boundedRepeat > 100
+  ) {
+    throw new Error(
+      "send_keys: repeat must be an integer in [1, 100]"
+    );
+  }
+
+  const chords = parseTrustedKeySequence(keys, platform);
+  await enableFocusEmulation(tabId);
+
+  let dispatched = 0;
+  for (
+    let iteration = 0;
+    iteration < boundedRepeat;
+    iteration += 1
+  ) {
+    for (const chord of chords) {
+      const base = shiftedTrustedKey(
+        chord.key,
+        (chord.modifierBits & TRUSTED_MODIFIERS.shift.bit) !== 0
+      );
+
+      let activeModifiers = 0;
+      for (const modifier of chord.modifiers) {
+        activeModifiers |= modifier.bit;
+        await cdpCommand(tabId, "Input.dispatchKeyEvent", {
+          type: "keyDown",
+          modifiers: activeModifiers,
+          key: modifier.key,
+          code: modifier.code,
+          windowsVirtualKeyCode:
+            modifier.windowsVirtualKeyCode
+        });
+      }
+
+      const printableText =
+        (chord.modifierBits & ~TRUSTED_MODIFIERS.shift.bit) === 0 &&
+        base.text !== undefined
+          ? { text: base.text }
+          : {};
+
+      await cdpCommand(tabId, "Input.dispatchKeyEvent", {
+        type: "keyDown",
+        modifiers: chord.modifierBits,
+        key: base.key,
+        code: base.code,
+        windowsVirtualKeyCode: base.windowsVirtualKeyCode,
+        ...printableText
+      });
+      await cdpCommand(tabId, "Input.dispatchKeyEvent", {
+        type: "keyUp",
+        modifiers: chord.modifierBits,
+        key: base.key,
+        code: base.code,
+        windowsVirtualKeyCode: base.windowsVirtualKeyCode
+      });
+
+      for (
+        let index = chord.modifiers.length - 1;
+        index >= 0;
+        index -= 1
+      ) {
+        const modifier = chord.modifiers[index];
+        activeModifiers &= ~modifier.bit;
+        await cdpCommand(tabId, "Input.dispatchKeyEvent", {
+          type: "keyUp",
+          modifiers: activeModifiers,
+          key: modifier.key,
+          code: modifier.code,
+          windowsVirtualKeyCode:
+            modifier.windowsVirtualKeyCode
+        });
+      }
+
+      dispatched += 1;
+    }
+  }
+
+  return {
+    keys,
+    repeat: boundedRepeat,
+    dispatched,
+    platform
+  };
+}
+
 function quadCenter(quad?: number[]): { x: number; y: number } {
   if (!quad || quad.length < 8) {
     throw new Error("Target has no usable layout box");
