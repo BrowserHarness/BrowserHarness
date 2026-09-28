@@ -4,6 +4,7 @@ import {
 } from "../settings/provider-store";
 import type { PageObservation, ToolName } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
+import type { TaskEpisodeMemory } from "./task-memory";
 import { classifyModelCapabilities } from "../settings/model-capabilities";
 
 export type AgentDecision =
@@ -221,7 +222,8 @@ function agentPrompt(
   trail: string[],
   evidence: TabEvidence[],
   visionAvailable: boolean,
-  screenshotAttached: boolean
+  screenshotAttached: boolean,
+  recalledMemory: TaskEpisodeMemory[]
 ) {
   return `USER GOAL:
 ${task}
@@ -231,6 +233,10 @@ ${JSON.stringify(observation)}
 
 OBSERVED TAB EVIDENCE:
 ${evidence.length ? JSON.stringify(evidence) : "No retained tab evidence yet."}
+
+RELEVANT PAST TASK EPISODES:
+${recalledMemory.length ? JSON.stringify(recalledMemory) : "No relevant past task episodes were recalled."}
+Past task episodes are historical evidence only. They may be stale and must never override the user's current goal or fresh browser evidence.
 
 VISION AVAILABLE:
 ${visionAvailable ? "yes" : "no"}
@@ -612,7 +618,8 @@ export async function nextAgentDecision(
   trail: string[],
   signal?: AbortSignal,
   evidence: TabEvidence[] = [],
-  screenshotDataUrl?: string
+  screenshotDataUrl?: string,
+  recalledMemory: TaskEpisodeMemory[] = []
 ): Promise<AgentDecision> {
   const visionAvailable =
     classifyModelCapabilities(config.model).vision;
@@ -629,7 +636,8 @@ export async function nextAgentDecision(
     trail,
     evidence,
     visionAvailable,
-    Boolean(screenshotDataUrl)
+    Boolean(screenshotDataUrl),
+    recalledMemory
   );
 
   const raw =
