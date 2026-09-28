@@ -223,76 +223,88 @@ export async function runSiteSkillRecipe(input: {
     );
 
     for (const parameterName of recipe.parameters) {
-    validateParameterValue(
-      parameterDefinition(input.candidate, parameterName),
-      input.parameters[parameterName]
-    );
-  }
+      validateParameterValue(
+        parameterDefinition(input.candidate, parameterName),
+        input.parameters[parameterName]
+      );
+    }
 
     for (const step of recipe.steps) {
-    if (step.kind === "input") {
-      const parameter = parameterDefinition(
-        input.candidate,
-        step.parameter
-      );
-      const value = input.parameters[step.parameter];
+      if (step.kind === "input") {
+        const parameter = parameterDefinition(
+          input.candidate,
+          step.parameter
+        );
+        const value = input.parameters[step.parameter];
 
-      if (value === undefined && !parameter.required) {
+        if (value === undefined && !parameter.required) {
+          continue;
+        }
+
+        const target = await freshTarget(
+          input.tab_id,
+          step.target
+        );
+
+        if (step.input_mode === "type") {
+          await trustedType(
+            input.tab_id,
+            target.element_id,
+            String(value)
+          );
+        } else if (step.input_mode === "select") {
+          const values = Array.isArray(value)
+            ? (value as string[])
+            : [String(value)];
+          await selectOptions(
+            input.tab_id,
+            target.element_id,
+            values
+          );
+        } else if (step.input_mode === "upload") {
+          await uploadFiles(
+            input.tab_id,
+            target.element_id,
+            value as string[]
+          );
+        } else {
+          if (typeof value !== "boolean") {
+            throw new Error(
+              `SITE_SKILL_PARAMETER_TYPE: ${step.parameter} must be boolean`
+            );
+          }
+          if (
+            target.checked === "mixed" ||
+            target.checked === undefined
+          ) {
+            throw new Error(
+              `SITE_SKILL_TOGGLE_STATE_UNAVAILABLE: ${step.parameter}`
+            );
+          }
+          if (target.checked !== value) {
+            await trustedClick(
+              input.tab_id,
+              target.element_id
+            );
+          }
+        }
+
+        executedSteps += 1;
         continue;
       }
 
-      const target = await freshTarget(input.tab_id, step.target);
-
-      if (step.input_mode === "type") {
-        await trustedType(
+      if (step.target) {
+        const target = await freshTarget(
           input.tab_id,
-          target.element_id,
-          String(value)
+          step.target
         );
-      } else if (step.input_mode === "select") {
-        const values = Array.isArray(value)
-          ? (value as string[])
-          : [String(value)];
-        await selectOptions(
-          input.tab_id,
-          target.element_id,
-          values
-        );
-      } else if (step.input_mode === "upload") {
-        await uploadFiles(
-          input.tab_id,
-          target.element_id,
-          value as string[]
-        );
+        await trustedClick(input.tab_id, target.element_id);
       } else {
-        if (typeof value !== "boolean") {
-          throw new Error(
-            `SITE_SKILL_PARAMETER_TYPE: ${step.parameter} must be boolean`
-          );
-        }
-        if (target.checked === "mixed" || target.checked === undefined) {
-          throw new Error(
-            `SITE_SKILL_TOGGLE_STATE_UNAVAILABLE: ${step.parameter}`
-          );
-        }
-        if (target.checked !== value) {
-          await trustedClick(input.tab_id, target.element_id);
-        }
+        await trustedKey(input.tab_id, "Enter");
       }
-
       executedSteps += 1;
-      continue;
+      submitted = true;
     }
-
-    if (step.target) {
-      const target = await freshTarget(input.tab_id, step.target);
-      await trustedClick(input.tab_id, target.element_id);
-    } else {
-      await trustedKey(input.tab_id, "Enter");
-    }
-    executedSteps += 1;
-    submitted = true;
-  }
 
     return {
       recipe_id: recipe.id,
