@@ -10,6 +10,10 @@ import {
   type TabEvidence
 } from "./tab-evidence";
 import {
+  buildBrowserWorkingMemory,
+  type BrowserWorkingMemory
+} from "./working-memory";
+import {
   copySessionInput,
   pageContext,
   targetEvidence,
@@ -63,6 +67,9 @@ export interface BrowserEngineDependencies {
     observation: PageObservation,
     signal?: AbortSignal
   ): Promise<BrowserUserActionOutcome>;
+  persistWorkingMemory?(
+    memory: BrowserWorkingMemory
+  ): Promise<void>;
   isCancelled(): boolean;
   waitWhilePaused(): Promise<void>;
   withActivity<T>(
@@ -191,6 +198,23 @@ export async function runBrowserTask(
   const sessionActions: BrowserSessionActionEvidence[] = [];
   const manualHandoffs: BrowserSessionManualHandoffEvidence[] = [];
 
+  const persistWorkingMemory = async () => {
+    if (!dependencies.persistWorkingMemory) return;
+    await dependencies
+      .persistWorkingMemory(
+        buildBrowserWorkingMemory({
+          session_id: sessionIdentity.id,
+          title: sessionIdentity.title,
+          task,
+          started_at: sessionStartedAt,
+          current: pageContext(observation),
+          actions: sessionActions,
+          manual_handoffs: manualHandoffs
+        })
+      )
+      .catch(() => undefined);
+  };
+
   const buildResult = (
     status: BrowserEngineResult["status"],
     message: string,
@@ -235,6 +259,8 @@ export async function runBrowserTask(
       }
     };
   };
+
+  await persistWorkingMemory();
 
   for (let step = 0; step < maxSteps; step += 1) {
     if (dependencies.isCancelled()) {
@@ -309,6 +335,7 @@ export async function runBrowserTask(
         trail.push(
           `await_user_action: cancelled — ${reason}`
         );
+        await persistWorkingMemory();
         return buildResult(
           "stopped",
           `I stopped because the manual step was cancelled: ${reason}`,
@@ -341,6 +368,7 @@ export async function runBrowserTask(
       trail.push(
         `await_user_action: continued via ${outcome.source}; page=${observation.title}`
       );
+      await persistWorkingMemory();
       continue;
     }
 
@@ -441,6 +469,7 @@ export async function runBrowserTask(
       }
       screenshotDataUrl = data.data_url;
       trail.push("screenshot: captured visual evidence");
+      await persistWorkingMemory();
       continue;
     }
 
@@ -522,6 +551,7 @@ export async function runBrowserTask(
         ...(resultTabId ? { result_tab_id: resultTabId } : {}),
         ...(verifiedContext ? { after: verifiedContext } : {})
       });
+      await persistWorkingMemory();
     }
   }
 
