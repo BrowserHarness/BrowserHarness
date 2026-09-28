@@ -75,7 +75,7 @@ describe("user handoff", () => {
           groupId: -1,
           url: "https://example.com/account",
           status: "complete"
-        }
+        } as chrome.tabs.Tab
       );
     }
 
@@ -149,7 +149,7 @@ describe("user handoff", () => {
           groupId: -1,
           url: "https://example.com/dashboard",
           status: "complete"
-        }
+        } as chrome.tabs.Tab
       );
     }
 
