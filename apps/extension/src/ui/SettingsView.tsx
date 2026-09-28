@@ -40,8 +40,12 @@ import {
   type DiscoveredModel
 } from "../settings/model-catalog";
 import {
+  classifyModelCapabilities
+} from "../settings/model-capabilities";
+import {
   testAgentCapability,
-  testChatCapability
+  testChatCapability,
+  testEmbeddingCapability
 } from "../runtime/model-client";
 import { MvpSettingsSections } from "./MvpSettingsSections";
 import {
@@ -237,42 +241,76 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     }
 
     const config = candidateConfig();
+    const declaredCapabilities =
+      classifyModelCapabilities(config.model);
+    const embeddingOnly =
+      declaredCapabilities.embedding &&
+      !declaredCapabilities.chat &&
+      !declaredCapabilities.agent &&
+      !declaredCapabilities.vision;
+
     setConnectionState("testing");
-    setConnectionMessage("Running Chat and Agent capability checks…");
+    setConnectionMessage(
+      embeddingOnly
+        ? "Running Embedding capability check…"
+        : "Running Chat and Agent capability checks…"
+    );
 
-    let chatHealth: CapabilityHealth;
-    let agentHealth: CapabilityHealth;
+    let chatHealth: CapabilityHealth = {
+      status: "unknown"
+    };
+    let agentHealth: CapabilityHealth = {
+      status: "unknown"
+    };
+    let embeddingHealth: CapabilityHealth = {
+      status: "unknown"
+    };
 
-    try {
-      const chat = await testChatCapability(config);
-      chatHealth = {
-        status: "healthy",
-        latencyMs: chat.latencyMs,
-        checkedAt: new Date().toISOString(),
-        message: chat.preview
-      };
-    } catch (error) {
-      chatHealth = healthFromError(error);
-    }
-
-    if (chatHealth.status === "healthy") {
+    if (embeddingOnly) {
       try {
-        const agent = await testAgentCapability(config);
-        agentHealth = {
+        const embedding = await testEmbeddingCapability(config);
+        embeddingHealth = {
           status: "healthy",
-          latencyMs: agent.latencyMs,
+          latencyMs: embedding.latencyMs,
           checkedAt: new Date().toISOString(),
-          message: agent.preview
+          message: embedding.preview
         };
       } catch (error) {
-        agentHealth = healthFromError(error);
+        embeddingHealth = healthFromError(error);
       }
     } else {
-      agentHealth = {
-        status: "failed",
-        checkedAt: new Date().toISOString(),
-        message: "Agent test skipped because Chat capability failed."
-      };
+      try {
+        const chat = await testChatCapability(config);
+        chatHealth = {
+          status: "healthy",
+          latencyMs: chat.latencyMs,
+          checkedAt: new Date().toISOString(),
+          message: chat.preview
+        };
+      } catch (error) {
+        chatHealth = healthFromError(error);
+      }
+
+      if (chatHealth.status === "healthy") {
+        try {
+          const agent = await testAgentCapability(config);
+          agentHealth = {
+            status: "healthy",
+            latencyMs: agent.latencyMs,
+            checkedAt: new Date().toISOString(),
+            message: agent.preview
+          };
+        } catch (error) {
+          agentHealth = healthFromError(error);
+        }
+      } else {
+        agentHealth = {
+          status: "failed",
+          checkedAt: new Date().toISOString(),
+          message:
+            "Agent test skipped because Chat capability failed."
+        };
+      }
     }
 
     const connection = createConnection(
@@ -284,10 +322,14 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
             : undefined,
         validatedLatencyMs: chatHealth.latencyMs
       },
-      { chatHealth, agentHealth }
+      { chatHealth, agentHealth, embeddingHealth }
     );
 
-    if (chatHealth.status === "healthy") {
+    if (embeddingOnly) {
+      connection.capabilities.embedding =
+        embeddingHealth.status === "healthy";
+      connection.capabilities.unknown = false;
+    } else if (chatHealth.status === "healthy") {
       connection.capabilities.chat = true;
       connection.capabilities.agent =
         agentHealth.status === "healthy";
@@ -297,7 +339,19 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     await saveConnection(connection);
 
     const currentRouting = await loadRoutingConfig();
-    if (!currentRouting.primaryConnectionId) {
+    if (
+      embeddingOnly &&
+      embeddingHealth.status === "healthy" &&
+      !currentRouting.embeddingConnectionId
+    ) {
+      await saveRoutingConfig({
+        ...currentRouting,
+        embeddingConnectionId: connection.id
+      });
+    } else if (
+      !embeddingOnly &&
+      !currentRouting.primaryConnectionId
+    ) {
       await saveRoutingConfig({
         ...currentRouting,
         primaryConnectionId: connection.id
@@ -306,7 +360,19 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
 
     await refreshRegistry();
 
-    if (chatHealth.status === "healthy") {
+    if (embeddingOnly) {
+      if (embeddingHealth.status === "healthy") {
+        setConnectionState("success");
+        setConnectionMessage(
+          `Saved. Embedding ✓ ${embeddingHealth.latencyMs} ms · ${embeddingHealth.message || "ready"}`
+        );
+      } else {
+        setConnectionState("error");
+        setConnectionMessage(
+          `Embedding check failed: ${embeddingHealth.message || embeddingHealth.status}`
+        );
+      }
+    } else if (chatHealth.status === "healthy") {
       setConnectionState("success");
       setConnectionMessage(
         agentHealth.status === "healthy"
@@ -534,7 +600,11 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
             >
               {connectionState === "testing"
                 ? "Testing capabilities…"
-                : "Test Chat + Agent & save"}
+                : classifyModelCapabilities(model).embedding &&
+                    !classifyModelCapabilities(model).chat &&
+                    !classifyModelCapabilities(model).agent
+                  ? "Test Embedding & save"
+                  : "Test Chat + Agent & save"}
             </Button>
           </Stack>
         </Paper>
@@ -596,6 +666,13 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                       size="small"
                       variant="outlined"
                       label="Vision"
+                    />
+                  )}
+                  {connection.capabilities.embedding && (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`Embedding: ${connection.embeddingHealth.status}`}
                     />
                   )}
                 </Stack>
@@ -666,6 +743,42 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                         connection.id !==
                           routing.primaryConnectionId &&
                         connection.chatHealth.status === "healthy"
+                    )
+                    .map((connection) => (
+                      <MenuItem
+                        value={connection.id}
+                        key={connection.id}
+                      >
+                        {connection.label}
+                      </MenuItem>
+                    ))}
+                </Select>
+              </FormControl>
+
+              <FormControl fullWidth>
+                <InputLabel id="embedding-model-label">
+                  Embedding
+                </InputLabel>
+                <Select
+                  labelId="embedding-model-label"
+                  label="Embedding"
+                  value={routing.embeddingConnectionId || ""}
+                  onChange={(event) =>
+                    void updateRouting({
+                      embeddingConnectionId:
+                        event.target.value || undefined
+                    })
+                  }
+                >
+                  <MenuItem value="">
+                    Lexical fallback only
+                  </MenuItem>
+                  {connections
+                    .filter(
+                      (connection) =>
+                        connection.capabilities.embedding &&
+                        connection.embeddingHealth.status ===
+                          "healthy"
                     )
                     .map((connection) => (
                       <MenuItem
