@@ -358,12 +358,14 @@ function evidencePreference(
   procedure: ProceduralMemoryRecord
 ): number {
   let score = 0;
-  if (procedure.active) score += 0.003;
+  // This is intentionally tiny relative to one RRF rank step.
+  // Evidence may break near-ties, but it must not overrule relevance.
+  if (procedure.active) score += 0.00008;
   if (procedure.structural_verification === "passed") {
-    score += 0.001;
+    score += 0.00003;
   }
   if (procedure.latest_execution === "passed") {
-    score += 0.002;
+    score += 0.00005;
   }
   return score;
 }
