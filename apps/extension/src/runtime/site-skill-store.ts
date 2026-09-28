@@ -22,6 +22,36 @@ export interface SiteSkillRevisionRecord {
   candidate: SiteCandidateSkill;
 }
 
+export type SiteSkillEvaluationKind =
+  | "structural-verification"
+  | "execution";
+export type SiteSkillEvaluationOutcome = "passed" | "failed";
+
+export interface SiteSkillEvaluationRecord {
+  evaluation_id: string;
+  revision_id: string;
+  recorded_at: string;
+  kind: SiteSkillEvaluationKind;
+  outcome: SiteSkillEvaluationOutcome;
+  detail?: string;
+}
+
+export interface SiteSkillLifecycleEvent {
+  event_id: string;
+  recorded_at: string;
+  kind: "promotion" | "rollback";
+  from_revision_id?: string;
+  to_revision_id: string;
+}
+
+export interface SiteSkillPromotionGate {
+  revision_id: string;
+  eligible: boolean;
+  structural_verification: SiteSkillEvaluationOutcome | "missing";
+  execution: SiteSkillEvaluationOutcome | "missing";
+  reasons: string[];
+}
+
 export interface SiteSkillFamilyRecord {
   id: string;
   slug: string;
@@ -29,6 +59,8 @@ export interface SiteSkillFamilyRecord {
   latest_revision_id: string;
   active_revision_id?: string;
   revisions: SiteSkillRevisionRecord[];
+  evaluations: SiteSkillEvaluationRecord[];
+  lifecycle_events: SiteSkillLifecycleEvent[];
 }
 
 export interface SiteSkillLibrary {
@@ -126,7 +158,26 @@ function familyFromLegacyCandidate(
     slug: candidate.slug,
     name: candidate.name,
     latest_revision_id: revision.revision_id,
-    revisions: [revision]
+    revisions: [revision],
+    evaluations: [],
+    lifecycle_events: []
+  };
+}
+
+function normalizeFamily(
+  family: SiteSkillFamilyRecord
+): SiteSkillFamilyRecord {
+  return {
+    ...structuredClone(family),
+    revisions: Array.isArray(family.revisions)
+      ? structuredClone(family.revisions)
+      : [],
+    evaluations: Array.isArray(family.evaluations)
+      ? structuredClone(family.evaluations)
+      : [],
+    lifecycle_events: Array.isArray(family.lifecycle_events)
+      ? structuredClone(family.lifecycle_events)
+      : []
   };
 }
 
@@ -149,7 +200,10 @@ function validLibrary(value: unknown): value is SiteSkillLibrary {
 async function loadStoredLibrary(): Promise<SiteSkillLibrary> {
   const current = await chrome.storage.local.get(KEY);
   if (validLibrary(current[KEY])) {
-    return structuredClone(current[KEY]);
+    return {
+      schema_version: 2,
+      families: current[KEY].families.map(normalizeFamily)
+    };
   }
 
   const legacy = await chrome.storage.local.get(LEGACY_KEY);
@@ -205,7 +259,9 @@ export async function saveSiteSkillCandidate(
       slug: candidate.slug,
       name: candidate.name,
       latest_revision_id: "",
-      revisions: []
+      revisions: [],
+      evaluations: [],
+      lifecycle_events: []
     };
     library.families.unshift(family);
   }
@@ -281,6 +337,28 @@ export async function getSiteSkillFamily(
   return family ? structuredClone(family) : null;
 }
 
+export async function getSiteSkillExecutableCandidate(
+  id: string,
+  revisionIdInput?: string
+): Promise<SiteCandidateSkill | null> {
+  const family = await getSiteSkillFamily(id);
+  if (!family) return null;
+
+  const revisionIdToUse =
+    revisionIdInput ||
+    family.active_revision_id ||
+    family.latest_revision_id;
+
+  const revision =
+    family.revisions.find(
+      (item) => item.revision_id === revisionIdToUse
+    ) || null;
+
+  return revision
+    ? cloneCandidate(revision.candidate)
+    : null;
+}
+
 export async function listSiteSkillRevisions(
   id: string
 ): Promise<SiteSkillRevisionRecord[]> {
@@ -313,6 +391,234 @@ export async function listSiteSkillRevisionSummaries(
         }
       : {})
   }));
+}
+
+function nextEvaluationId(
+  family: SiteSkillFamilyRecord
+): string {
+  return `${family.id}:eval-${family.evaluations.length + 1}`;
+}
+
+function nextLifecycleEventId(
+  family: SiteSkillFamilyRecord
+): string {
+  return `${family.id}:lifecycle-${family.lifecycle_events.length + 1}`;
+}
+
+function latestEvaluation(
+  family: SiteSkillFamilyRecord,
+  revisionIdInput: string,
+  kind: SiteSkillEvaluationKind
+): SiteSkillEvaluationRecord | null {
+  return (
+    [...family.evaluations]
+      .reverse()
+      .find(
+        (evaluation) =>
+          evaluation.revision_id === revisionIdInput &&
+          evaluation.kind === kind
+      ) || null
+  );
+}
+
+export function siteSkillPromotionGate(
+  family: SiteSkillFamilyRecord,
+  revisionIdInput: string
+): SiteSkillPromotionGate {
+  const structural = latestEvaluation(
+    family,
+    revisionIdInput,
+    "structural-verification"
+  );
+  const execution = latestEvaluation(
+    family,
+    revisionIdInput,
+    "execution"
+  );
+  const reasons: string[] = [];
+
+  if (structural?.outcome !== "passed") {
+    reasons.push(
+      structural
+        ? "latest structural verification failed"
+        : "structural verification evidence is missing"
+    );
+  }
+  if (execution?.outcome !== "passed") {
+    reasons.push(
+      execution
+        ? "latest execution evaluation failed"
+        : "successful execution evidence is missing"
+    );
+  }
+
+  return {
+    revision_id: revisionIdInput,
+    eligible: reasons.length === 0,
+    structural_verification:
+      structural?.outcome || "missing",
+    execution: execution?.outcome || "missing",
+    reasons
+  };
+}
+
+export async function recordSiteSkillEvaluation(
+  id: string,
+  revisionIdInput: string,
+  input: {
+    kind: SiteSkillEvaluationKind;
+    outcome: SiteSkillEvaluationOutcome;
+    recorded_at?: string;
+    detail?: string;
+  }
+): Promise<SiteSkillEvaluationRecord> {
+  const library = await loadStoredLibrary();
+  const family = library.families.find(
+    (item) => item.id === id
+  );
+  if (!family) {
+    throw new Error("SITE_SKILL_NOT_FOUND");
+  }
+  if (
+    !family.revisions.some(
+      (revision) =>
+        revision.revision_id === revisionIdInput
+    )
+  ) {
+    throw new Error("SITE_SKILL_REVISION_NOT_FOUND");
+  }
+
+  const evaluation: SiteSkillEvaluationRecord = {
+    evaluation_id: nextEvaluationId(family),
+    revision_id: revisionIdInput,
+    recorded_at: input.recorded_at || new Date().toISOString(),
+    kind: input.kind,
+    outcome: input.outcome,
+    ...(input.detail ? { detail: input.detail } : {})
+  };
+  family.evaluations.push(evaluation);
+  await persistLibrary(library);
+  return structuredClone(evaluation);
+}
+
+export async function getSiteSkillPromotionGate(
+  id: string,
+  revisionIdInput?: string
+): Promise<SiteSkillPromotionGate | null> {
+  const family = await getSiteSkillFamily(id);
+  if (!family) return null;
+  const revisionIdToUse =
+    revisionIdInput || family.latest_revision_id;
+  if (
+    !family.revisions.some(
+      (revision) =>
+        revision.revision_id === revisionIdToUse
+    )
+  ) {
+    return null;
+  }
+  return siteSkillPromotionGate(family, revisionIdToUse);
+}
+
+export async function promoteSiteSkillRevision(
+  id: string,
+  revisionIdInput: string,
+  recordedAt?: string
+): Promise<SiteSkillLifecycleEvent> {
+  const library = await loadStoredLibrary();
+  const family = library.families.find(
+    (item) => item.id === id
+  );
+  if (!family) {
+    throw new Error("SITE_SKILL_NOT_FOUND");
+  }
+  if (
+    !family.revisions.some(
+      (revision) =>
+        revision.revision_id === revisionIdInput
+    )
+  ) {
+    throw new Error("SITE_SKILL_REVISION_NOT_FOUND");
+  }
+
+  const gate = siteSkillPromotionGate(
+    family,
+    revisionIdInput
+  );
+  if (!gate.eligible) {
+    throw new Error(
+      `SITE_SKILL_PROMOTION_EVIDENCE_REQUIRED: ${gate.reasons.join("; ")}`
+    );
+  }
+
+  if (family.active_revision_id === revisionIdInput) {
+    const existing = [...family.lifecycle_events]
+      .reverse()
+      .find(
+        (event) =>
+          event.to_revision_id === revisionIdInput
+      );
+    if (existing) return structuredClone(existing);
+  }
+
+  const event: SiteSkillLifecycleEvent = {
+    event_id: nextLifecycleEventId(family),
+    recorded_at: recordedAt || new Date().toISOString(),
+    kind: "promotion",
+    ...(family.active_revision_id
+      ? { from_revision_id: family.active_revision_id }
+      : {}),
+    to_revision_id: revisionIdInput
+  };
+  family.active_revision_id = revisionIdInput;
+  family.lifecycle_events.push(event);
+  await persistLibrary(library);
+  return structuredClone(event);
+}
+
+export async function rollbackSiteSkillRevision(
+  id: string,
+  revisionIdInput: string,
+  recordedAt?: string
+): Promise<SiteSkillLifecycleEvent> {
+  const library = await loadStoredLibrary();
+  const family = library.families.find(
+    (item) => item.id === id
+  );
+  if (!family) {
+    throw new Error("SITE_SKILL_NOT_FOUND");
+  }
+  if (
+    !family.revisions.some(
+      (revision) =>
+        revision.revision_id === revisionIdInput
+    )
+  ) {
+    throw new Error("SITE_SKILL_REVISION_NOT_FOUND");
+  }
+  const previouslyActive = family.lifecycle_events.some(
+    (event) =>
+      event.to_revision_id === revisionIdInput
+  );
+  if (!previouslyActive) {
+    throw new Error(
+      "SITE_SKILL_ROLLBACK_TARGET_NOT_PREVIOUSLY_ACTIVE"
+    );
+  }
+
+  const event: SiteSkillLifecycleEvent = {
+    event_id: nextLifecycleEventId(family),
+    recorded_at: recordedAt || new Date().toISOString(),
+    kind: "rollback",
+    ...(family.active_revision_id
+      ? { from_revision_id: family.active_revision_id }
+      : {}),
+    to_revision_id: revisionIdInput
+  };
+  family.active_revision_id = revisionIdInput;
+  family.lifecycle_events.push(event);
+  await persistLibrary(library);
+  return structuredClone(event);
 }
 
 export async function deleteSiteSkillCandidate(
