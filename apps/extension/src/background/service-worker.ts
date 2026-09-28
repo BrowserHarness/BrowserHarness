@@ -75,9 +75,12 @@ import {
 import {
   deleteTaskEpisodeMemory,
   getTaskEpisodeMemory,
-  listTaskEpisodeMemory,
-  searchTaskEpisodeMemory
+  listTaskEpisodeMemory
 } from "../runtime/task-memory";
+import {
+  deleteTaskEpisodeVector,
+  searchTaskMemoryHybrid
+} from "../runtime/semantic-memory";
 import {
   clearBrowserWorkingMemory,
   getBrowserWorkingMemory
@@ -617,13 +620,15 @@ async function runTool(
         };
       }
 
+      const hits = await searchTaskMemoryHybrid(
+        input.query,
+        Number(input.limit ?? 10)
+      );
       return {
         ok: true,
         data: {
-          episodes: await searchTaskEpisodeMemory(
-            input.query,
-            Number(input.limit ?? 10)
-          )
+          hits,
+          episodes: hits.map((hit) => hit.episode)
         }
       };
     }
@@ -673,11 +678,19 @@ async function runTool(
         };
       }
 
+      const deleted = await deleteTaskEpisodeMemory(
+        input.id
+      );
+      if (deleted) {
+        await deleteTaskEpisodeVector(input.id).catch(
+          () => undefined
+        );
+      }
       return {
         ok: true,
         data: {
           id: input.id,
-          deleted: await deleteTaskEpisodeMemory(input.id)
+          deleted
         }
       };
     }
