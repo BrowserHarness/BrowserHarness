@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.2-site-skill-v1-active",
+  "status": "v0.2-site-skill-v1-verified-interaction-parity-next",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -203,9 +203,9 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "Site -> Skill v1 evidence/recipe compiler and user-facing persistence; never auto-promote",
+        "next": "Kimi-reference interaction parity, then versioned Skill refinement/promotion",
         "site_to_skill": {
-          "status": "active-v1-create-verify-run",
+          "status": "verified-v1",
           "tool": "site_skill",
           "actions": [
             "create",
@@ -229,7 +229,9 @@
             "ambiguous targets rejected",
             "non-GET/risky submit requires privileged BrowserCrew approval",
             "run parameters redacted from session evidence"
-          ]
+          ],
+          "verified_sha": "bbfed3443eea22df9b0115407519836263032469",
+          "ci_run_id": 36369232137
         }
       }
     },
@@ -244,7 +246,7 @@
           "navigation",
           "tab open/activation/close"
         ],
-        "next": "Site -> Skill v1; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
+        "next": "Kimi-reference interaction parity; SK-BROWSER-001 cross-runtime evaluation remains parallel external-runtime blocker",
         "record_to_skill": {
           "status": "verified",
           "verified_sha": "9a21949333de565e5a77001ce1f39da95e346657",
@@ -334,18 +336,18 @@
     }
   ],
   "latest_verified": {
-    "sha": "3b6c7567f5f20124bedbe30abdac45005c777756",
-    "ci_run_id": 36367934722,
+    "sha": "bbfed3443eea22df9b0115407519836263032469",
+    "ci_run_id": 36369232137,
     "extension_tests": {
-      "passed": 160,
-      "total": 160,
-      "files": 32
+      "passed": 181,
+      "total": 181,
+      "files": 38
     },
     "bridge_tests": {
       "passed": 3,
       "total": 3
     },
-    "artifact_id": 10947872942,
-    "artifact_digest": "sha256:7329bb00a869ff475f1e5bc270446d945a44b5624e6353e1bab46b353b5a1923"
+    "artifact_id": 10947964449,
+    "artifact_digest": "sha256:e0b48d34eecb612ef4774b9918f3bfedb89b2c2479b1034cb3cc22ffe82bc9ea"
   }
 }
