@@ -211,5 +211,18 @@
     ],
     "mod_resolution": "Cmd on macOS; Ctrl on Windows/Linux/ChromeOS",
     "approval": "Enter-containing sequences preserve BrowserCrew approval policy"
+  },
+  "orchestrator_tools": {
+    "await_user_action": {
+      "bridge_exposed": false,
+      "purpose": "pause BrowserCrew planning for a human-only page step, then re-observe fresh state",
+      "use_cases": [
+        "login",
+        "CAPTCHA/human verification",
+        "2FA",
+        "manual consent"
+      ],
+      "behavior": "10-second navigation-first grace period, then takeover UI; navigation or user confirmation resumes; cancel stops"
+    }
   }
 }
