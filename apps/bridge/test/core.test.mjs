@@ -6,13 +6,14 @@ import {
   createBridgeServer
 } from "../src/core.mjs";
 
-async function start() {
+async function start(options = {}) {
   const token = "test-token";
   const bridge = createBridgeServer({
     host: "127.0.0.1",
     port: 0,
     token,
-    commandTimeoutMs: 1000
+    commandTimeoutMs: 1000,
+    ...options
   });
   const address = await bridge.listen();
   const base = `http://127.0.0.1:${address.port}`;
@@ -127,4 +128,163 @@ test("relays a command to the connected extension", async () => {
     ws.close();
     await env.bridge.close();
   }
+});
+
+
+test("outbound MCP endpoints require pairing token", async () => {
+  const env = await start({
+    mcpManager: {
+      listServers: async () => [],
+      closeAll: async () => undefined
+    }
+  });
+  try {
+    const response = await fetch(
+      `${env.base}/mcp/servers`
+    );
+    assert.equal(response.status, 401);
+  } finally {
+    await env.bridge.close();
+  }
+});
+
+test("Bridge exposes authenticated outbound MCP discovery and calls", async () => {
+  let closed = false;
+  const mcpManager = {
+    listServers: async () => [
+      {
+        id: "notes",
+        label: "Notes",
+        transport: "stdio",
+        enabled: true,
+        connected: false,
+        env_keys: ["NOTES_TOKEN"]
+      }
+    ],
+    listTools: async (serverId) => {
+      assert.equal(serverId, "notes");
+      return {
+        server: {
+          id: "notes",
+          label: "Notes",
+          transport: "stdio",
+          enabled: true,
+          connected: true,
+          env_keys: ["NOTES_TOKEN"]
+        },
+        tools: [
+          {
+            name: "search_notes",
+            description: "Search notes",
+            inputSchema: {
+              type: "object"
+            },
+            annotations: {
+              readOnlyHint: true
+            }
+          }
+        ]
+      };
+    },
+    callTool: async (serverId, tool, args) => {
+      assert.equal(serverId, "notes");
+      assert.equal(tool, "search_notes");
+      assert.deepEqual(args, { query: "BrowserCrew" });
+      return {
+        server_id: serverId,
+        tool,
+        annotations: {
+          readOnlyHint: true
+        },
+        result: {
+          content: [
+            {
+              type: "text",
+              text: "Found BrowserCrew"
+            }
+          ]
+        }
+      };
+    },
+    closeAll: async () => {
+      closed = true;
+    }
+  };
+
+  const env = await start({ mcpManager });
+  const auth = {
+    authorization: `Bearer ${env.token}`
+  };
+
+  try {
+    const status = await fetch(`${env.base}/status`);
+    const statusBody = await status.json();
+    assert.equal(statusBody.mcp_client_enabled, true);
+    assert.equal(statusBody.mcp_servers_configured, 1);
+
+    const servers = await fetch(
+      `${env.base}/mcp/servers`,
+      { headers: auth }
+    );
+    const serversBody = await servers.json();
+    assert.equal(servers.status, 200);
+    assert.equal(serversBody.ok, true);
+    assert.equal(
+      serversBody.data.servers[0].id,
+      "notes"
+    );
+    assert.equal(
+      JSON.stringify(serversBody).includes("secret-value"),
+      false
+    );
+
+    const tools = await fetch(
+      `${env.base}/mcp/list-tools`,
+      {
+        method: "POST",
+        headers: {
+          ...auth,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          server_id: "notes"
+        })
+      }
+    );
+    const toolsBody = await tools.json();
+    assert.equal(tools.status, 200);
+    assert.equal(
+      toolsBody.data.tools[0].annotations.readOnlyHint,
+      true
+    );
+
+    const call = await fetch(
+      `${env.base}/mcp/call-tool`,
+      {
+        method: "POST",
+        headers: {
+          ...auth,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          server_id: "notes",
+          tool: "search_notes",
+          arguments: {
+            query: "BrowserCrew"
+          }
+        })
+      }
+    );
+    const callBody = await call.json();
+    assert.equal(call.status, 200);
+    assert.equal(callBody.ok, true);
+    assert.equal(
+      callBody.data.result.content[0].text,
+      "Found BrowserCrew"
+    );
+  } finally {
+    await env.bridge.close();
+  }
+
+  assert.equal(closed, true);
 });
