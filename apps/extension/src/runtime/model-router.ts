@@ -2,6 +2,7 @@ import type { PageObservation } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
 import type { TaskEpisodeMemory } from "./task-memory";
 import type { ProceduralSearchHit } from "./procedural-memory";
+import type { BrowserCrewMcpCatalog } from "./mcp-catalog";
 import {
   directChatCompletion,
   nextAgentDecision,
@@ -77,7 +78,11 @@ export async function agentDecisionWithFallback(
   evidence: TabEvidence[] = [],
   screenshotDataUrl?: string,
   recalledMemory: TaskEpisodeMemory[] = [],
-  recalledProcedures: ProceduralSearchHit[] = []
+  recalledProcedures: ProceduralSearchHit[] = [],
+  mcpCatalog: BrowserCrewMcpCatalog = {
+    servers_considered: 0,
+    tools: []
+  }
 ): Promise<RoutedResult<AgentDecision>> {
   return runWithFallback(primary, fallback, (connection) =>
     nextAgentDecision(
@@ -89,7 +94,8 @@ export async function agentDecisionWithFallback(
       evidence,
       screenshotDataUrl,
       recalledMemory,
-      recalledProcedures
+      recalledProcedures,
+      mcpCatalog
     )
   );
 }
