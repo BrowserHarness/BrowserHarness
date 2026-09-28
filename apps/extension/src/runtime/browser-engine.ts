@@ -32,6 +32,10 @@ export interface BrowserDecisionResult {
   usedFallback?: boolean;
 }
 
+export interface BrowserToolExecution {
+  approvalGranted?: boolean;
+}
+
 export interface BrowserEngineDependencies {
   session?: BrowserTaskSessionIdentity;
   decide(
@@ -39,7 +43,8 @@ export interface BrowserEngineDependencies {
   ): Promise<BrowserDecisionResult>;
   tool<T = unknown>(
     tool: ToolName,
-    input?: Record<string, unknown>
+    input?: Record<string, unknown>,
+    execution?: BrowserToolExecution
   ): Promise<ToolResult<T>>;
   approvalDescription(
     observation: PageObservation,
@@ -72,6 +77,7 @@ const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
   "trusted_click",
   "trusted_type",
   "trusted_key",
+  "select_option",
   "dialog",
   "evaluate",
   "cdp",
@@ -208,11 +214,12 @@ export async function runBrowserTask(
     }
 
     const beforeObservation = observation;
-    const approval = dependencies.approvalDescription(
+    let approval = dependencies.approvalDescription(
       beforeObservation,
       decision.tool,
       decision.input
     );
+    let approvalGranted = false;
 
     if (approval) {
       const approved = await dependencies.requestApproval(approval);
@@ -223,12 +230,47 @@ export async function runBrowserTask(
           step
         );
       }
+      approvalGranted = true;
     }
 
-    const result = await dependencies.withActivity(
+    let result = await dependencies.withActivity(
       decision.note || `Using ${decision.tool}`,
-      () => dependencies.tool(decision.tool, decision.input)
+      () =>
+        dependencies.tool(
+          decision.tool,
+          decision.input,
+          approvalGranted ? { approvalGranted: true } : undefined
+        )
     );
+
+    if (
+      !result.ok &&
+      result.error?.code === "APPROVAL_REQUIRED" &&
+      !approvalGranted
+    ) {
+      approval =
+        result.error.message ||
+        `Approve ${decision.tool} on this page`;
+      const approved = await dependencies.requestApproval(approval);
+      if (!approved) {
+        return buildResult(
+          "approval-cancelled",
+          "I stopped before that action.",
+          step
+        );
+      }
+
+      approvalGranted = true;
+      result = await dependencies.withActivity(
+        `Approved: ${decision.note || decision.tool}`,
+        () =>
+          dependencies.tool(
+            decision.tool,
+            decision.input,
+            { approvalGranted: true }
+          )
+      );
+    }
 
     if (decision.tool === "screenshot" && result.ok) {
       sessionActions.push({
