@@ -22,10 +22,12 @@ import {
   findAxElements
 } from "./cdp-semantic";
 import {
+  parseTrustedKeySequence,
   trustedClick,
   trustedDrag,
   trustedHover,
   trustedKey,
+  trustedSendKeys,
   trustedType
 } from "./cdp-input";
 import {
@@ -1258,6 +1260,78 @@ async function runTool(
     }
   }
 
+  if (tool === "send_keys") {
+    if (typeof input.keys !== "string" || !input.keys.trim()) {
+      return {
+        ok: false,
+        error: {
+          code: "SEND_KEYS_INPUT_INVALID",
+          message:
+            'send_keys requires keys, e.g. "Enter", "Mod+A", "Shift+Tab", or "Enter Escape"'
+        }
+      };
+    }
+
+    const repeat = Number(input.repeat ?? 1);
+
+    try {
+      const platformInfo = await chrome.runtime.getPlatformInfo();
+      const sequence = parseTrustedKeySequence(
+        input.keys,
+        platformInfo.os
+      );
+
+      if (
+        sequence.some((chord) => chord.key.key === "Enter") &&
+        !options.approvalGranted
+      ) {
+        try {
+          const snapshot = await captureAxSnapshot(tabId, 300);
+          const focused = snapshot.elements.find(
+            (element) => element.focused
+          );
+          if (
+            focused &&
+            isRiskyTrustedLabel(focused.name)
+          ) {
+            return {
+              ok: false,
+              error: {
+                code: "APPROVAL_REQUIRED",
+                message:
+                  `Trusted key sequence containing Enter in “${focused.name || focused.role}” requires explicit approval.`
+              }
+            };
+          }
+        } catch {
+          // AX evidence is best-effort here; parser/runtime validation
+          // still applies and BrowserCrew can re-observe after dispatch.
+        }
+      }
+
+      return {
+        ok: true,
+        data: await trustedSendKeys(
+          tabId,
+          input.keys,
+          repeat,
+          platformInfo.os
+        )
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "SEND_KEYS_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Trusted key sequence failed"
+        }
+      };
+    }
+  }
+
   if (tool === "dialog") {
     const action =
       typeof input.action === "string"
@@ -1577,6 +1651,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "trusted_click",
   "trusted_type",
   "trusted_key",
+  "send_keys",
   "dialog",
   "network",
   "upload",
