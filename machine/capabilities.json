@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.3-procedural-memory-verified",
+  "status": "v0.3-mcp-server-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -271,14 +271,34 @@
           "stop",
           "restart",
           "logs",
-          "pair"
+          "pair",
+          "mcp"
         ],
         "cdp": "available through primary BrowserCrew runtime",
         "tools": 34,
         "planner_tools": 31,
         "orchestrator_only": [
           "await_user_action"
-        ]
+        ],
+        "mcp_server": {
+          "status": "verified",
+          "sdk": "@modelcontextprotocol/server v2",
+          "transport": "stdio via serveStdio",
+          "protocol": "supports current MCP v2 negotiation while preserving legacy compatibility through SDK",
+          "tool_surface": "browsercrew_status + one MCP tool for each of 34 Local Bridge actions",
+          "execution_path": "MCP -> authenticated loopback POST /command -> paired WebSocket -> BrowserCrew extension runtime",
+          "session_contract": "MCP session input maps unchanged to BrowserCrew task session",
+          "safety": [
+            "MCP is not a second browser executor",
+            "APPROVAL_REQUIRED is preserved as an MCP tool error result",
+            "borrowed-tab ownership rules remain extension-enforced",
+            "MCP transport only targets loopback BrowserCrew Bridge config",
+            "stdout reserved for MCP JSON-RPC; diagnostics use stderr"
+          ],
+          "verified_sha": "ea4433d7efacb760bf5aab060a9f96b9e72c3b25",
+          "ci_run_id": 36377928834,
+          "tests": "9/9 Bridge tests + 240/240 extension tests"
+        }
       }
     },
     {
@@ -508,7 +528,7 @@
           "active_scope": "current task session only"
         },
         "next": [
-          "MCP client/tool bridge"
+          "outbound MCP client + tool bridge"
         ],
         "semantic_retrieval": {
           "status": "verified",
