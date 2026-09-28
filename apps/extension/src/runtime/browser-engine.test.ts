@@ -842,6 +842,70 @@ describe("Browser MVP engine scenarios", () => {
     });
   });
 
+  it("redacts Site Skill run parameter values from session evidence", async () => {
+    const h = harness({
+      observations: [
+        page(8, "Checkout", "Checkout"),
+        page(8, "Done", "Thanks")
+      ],
+      decisions: [
+        {
+          kind: "tool",
+          tool: "site_skill",
+          input: {
+            action: "run",
+            id: "SK-SITE-1",
+            parameters: {
+              email: "user@example.com",
+              password: "top-secret"
+            }
+          },
+          note: "Running saved Site Skill"
+        },
+        {
+          kind: "final",
+          message: "Done."
+        }
+      ],
+      toolResults: {
+        site_skill: [
+          {
+            ok: true,
+            data: {
+              candidate_id: "SK-SITE-1"
+            }
+          }
+        ]
+      }
+    });
+
+    h.dependencies.session = {
+      id: "site-skill-task",
+      title: "Run Site Skill"
+    };
+
+    const result = await runBrowserTask(
+      "Run my checkout Skill",
+      h.dependencies
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.session_evidence.actions[0].input).toEqual({
+      action: "run",
+      id: "SK-SITE-1",
+      parameters: {
+        email: "<redacted>",
+        password: "<redacted>"
+      }
+    });
+    expect(
+      JSON.stringify(result.session_evidence)
+    ).not.toContain("top-secret");
+    expect(
+      JSON.stringify(result.session_evidence)
+    ).not.toContain("user@example.com");
+  });
+
   it("does not advance session evidence for stale failed attempts", async () => {
     let turn = 0;
     const oldButton = {
