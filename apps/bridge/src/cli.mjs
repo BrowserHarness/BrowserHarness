@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBridgeServer } from "./core.mjs";
+import { serveBrowserCrewMcp } from "./mcp.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 const HOME = path.join(os.homedir(), ".browsercrew-bridge");
@@ -227,6 +228,8 @@ const { config, created } = await ensureConfig();
 try {
   if (command === "serve") {
     await serve(config);
+  } else if (command === "mcp") {
+    await serveBrowserCrewMcp(config);
   } else if (command === "start") {
     await start(config, created);
   } else if (command === "status") {
@@ -246,7 +249,7 @@ try {
     });
   } else {
     throw new Error(
-      "Usage: browsercrew-bridge [start|status|stop|restart|logs|pair]"
+      "Usage: browsercrew-bridge [start|status|stop|restart|logs|pair|mcp]"
     );
   }
 } catch (error) {
