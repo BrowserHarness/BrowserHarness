@@ -58,6 +58,7 @@ import {
   getSiteSkillExecutableRevision,
   getSiteSkillFamily,
   getSiteSkillPromotionGate,
+  getSiteSkillRevisionComparison,
   getSiteSkillRevision,
   listSiteSkillCandidateSummaries,
   listSiteSkillRevisionSummaries,
@@ -602,9 +603,62 @@ async function runTool(
             await listSiteSkillExecutionEvidence(input.id),
           lifecycle_events: family?.lifecycle_events || [],
           promotion_gate:
-            await getSiteSkillPromotionGate(input.id)
+            await getSiteSkillPromotionGate(input.id),
+          comparison:
+            await getSiteSkillRevisionComparison(input.id)
         }
       };
+    }
+
+    if (action === "compare") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill compare requires id"
+          }
+        };
+      }
+
+      try {
+        const comparison =
+          await getSiteSkillRevisionComparison(
+            input.id,
+            typeof input.revision_id === "string"
+              ? input.revision_id
+              : undefined,
+            typeof input.baseline_revision_id === "string"
+              ? input.baseline_revision_id
+              : undefined
+          );
+        return comparison
+          ? {
+              ok: true,
+              data: {
+                id: input.id,
+                comparison
+              }
+            }
+          : {
+              ok: false,
+              error: {
+                code: "SITE_SKILL_NOT_FOUND",
+                message: "Site Skill candidate was not found"
+              }
+            };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_COMPARISON_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Site Skill comparison failed"
+          }
+        };
+      }
     }
 
     if (action === "promote") {
@@ -638,7 +692,14 @@ async function runTool(
       if (!gate?.eligible) {
         return {
           ok: false,
-          data: { promotion_gate: gate },
+          data: {
+            promotion_gate: gate,
+            comparison:
+              await getSiteSkillRevisionComparison(
+                input.id,
+                revisionId
+              )
+          },
           error: {
             code: "SITE_SKILL_PROMOTION_EVIDENCE_REQUIRED",
             message:
@@ -649,6 +710,11 @@ async function runTool(
       }
 
       try {
+        const comparison =
+          await getSiteSkillRevisionComparison(
+            input.id,
+            revisionId
+          );
         const event = await promoteSiteSkillRevision(
           input.id,
           revisionId
@@ -658,6 +724,7 @@ async function runTool(
           data: {
             id: input.id,
             active_revision_id: revisionId,
+            comparison,
             event
           }
         };
@@ -744,6 +811,7 @@ async function runTool(
       action !== "run" &&
       action !== "refine" &&
       action !== "history" &&
+      action !== "compare" &&
       action !== "promote" &&
       action !== "rollback"
     ) {
@@ -752,7 +820,7 @@ async function runTool(
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, verify, run, refine, list, get, history, promote, rollback, or delete"
+            "site_skill action must be create, verify, run, refine, list, get, history, compare, promote, rollback, or delete"
         }
       };
     }
