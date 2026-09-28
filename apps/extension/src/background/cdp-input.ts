@@ -137,6 +137,49 @@ async function collectDeliveryProof(
   return result.result?.value === true;
 }
 
+async function armDragDeliveryProof(
+  tabId: number,
+  sourceObjectId: string,
+  targetObjectId: string,
+  token: string
+): Promise<void> {
+  await cdpCommand(
+    tabId,
+    "Runtime.callFunctionOn",
+    {
+      objectId: sourceObjectId,
+      functionDeclaration:
+        "function(token,target){const key='__browsercrewTrustedDragProofs';const store=window[key]||(window[key]={});const source=this;const owns=(root,node)=>Boolean(root&&node&&(node===root||root.contains(node)));const proof={down:false,up:false,downHandler:null,upHandler:null};const down=(event)=>{if(owns(source,event.target))proof.down=true;};const up=(event)=>{if(owns(target,event.target))proof.up=true;};proof.downHandler=down;proof.upHandler=up;store[token]=proof;document.addEventListener('pointerdown',down,true);document.addEventListener('mousedown',down,true);document.addEventListener('pointerup',up,true);document.addEventListener('mouseup',up,true);return true;}",
+      arguments: [
+        { value: token },
+        { objectId: targetObjectId }
+      ],
+      returnByValue: true
+    }
+  );
+}
+
+async function collectDragDeliveryProof(
+  tabId: number,
+  token: string
+): Promise<boolean> {
+  const encodedToken = JSON.stringify(token);
+  const result = await cdpCommand<RuntimeValue<boolean>>(
+    tabId,
+    "Runtime.evaluate",
+    {
+      expression:
+        "(function(){const key='__browsercrewTrustedDragProofs';const store=window[key];const proof=store&&store[" +
+        encodedToken +
+        "];if(!proof)return false;document.removeEventListener('pointerdown',proof.downHandler,true);document.removeEventListener('mousedown',proof.downHandler,true);document.removeEventListener('pointerup',proof.upHandler,true);document.removeEventListener('mouseup',proof.upHandler,true);const delivered=Boolean(proof.down&&proof.up);delete store[" +
+        encodedToken +
+        "];return delivered;})()",
+      returnByValue: true
+    }
+  );
+  return result.result?.value === true;
+}
+
 async function targetIsHovered(
   tabId: number,
   objectId: string
@@ -182,6 +225,146 @@ export async function trustedHover(
   }
 
   return { x, y };
+}
+
+export async function trustedDrag(
+  tabId: number,
+  sourceRef: string,
+  targetRef: string,
+  steps = 8
+): Promise<{
+  source: { x: number; y: number };
+  target: { x: number; y: number };
+  steps: number;
+}> {
+  await enableFocusEmulation(tabId);
+
+  const boundedSteps = Math.min(
+    Math.max(Math.round(Number(steps) || 8), 2),
+    30
+  );
+  const sourceBackendNodeId = backendNodeForRef(tabId, sourceRef);
+  const targetBackendNodeId = backendNodeForRef(tabId, targetRef);
+
+  await cdpCommand(tabId, "DOM.scrollIntoViewIfNeeded", {
+    backendNodeId: sourceBackendNodeId
+  });
+  await cdpCommand(tabId, "DOM.scrollIntoViewIfNeeded", {
+    backendNodeId: targetBackendNodeId
+  });
+
+  const [sourceBox, targetBox] = await Promise.all([
+    cdpCommand<BoxModel>(tabId, "DOM.getBoxModel", {
+      backendNodeId: sourceBackendNodeId
+    }),
+    cdpCommand<BoxModel>(tabId, "DOM.getBoxModel", {
+      backendNodeId: targetBackendNodeId
+    })
+  ]);
+
+  const source = quadCenter(
+    sourceBox.model?.content || sourceBox.model?.border
+  );
+  const target = quadCenter(
+    targetBox.model?.content || targetBox.model?.border
+  );
+
+  const sourceObjectId = await resolvedObjectId(
+    tabId,
+    sourceBackendNodeId
+  );
+  const targetObjectId = await resolvedObjectId(
+    tabId,
+    targetBackendNodeId
+  );
+
+  if (
+    !(await targetOwnsPoint(
+      tabId,
+      sourceObjectId,
+      source.x,
+      source.y
+    ))
+  ) {
+    throw new Error(
+      "Drag source is occluded at the calculated pointer point"
+    );
+  }
+  if (
+    !(await targetOwnsPoint(
+      tabId,
+      targetObjectId,
+      target.x,
+      target.y
+    ))
+  ) {
+    throw new Error(
+      "Drag target is occluded at the calculated pointer point"
+    );
+  }
+
+  const proofToken = crypto.randomUUID();
+  await armDragDeliveryProof(
+    tabId,
+    sourceObjectId,
+    targetObjectId,
+    proofToken
+  );
+
+  let delivered = false;
+  try {
+    await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: source.x,
+      y: source.y,
+      button: "none"
+    });
+    await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: source.x,
+      y: source.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1
+    });
+
+    for (let index = 1; index <= boundedSteps; index += 1) {
+      const progress = index / boundedSteps;
+      await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: source.x + (target.x - source.x) * progress,
+        y: source.y + (target.y - source.y) * progress,
+        button: "left",
+        buttons: 1
+      });
+    }
+
+    await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: target.x,
+      y: target.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1
+    });
+  } finally {
+    delivered = await collectDragDeliveryProof(
+      tabId,
+      proofToken
+    ).catch(() => false);
+  }
+
+  if (!delivered) {
+    throw new Error(
+      "Drag input was not delivered from the intended source to target"
+    );
+  }
+
+  return {
+    source,
+    target,
+    steps: boundedSteps
+  };
 }
 
 export async function trustedClick(
