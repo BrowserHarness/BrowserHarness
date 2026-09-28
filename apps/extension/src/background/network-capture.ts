@@ -65,7 +65,8 @@ subscribeCdpEvents((tabId, method, params) => {
       request_id: requestId,
       url: String(request.url || existing?.url || ""),
       method: String(request.method || existing?.method || "GET"),
-      request_headers: headers(request.headers),
+      request_headers:
+        headers(request.headers) || existing?.request_headers,
       ...(typeof request.postData === "string"
         ? { post_data: request.postData }
         : {}),
@@ -80,6 +81,47 @@ subscribeCdpEvents((tabId, method, params) => {
       ...record
     });
     ensureCapacity(session);
+
+    if (
+      request.hasPostData === true &&
+      typeof request.postData !== "string"
+    ) {
+      void cdpCommand<{ postData?: string }>(
+        tabId,
+        "Network.getRequestPostData",
+        { requestId }
+      )
+        .then((detail) => {
+          if (typeof detail.postData !== "string") return;
+          const currentSession = sessions.get(tabId);
+          const current = currentSession?.records.get(requestId);
+          if (!current) return;
+          currentSession!.records.set(requestId, {
+            ...current,
+            post_data: detail.postData
+          });
+        })
+        .catch(() => undefined);
+    }
+
+    return;
+  }
+
+  if (method === "Network.requestWillBeSentExtraInfo") {
+    const requestId = String(payload.requestId || "");
+    const record = session.records.get(requestId);
+    if (!record) return;
+
+    const extraHeaders = headers(payload.headers);
+    if (!extraHeaders) return;
+
+    session.records.set(requestId, {
+      ...record,
+      request_headers: {
+        ...(record.request_headers || {}),
+        ...extraHeaders
+      }
+    });
     return;
   }
 
