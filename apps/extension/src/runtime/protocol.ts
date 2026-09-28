@@ -14,6 +14,7 @@ export type ToolName =
   | "trusted_type"
   | "trusted_key"
   | "send_keys"
+  | "await_user_action"
   | "dialog"
   | "network"
   | "upload"
