@@ -43,7 +43,12 @@ function harness(options: {
   const contexts: BrowserDecisionContext[] = [];
   let decisionIndex = 0;
 
-  const toolMock = vi.fn(async (name: ToolName) => {
+  const toolMock = vi.fn(
+    async (
+      name: ToolName,
+      _input: Record<string, unknown> = {},
+      _execution?: { approvalGranted?: boolean }
+    ) => {
     if (name === "observe_page") {
       const observation = observations.shift();
       return observation
@@ -60,8 +65,9 @@ function harness(options: {
     const queued = toolResults.get(name);
     if (queued?.length) return queued.shift()!;
 
-    return { ok: true, data: {} };
-  });
+      return { ok: true, data: {} };
+    }
+  );
   const tool = toolMock as BrowserEngineDependencies["tool"];
 
   const requestApproval = vi.fn(async () => options.approval ?? true);
