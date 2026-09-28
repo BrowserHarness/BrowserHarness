@@ -4,6 +4,7 @@ import type {
   ToolResult
 } from "./protocol";
 import type { AgentDecision } from "./model-client";
+import type { TaskEpisodeMemory } from "./task-memory";
 import { createLoopGuard, registerDecision } from "./loop-guard";
 import {
   TabEvidenceStore,
@@ -28,6 +29,7 @@ export interface BrowserDecisionContext {
   observation: PageObservation;
   trail: string[];
   evidence: TabEvidence[];
+  recalled_memory: TaskEpisodeMemory[];
   screenshotDataUrl?: string;
   signal?: AbortSignal;
 }
@@ -70,6 +72,10 @@ export interface BrowserEngineDependencies {
   persistWorkingMemory?(
     memory: BrowserWorkingMemory
   ): Promise<void>;
+  recallMemory?(
+    task: string,
+    observation: PageObservation
+  ): Promise<TaskEpisodeMemory[]>;
   isCancelled(): boolean;
   waitWhilePaused(): Promise<void>;
   withActivity<T>(
@@ -189,6 +195,12 @@ export async function runBrowserTask(
   let screenshotDataUrl: string | undefined;
   evidenceStore.record(observation);
 
+  const recalledMemory = dependencies.recallMemory
+    ? await dependencies
+        .recallMemory(task, observation)
+        .catch(() => [])
+    : [];
+
   const sessionIdentity = dependencies.session || {
     id: "browser-task",
     title: task.length > 48 ? `${task.slice(0, 45)}…` : task
@@ -278,6 +290,7 @@ export async function runBrowserTask(
           observation,
           trail,
           evidence: evidenceStore.list(),
+          recalled_memory: recalledMemory,
           screenshotDataUrl: screenshotForDecision,
           signal
         })
