@@ -16,6 +16,18 @@ interface BoxModel {
   };
 }
 
+interface ResolvedNode {
+  object?: {
+    objectId?: string;
+  };
+}
+
+interface RuntimeValue<T> {
+  result?: {
+    value?: T;
+  };
+}
+
 function quadCenter(quad?: number[]): { x: number; y: number } {
   if (!quad || quad.length < 8) {
     throw new Error("Target has no usable layout box");
@@ -52,33 +64,131 @@ async function pointForRef(
   return { x, y, backendNodeId };
 }
 
+async function resolvedObjectId(
+  tabId: number,
+  backendNodeId: number
+): Promise<string> {
+  const resolved = await cdpCommand<ResolvedNode>(
+    tabId,
+    "DOM.resolveNode",
+    { backendNodeId }
+  );
+  const objectId = resolved.object?.objectId;
+  if (!objectId) {
+    throw new Error("Trusted target could not be resolved");
+  }
+  return objectId;
+}
+
+async function targetOwnsPoint(
+  tabId: number,
+  objectId: string,
+  x: number,
+  y: number
+): Promise<boolean> {
+  const result = await cdpCommand<RuntimeValue<boolean>>(
+    tabId,
+    "Runtime.callFunctionOn",
+    {
+      objectId,
+      functionDeclaration:
+        "function(x,y){const hit=document.elementFromPoint(x,y);return Boolean(hit&&(hit===this||this.contains(hit)));}",
+      arguments: [{ value: x }, { value: y }],
+      returnByValue: true
+    }
+  );
+  return result.result?.value === true;
+}
+
+async function armDeliveryProof(
+  tabId: number,
+  objectId: string,
+  token: string
+): Promise<void> {
+  await cdpCommand(
+    tabId,
+    "Runtime.callFunctionOn",
+    {
+      objectId,
+      functionDeclaration:
+        "function(token){const key='__browsercrewTrustedClickProofs';const root=window;const store=root[key]||(root[key]={});const target=this;const proof={received:false,handler:null};const handler=(event)=>{const node=event.target;proof.received=Boolean(node&&(node===target||target.contains(node)));};proof.handler=handler;store[token]=proof;document.addEventListener('pointerdown',handler,true);document.addEventListener('mousedown',handler,true);return true;}",
+      arguments: [{ value: token }],
+      returnByValue: true
+    }
+  );
+}
+
+async function collectDeliveryProof(
+  tabId: number,
+  objectId: string,
+  token: string
+): Promise<boolean> {
+  const result = await cdpCommand<RuntimeValue<boolean>>(
+    tabId,
+    "Runtime.callFunctionOn",
+    {
+      objectId,
+      functionDeclaration:
+        "function(token){const key='__browsercrewTrustedClickProofs';const store=window[key];const proof=store&&store[token];if(!proof)return false;document.removeEventListener('pointerdown',proof.handler,true);document.removeEventListener('mousedown',proof.handler,true);const received=Boolean(proof.received);delete store[token];return received;}",
+      arguments: [{ value: token }],
+      returnByValue: true
+    }
+  );
+  return result.result?.value === true;
+}
+
 export async function trustedClick(
   tabId: number,
   ref: string
 ): Promise<{ x: number; y: number }> {
   await enableFocusEmulation(tabId);
-  const { x, y } = await pointForRef(tabId, ref);
+  const { x, y, backendNodeId } = await pointForRef(tabId, ref);
+  const objectId = await resolvedObjectId(tabId, backendNodeId);
 
-  await cdpCommand(tabId, "Input.dispatchMouseEvent", {
-    type: "mouseMoved",
-    x,
-    y,
-    button: "none"
-  });
-  await cdpCommand(tabId, "Input.dispatchMouseEvent", {
-    type: "mousePressed",
-    x,
-    y,
-    button: "left",
-    clickCount: 1
-  });
-  await cdpCommand(tabId, "Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    x,
-    y,
-    button: "left",
-    clickCount: 1
-  });
+  if (!(await targetOwnsPoint(tabId, objectId, x, y))) {
+    throw new Error(
+      "Trusted click target is occluded at the calculated click point"
+    );
+  }
+
+  const proofToken = crypto.randomUUID();
+  await armDeliveryProof(tabId, objectId, proofToken);
+
+  let delivered = false;
+  try {
+    await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x,
+      y,
+      button: "none"
+    });
+    await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x,
+      y,
+      button: "left",
+      clickCount: 1
+    });
+    await cdpCommand(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x,
+      y,
+      button: "left",
+      clickCount: 1
+    });
+  } finally {
+    delivered = await collectDeliveryProof(
+      tabId,
+      objectId,
+      proofToken
+    ).catch(() => false);
+  }
+
+  if (!delivered) {
+    throw new Error(
+      "Trusted click input was not delivered to the intended target"
+    );
+  }
 
   return { x, y };
 }
