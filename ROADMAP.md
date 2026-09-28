@@ -143,8 +143,9 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
 5. **Kimi-reference interaction parity — active**
    - hover — verified
    - drag/drop with real CDP pointer sequence + source/target delivery verification — verified at `7f3df6c3f1bbb2df440b63b0a41c2fbb70e0069c` (CI `36370487993`)
-   - richer key chords/sequences/modifiers — next
-   - await-user-action / human handoff for login, CAPTCHA, 2FA or explicit manual step
+   - richer key chords/sequences/modifiers — verified at `f89e629ea4d5f14a82cc38021c9e7bbb5383ea24` (CI `36370758984`)
+   - `send_keys` matches the Kimi reference surface: OS-aware `Mod`, Alt/Ctrl/Cmd/Meta/Shift, named navigation keys, F1-F12, sequences and repeat 1-100
+   - await-user-action / human handoff for login, CAPTCHA, 2FA or explicit manual step — next
 6. **Versioned Skill lifecycle + refinement — after interaction parity**
    - candidate revision history
    - evaluation comparison against active version
