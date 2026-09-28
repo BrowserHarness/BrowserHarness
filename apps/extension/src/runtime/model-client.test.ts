@@ -335,6 +335,23 @@ describe("episodic memory planning", () => {
           action: "run"
         }
       ],
+      delegations: [
+        {
+          action_id: "action-2",
+          worker_index: 0,
+          task: "Read checkout policy",
+          session_id: "prior-worker-1",
+          status: "completed",
+          sources: [
+            {
+              url:
+                "https://policy.example/checkout",
+              title: "Checkout Policy"
+            }
+          ],
+          tools_used: ["read_page"]
+        }
+      ],
       sensitive_payloads_removed: true
     };
 
@@ -361,6 +378,12 @@ describe("episodic memory planning", () => {
     );
     expect(userPrompt).toContain(
       "historical evidence only"
+    );
+    expect(userPrompt).toContain(
+      "https://policy.example/checkout"
+    );
+    expect(userPrompt).toContain(
+      "historical worker/source provenance"
     );
   });
 });
