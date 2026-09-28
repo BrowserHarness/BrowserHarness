@@ -42,6 +42,8 @@ const TOOL_NAMES = new Set<ToolName>([
   "save_pdf",
   "cdp",
   "navigate",
+  "back",
+  "reload",
   "click",
   "type",
   "press_key",
@@ -52,6 +54,7 @@ const TOOL_NAMES = new Set<ToolName>([
   "list_tabs",
   "switch_tab",
   "close_tab",
+  "close_session",
   "screenshot"
 ]);
 
@@ -62,13 +65,13 @@ Do not claim an action succeeded unless tool evidence shows it.
 Return exactly one JSON object and no markdown.
 
 To use a tool:
-{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|find|evaluate|site_skill|select_option|hover|drag|trusted_click|trusted_type|trusted_key|send_keys|await_user_action|dialog|network|upload|save_pdf|cdp|navigate|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|screenshot","input":{},"note":"short user-visible activity"}
+{"kind":"tool","tool":"observe_page|read_page|ax_snapshot|find|evaluate|site_skill|select_option|hover|drag|trusted_click|trusted_type|trusted_key|send_keys|await_user_action|dialog|network|upload|save_pdf|cdp|navigate|back|reload|click|type|press_key|scroll|wait|open_tab|find_tab|list_tabs|switch_tab|close_tab|close_session|screenshot","input":{},"note":"short user-visible activity"}
 
 When the browser task is complete:
 {"kind":"final","message":"concise result for the user"}
 
 Prefer semantic @e element_id values from the current observation. Never invent an element_id.
-Use list_tabs to inspect tabs belonging to this task session. New task tabs open in the background by default. Use find_tab with the exact observed URL to select a session tab without changing the user's foreground tab; use active:true only when the user's goal explicitly refers to the tab they are currently viewing. Use switch_tab only when foreground activation is genuinely necessary.
+Use list_tabs to inspect tabs belonging to this task session. New task tabs open in the background by default. Use find_tab with the exact observed URL to select a session tab without changing the user's foreground tab; use active:true only when the user's goal explicitly refers to the tab they are currently viewing. Use switch_tab only when foreground activation is genuinely necessary. Use back for browser-history navigation and reload for a bounded reload instead of raw CDP. Use close_session when task-owned tabs should be cleaned up together; BrowserCrew closes only owned task tabs and preserves borrowed user tabs.
 Use read_page when a research/extraction task needs content beyond the compact visible observation. Honor next_start for bounded continuation and do not repeatedly scan an endless_feed/stalled page.
 Escalate browser control in layers:
 1. ordinary semantic observe/click/type/press_key first;
