@@ -13,6 +13,7 @@ export type ToolName =
   | "trusted_click"
   | "trusted_type"
   | "trusted_key"
+  | "send_keys"
   | "dialog"
   | "network"
   | "upload"
