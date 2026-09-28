@@ -162,6 +162,77 @@ describe("task episode memory", () => {
     );
   });
 
+  it("persists bounded delegation provenance and delegated sources", async () => {
+    const session = evidence();
+    session.actions.push({
+      id: "action-3",
+      ordinal: 3,
+      recorded_at: "2026-09-28T08:00:03.000Z",
+      tool: "agent",
+      input: {
+        tasks: ["Read independent source"]
+      },
+      note: "Delegate research",
+      before: {
+        tab_id: 1,
+        url: "https://shop.example/done",
+        title: "Done"
+      },
+      approval: {
+        required: false,
+        approved: true
+      },
+      delegation: {
+        worker_count: 1,
+        completed_count: 1,
+        non_completed_count: 0,
+        workers: [
+          {
+            index: 0,
+            task: "Read independent source",
+            session_id: "session-1:worker:1",
+            status: "completed",
+            sources: [
+              {
+                url:
+                  "https://research.example/report?id=42",
+                title: "Independent Report"
+              }
+            ],
+            tools_used: ["open_tab", "read_page"]
+          }
+        ]
+      }
+    });
+
+    const saved = await saveTaskEpisodeMemory(session);
+
+    expect(saved.delegations).toEqual([
+      {
+        action_id: "action-3",
+        worker_index: 0,
+        task: "Read independent source",
+        session_id: "session-1:worker:1",
+        status: "completed",
+        sources: [
+          {
+            url:
+              "https://research.example/report?id=42",
+            title: "Independent Report"
+          }
+        ],
+        tools_used: ["open_tab", "read_page"]
+      }
+    ]);
+    expect(saved.sites).toContain(
+      "https://research.example"
+    );
+    expect(
+      (await searchTaskEpisodeMemory("Independent Report"))[0]
+        ?.id
+    ).toBe(saved.id);
+  });
+
   it("persists, searches, retrieves and deletes episodic memory", async () => {
     const saved = await saveTaskEpisodeMemory(evidence());
 
