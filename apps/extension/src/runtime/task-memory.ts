@@ -16,6 +16,23 @@ export interface TaskEpisodeSkillRef {
   revision_id?: string;
 }
 
+export interface TaskEpisodeDelegation {
+  action_id: string;
+  worker_index: number;
+  task: string;
+  session_id: string;
+  status:
+    | "completed"
+    | "stopped"
+    | "approval-cancelled"
+    | "failed";
+  sources: Array<{
+    url: string;
+    title: string;
+  }>;
+  tools_used: string[];
+}
+
 export interface TaskEpisodeMemory {
   schema_version: 1;
   id: string;
@@ -33,6 +50,7 @@ export interface TaskEpisodeMemory {
   targets: string[];
   sites: string[];
   skill_refs: TaskEpisodeSkillRef[];
+  delegations?: TaskEpisodeDelegation[];
   boundary_action_id?: string;
   sensitive_payloads_removed: true;
 }
@@ -115,10 +133,39 @@ function skillRefs(
     .slice(0, MAX_SKILL_REFS);
 }
 
+function delegations(
+  evidence: BrowserTaskSessionEvidence
+): TaskEpisodeDelegation[] {
+  return evidence.actions
+    .flatMap((action) =>
+      (action.delegation?.workers || []).map(
+        (worker): TaskEpisodeDelegation => ({
+          action_id: action.id,
+          worker_index: worker.index,
+          task: bounded(worker.task),
+          session_id: worker.session_id,
+          status: worker.status,
+          sources: worker.sources
+            .slice(0, 6)
+            .map((source) => ({
+              url: source.url,
+              title: bounded(source.title, 240)
+            })),
+          tools_used: unique(
+            worker.tools_used,
+            20
+          )
+        })
+      )
+    )
+    .slice(0, 20);
+}
+
 export function taskEpisodeFromSession(
   evidence: BrowserTaskSessionEvidence,
   recordedAt = new Date().toISOString()
 ): TaskEpisodeMemory {
+  const delegated = delegations(evidence);
   const tools = unique(
     evidence.actions.map((action) => action.tool),
     50
@@ -139,7 +186,10 @@ export function taskEpisodeFromSession(
         action.before.url,
         action.after?.url || ""
       ]),
-      ...evidence.tab_evidence.map((item) => item.url)
+      ...evidence.tab_evidence.map((item) => item.url),
+      ...delegated.flatMap((item) =>
+        item.sources.map((source) => source.url)
+      )
     ].map(origin),
     MAX_SITES
   );
@@ -164,6 +214,9 @@ export function taskEpisodeFromSession(
     targets,
     sites,
     skill_refs: skillRefs(evidence),
+    ...(delegated.length
+      ? { delegations: delegated }
+      : {}),
     ...(evidence.boundary_action_id
       ? { boundary_action_id: evidence.boundary_action_id }
       : {}),
@@ -246,7 +299,19 @@ function searchScore(
       ref.id,
       ref.action,
       ref.revision_id || ""
-    ])
+    ]),
+    ...(episode.delegations || []).flatMap(
+      (delegation) => [
+        delegation.task,
+        delegation.session_id,
+        delegation.status,
+        ...delegation.tools_used,
+        ...delegation.sources.flatMap((source) => [
+          source.url,
+          source.title
+        ])
+      ]
+    )
   ]
     .join(" ")
     .toLowerCase();
