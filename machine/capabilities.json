@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "v0.3-mcp-server-verified",
+  "status": "v0.3-mcp-productization-verified",
   "capability_domains": [
     {
       "id": "browser-harness",
@@ -298,6 +298,50 @@
           "verified_sha": "ea4433d7efacb760bf5aab060a9f96b9e72c3b25",
           "ci_run_id": 36377928834,
           "tests": "9/9 Bridge tests + 240/240 extension tests"
+        },
+        "outbound_mcp": {
+          "status": "verified",
+          "daemon": {
+            "config": "mcpServers-compatible stdio config",
+            "secrets": "environment values remain daemon-side",
+            "discovery": "authenticated extension-gated WebSocket RPC",
+            "result_bound": "oversized MCP results are truncated before entering BrowserCrew context"
+          },
+          "extension": {
+            "tool": "mcp",
+            "actions": [
+              "servers",
+              "list_tools",
+              "call_tool"
+            ],
+            "fresh_discovery_before_call": true,
+            "argument_evidence": "redacted from BrowserTaskSessionEvidence",
+            "trust_modes": [
+              "allow-read-only",
+              "ask-all",
+              "blocked"
+            ],
+            "default_trust": "allow-read-only",
+            "mutating_tools": "always require BrowserCrew approval"
+          },
+          "settings": {
+            "server_inventory": true,
+            "tool_discovery": true,
+            "annotation_display": true,
+            "environment_key_names_only": true,
+            "per_server_trust_policy": true
+          },
+          "planner_catalog": {
+            "status": "verified",
+            "maximum_servers": 6,
+            "maximum_tools": 18,
+            "ranking": "task-aware lexical ranking over tool name/description",
+            "blocked_servers": "excluded",
+            "trust_and_approval_metadata": "included",
+            "descriptions": "explicitly treated as untrusted external text"
+          },
+          "verified_sha": "d116cb410dc179994f22bbb035028e6a053b35ba",
+          "ci_run_id": 36381759745
         }
       }
     },
