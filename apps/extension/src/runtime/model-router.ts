@@ -1,5 +1,6 @@
 import type { PageObservation } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
+import type { TaskEpisodeMemory } from "./task-memory";
 import {
   directChatCompletion,
   nextAgentDecision,
@@ -73,7 +74,8 @@ export async function agentDecisionWithFallback(
   trail: string[],
   signal?: AbortSignal,
   evidence: TabEvidence[] = [],
-  screenshotDataUrl?: string
+  screenshotDataUrl?: string,
+  recalledMemory: TaskEpisodeMemory[] = []
 ): Promise<RoutedResult<AgentDecision>> {
   return runWithFallback(primary, fallback, (connection) =>
     nextAgentDecision(
@@ -83,7 +85,8 @@ export async function agentDecisionWithFallback(
       trail,
       signal,
       evidence,
-      screenshotDataUrl
+      screenshotDataUrl,
+      recalledMemory
     )
   );
 }
