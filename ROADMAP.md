@@ -140,10 +140,10 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - candidate status is preserved after verified execution; no auto-promotion
    - Local Bridge/browser runtime surface: **27 tools**
    - CI run `36369232137`: 181/181 extension tests across 38 files + 3/3 Bridge tests, all typecheck/build/MV3/contract/package gates green
-5. **Kimi-reference interaction parity — next active engineering target**
-   - hover
-   - drag/drop with real CDP pointer sequence + verification
-   - richer key chords/sequences/modifiers
+5. **Kimi-reference interaction parity — active**
+   - hover — verified
+   - drag/drop with real CDP pointer sequence + source/target delivery verification — verified at `7f3df6c3f1bbb2df440b63b0a41c2fbb70e0069c` (CI `36370487993`)
+   - richer key chords/sequences/modifiers — next
    - await-user-action / human handoff for login, CAPTCHA, 2FA or explicit manual step
 6. **Versioned Skill lifecycle + refinement — after interaction parity**
    - candidate revision history
