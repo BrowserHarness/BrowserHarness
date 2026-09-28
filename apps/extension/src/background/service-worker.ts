@@ -598,6 +598,8 @@ async function runTool(
           active_revision_id: family?.active_revision_id,
           revisions,
           evaluations: family?.evaluations || [],
+          executions:
+            await listSiteSkillExecutionEvidence(input.id),
           lifecycle_events: family?.lifecycle_events || [],
           promotion_gate:
             await getSiteSkillPromotionGate(input.id)
@@ -740,6 +742,7 @@ async function runTool(
       action !== "create" &&
       action !== "verify" &&
       action !== "run" &&
+      action !== "refine" &&
       action !== "history" &&
       action !== "promote" &&
       action !== "rollback"
@@ -749,7 +752,7 @@ async function runTool(
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, verify, run, list, get, history, promote, rollback, or delete"
+            "site_skill action must be create, verify, run, refine, list, get, history, promote, rollback, or delete"
         }
       };
     }
@@ -775,6 +778,128 @@ async function runTool(
             "Site Skill creation requires an http(s) page"
         }
       };
+    }
+
+    if (action === "refine") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill refine requires id"
+          }
+        };
+      }
+
+      const baseRevision = await getSiteSkillExecutableRevision(
+        input.id,
+        typeof input.revision_id === "string"
+          ? input.revision_id
+          : undefined
+      );
+      if (!baseRevision) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_NOT_FOUND",
+            message: "Site Skill candidate was not found"
+          }
+        };
+      }
+
+      try {
+        const fresh = await collectCurrentSiteSkill({
+          tab_id: tabId,
+          url: tab.url,
+          title: tab.title || new URL(tab.url).hostname,
+          requested_name: baseRevision.candidate.name,
+          include_network: input.include_network !== false
+        });
+        const proposal = createRefinedSiteSkillCandidate(
+          baseRevision.candidate,
+          fresh.candidate
+        );
+
+        if (!proposal.diff.changed) {
+          return {
+            ok: true,
+            data: {
+              id: input.id,
+              base_revision_id: baseRevision.revision_id,
+              refinement_needed: false,
+              diff: proposal.diff,
+              message:
+                "Fresh site evidence matches the existing Skill contract; no revision was created."
+            }
+          };
+        }
+
+        const verification = verifySiteSkillCandidate(
+          proposal.candidate,
+          fresh.evidence
+        );
+        if (verification.status !== "verified") {
+          return {
+            ok: false,
+            data: {
+              base_revision_id: baseRevision.revision_id,
+              diff: proposal.diff,
+              verification
+            },
+            error: {
+              code: "SITE_SKILL_REFINEMENT_VERIFICATION_FAILED",
+              message:
+                "Fresh refinement candidate did not verify against the evidence that produced it"
+            }
+          };
+        }
+
+        proposal.candidate.verification = verification;
+        const revision = await saveSiteSkillCandidate(
+          proposal.candidate,
+          { reason: "refinement" }
+        );
+        await recordSiteSkillEvaluation(
+          input.id,
+          revision.revision_id,
+          {
+            kind: "structural-verification",
+            outcome: "passed",
+            detail:
+              `Refinement candidate verified against fresh evidence ${fresh.evidence.evidence_id}`
+          }
+        );
+
+        const family = await getSiteSkillFamily(input.id);
+        return {
+          ok: true,
+          data: {
+            id: input.id,
+            base_revision_id: baseRevision.revision_id,
+            proposed_revision_id: revision.revision_id,
+            active_revision_id: family?.active_revision_id,
+            refinement_needed: true,
+            diff: proposal.diff,
+            verification,
+            promotion_gate:
+              await getSiteSkillPromotionGate(
+                input.id,
+                revision.revision_id
+              )
+          }
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_REFINEMENT_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Site Skill refinement failed"
+          }
+        };
+      }
     }
 
     if (action === "run") {
@@ -887,6 +1012,8 @@ async function runTool(
           !Array.isArray(input.parameters)
             ? (input.parameters as Record<string, unknown>)
             : {};
+        const executionStartedAt = new Date().toISOString();
+        const parameterNames = Object.keys(parameters).sort();
 
         try {
           const run = await runSiteSkillRecipe({
@@ -906,6 +1033,19 @@ async function runTool(
                 `Recipe ${recipe.id} completed through its verified submit boundary`
             }
           );
+          await recordSiteSkillExecutionEvidence(
+            input.id,
+            revision.revision_id,
+            {
+              recipe_id: recipe.id,
+              started_at: executionStartedAt,
+              outcome: "passed",
+              evidence_id: fresh.evidence.evidence_id,
+              executed_steps: run.executed_steps,
+              submitted: run.submitted,
+              parameter_names: parameterNames
+            }
+          );
 
           return {
             ok: true,
@@ -917,18 +1057,40 @@ async function runTool(
             }
           };
         } catch (error) {
-          await recordSiteSkillEvaluation(
-            input.id,
-            revision.revision_id,
-            {
-              kind: "execution",
-              outcome: "failed",
-              detail:
-                error instanceof Error
-                  ? error.message
-                  : "Site Skill execution failed"
-            }
-          ).catch(() => undefined);
+          const runError =
+            error instanceof SiteSkillRunError ? error : null;
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Site Skill execution failed";
+          await Promise.all([
+            recordSiteSkillEvaluation(
+              input.id,
+              revision.revision_id,
+              {
+                kind: "execution",
+                outcome: "failed",
+                detail: errorMessage
+              }
+            ),
+            recordSiteSkillExecutionEvidence(
+              input.id,
+              revision.revision_id,
+              {
+                recipe_id: recipe.id,
+                started_at: executionStartedAt,
+                outcome: "failed",
+                evidence_id: fresh.evidence.evidence_id,
+                executed_steps:
+                  runError?.executed_steps || 0,
+                submitted: runError?.submitted === true,
+                parameter_names: parameterNames,
+                error_code:
+                  runError?.code || "SITE_SKILL_RUN_FAILED",
+                error_message: errorMessage
+              }
+            )
+          ]).catch(() => undefined);
           throw error;
         }
       } catch (error) {
