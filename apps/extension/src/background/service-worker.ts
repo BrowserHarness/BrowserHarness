@@ -54,8 +54,15 @@ import {
 import {
   deleteSiteSkillCandidate,
   getSiteSkillCandidate,
+  getSiteSkillExecutableRevision,
+  getSiteSkillFamily,
+  getSiteSkillPromotionGate,
+  getSiteSkillRevision,
   listSiteSkillCandidateSummaries,
   listSiteSkillRevisionSummaries,
+  promoteSiteSkillRevision,
+  recordSiteSkillEvaluation,
+  rollbackSiteSkillRevision,
   saveSiteSkillCandidate
 } from "../runtime/site-skill-store";
 import {
@@ -576,13 +583,132 @@ async function runTool(
         };
       }
 
+      const family = await getSiteSkillFamily(input.id);
       return {
         ok: true,
         data: {
           id: input.id,
-          revisions
+          latest_revision_id: family?.latest_revision_id,
+          active_revision_id: family?.active_revision_id,
+          revisions,
+          evaluations: family?.evaluations || [],
+          lifecycle_events: family?.lifecycle_events || [],
+          promotion_gate:
+            await getSiteSkillPromotionGate(input.id)
         }
       };
+    }
+
+    if (action === "promote") {
+      if (typeof input.id !== "string" || !input.id.trim()) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ID_REQUIRED",
+            message: "site_skill promote requires id"
+          }
+        };
+      }
+      const family = await getSiteSkillFamily(input.id);
+      if (!family) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_NOT_FOUND",
+            message: "Site Skill candidate was not found"
+          }
+        };
+      }
+      const revisionId =
+        typeof input.revision_id === "string"
+          ? input.revision_id
+          : family.latest_revision_id;
+      const gate = await getSiteSkillPromotionGate(
+        input.id,
+        revisionId
+      );
+      if (!gate?.eligible) {
+        return {
+          ok: false,
+          data: { promotion_gate: gate },
+          error: {
+            code: "SITE_SKILL_PROMOTION_EVIDENCE_REQUIRED",
+            message:
+              gate?.reasons.join("; ") ||
+              "Promotion evidence is incomplete"
+          }
+        };
+      }
+
+      try {
+        const event = await promoteSiteSkillRevision(
+          input.id,
+          revisionId
+        );
+        return {
+          ok: true,
+          data: {
+            id: input.id,
+            active_revision_id: revisionId,
+            event
+          }
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_PROMOTION_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Site Skill promotion failed"
+          }
+        };
+      }
+    }
+
+    if (action === "rollback") {
+      if (
+        typeof input.id !== "string" ||
+        !input.id.trim() ||
+        typeof input.revision_id !== "string" ||
+        !input.revision_id.trim()
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_REVISION_REQUIRED",
+            message:
+              "site_skill rollback requires id and revision_id"
+          }
+        };
+      }
+
+      try {
+        const event = await rollbackSiteSkillRevision(
+          input.id,
+          input.revision_id
+        );
+        return {
+          ok: true,
+          data: {
+            id: input.id,
+            active_revision_id: input.revision_id,
+            event
+          }
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "SITE_SKILL_ROLLBACK_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Site Skill rollback failed"
+          }
+        };
+      }
     }
 
     if (action === "delete") {
@@ -608,14 +734,16 @@ async function runTool(
       action !== "create" &&
       action !== "verify" &&
       action !== "run" &&
-      action !== "history"
+      action !== "history" &&
+      action !== "promote" &&
+      action !== "rollback"
     ) {
       return {
         ok: false,
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, verify, run, list, get, history, or delete"
+            "site_skill action must be create, verify, run, list, get, history, promote, rollback, or delete"
         }
       };
     }
