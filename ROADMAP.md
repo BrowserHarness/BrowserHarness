@@ -93,7 +93,7 @@ Goal: make provider/model behavior predictable before expanding product scope.
   - v3 workflows store events, recording summary and boundary_step_id
   - WATCH_STATUS restores active recording UI after side-panel reload
 - Task tabs stay backgrounded by default; `find_tab` does not steal foreground focus
-- Screenshot refuses to capture a different foreground tab when the task target is backgrounded
+- Screenshot targets the selected task tab through CDP even when backgrounded, with viewport, full-page and semantic-element clip modes
 
 ### Verified Local Bridge foundation
 - Loopback-only BrowserCrew Bridge daemon workspace
@@ -118,41 +118,44 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
 1. **Skill compiler — verified**
    - Record → Skill verified at `9a21949333de565e5a77001ce1f39da95e346657`
    - Session → Skill verified at `595af74d2a947a8ef7cc41d29c0f119cc9798dfa`
-   - SavedWorkflow v3 and BrowserTaskSessionEvidence v1 compile into portable candidate Skill contracts
-   - raw tab IDs become logical tab refs while source IDs remain provenance only
-   - recorded text becomes reusable parameters; password values and local upload paths are not retained as compiled examples
-   - workflow navigation/tab events and successful browser-session actions become ordered portable plans
-   - stale failed attempts and denied approval actions cannot advance the learned boundary
-   - `boundary_step_id` / `boundary_action_id` remain the maximum demonstrated action ceilings
-   - BrowserCrew approval semantics are preserved
-   - deterministic candidate evaluations are emitted
-   - generated Skills are candidate-only and cannot auto-promote
+   - generated Skills remain candidate-only; evaluation is required before promotion
 2. **Watch Me v3 adaptive workflow replay — verified**
-   - verified UI-integrated head: `0ad7117761a3f0d65987a6919e4eb3555f595678`
-   - SavedWorkflow v3 flows through Record → Skill compilation before execution
-   - logical tab refs are remapped into a fresh BrowserCrew task session; recorded source tab IDs are never executed
-   - recorded `tab_opened` evidence creates a distinct task-owned background tab instead of collapsing onto an existing tab
-   - targets are resolved from fresh `observe_page` semantics with fresh AX fallback; ambiguous equal-best matches are rejected rather than guessed
-   - recorded element/semantic refs are evidence hints only and are never sent as live selectors
-   - reusable parameters support runtime overrides and recorded defaults
-   - current-page and recorded approval metadata remain in force
-   - replay stops at the demonstrated boundary and re-observes after actions/context changes
-   - v3 Replay in Chat uses adaptive execution; legacy v2 exact single-tab replay remains available
-   - Session-derived candidate Skills are compiled but do not yet have a user-facing runner
-3. **Cross-runtime evaluation of `SK-BROWSER-001` v0.3.0 — next**
-4. Trusted-click hardening
-   - occlusion/hit-test verification
-   - explicit CDP input-delivery verification
-5. Site → Skill after Record/Session → Skill contracts stabilize
+   - SavedWorkflow v3 compiles before replay, remaps logical tabs into a fresh task session, resolves fresh DOM/AX targets and stops at the demonstrated boundary
+   - privileged trusted-input approval proof is now wired from the extension UI; newly risky AX-only targets can be approved and retried once without exposing the approval channel to Local Bridge callers
+3. **Kimi-reference browser reliability hardening — verified at `3b6c7567f5f20124bedbe30abdac45005c777756`**
+   - trusted clicks reject occluded targets using a fresh hit test
+   - trusted clicks verify pointer/mouse delivery to the intended target before reporting success
+   - screenshots use CDP for background viewport, full-page and semantic-element capture
+   - `find` searches a fresh AX tree by semantic query/role
+   - `evaluate` provides bounded JSON-safe page-context inspection
+   - network evidence merges `Network.requestWillBeSentExtraInfo` headers and recovers omitted POST bodies with `Network.getRequestPostData`
+   - Local Bridge/browser runtime surface is now 25 tools
+   - CI run `36367934722`: 160/160 extension tests across 32 files + 3/3 Bridge tests, all build/validation/package gates green
+4. **Site → Skill v1 — active engineering target**
+   - use AX + `find` + bounded `evaluate` + high-fidelity network evidence to discover stable site workflows
+   - emit inspectable candidate Skill recipes with parameters, provenance, verification evidence and explicit safety boundaries
+   - never auto-promote generated Skills
+5. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
+   - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
+   - do not substitute product unit tests or fabricate cross-runtime results
+6. Remaining Kimi-reference parity after Site → Skill
+   - hover / drag / select-option
+   - richer key chords/sequences
+   - await-user-action / human handoff
+   - user-facing Session → Skill runner and parameter editing
+   - saved Skill library/run/version/delete/refine
+   - subagents + context compaction
 
 ### Verified full browser-control parity
 - debugger/CDP attach manager
 - Accessibility.getFullAXTree + backend-node semantic refs
-- trusted mouse/key/text input
+- trusted mouse/key/text input with click occlusion and delivery verification
 - focus emulation
 - native dialog state/accept/dismiss
+- semantic AX find + bounded page evaluate
+- background/full-page/element CDP screenshots
 - raw CDP escape hatch
-- network start/list/detail/stop + response-body retrieval
+- network start/list/detail/stop + response-body retrieval + wire-header/post-data recovery
 - file upload through DOM.setFileInputFiles
 - Page.printToPDF + Chrome downloads
 
