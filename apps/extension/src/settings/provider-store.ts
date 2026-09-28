@@ -31,11 +31,13 @@ export interface ProviderConnection extends ProviderConfig {
   capabilities: ModelCapabilities;
   chatHealth: CapabilityHealth;
   agentHealth: CapabilityHealth;
+  embeddingHealth: CapabilityHealth;
 }
 
 export interface RuntimeRoutingConfig {
   primaryConnectionId?: string;
   fallbackConnectionId?: string;
+  embeddingConnectionId?: string;
 }
 
 export interface ProviderDefinition {
@@ -96,7 +98,12 @@ export function connectionIdFor(config: Pick<ProviderConfig, "provider" | "model
 
 export function createConnection(
   config: ProviderConfig,
-  health?: Partial<Pick<ProviderConnection, "chatHealth" | "agentHealth">>
+  health?: Partial<
+    Pick<
+      ProviderConnection,
+      "chatHealth" | "agentHealth" | "embeddingHealth"
+    >
+  >
 ): ProviderConnection {
   const id = connectionIdFor(config);
   return {
@@ -105,7 +112,9 @@ export function createConnection(
     label: `${PROVIDERS[config.provider].label} · ${config.model}`,
     capabilities: classifyModelCapabilities(config.model),
     chatHealth: health?.chatHealth || { status: "unknown" },
-    agentHealth: health?.agentHealth || { status: "unknown" }
+    agentHealth: health?.agentHealth || { status: "unknown" },
+    embeddingHealth:
+      health?.embeddingHealth || { status: "unknown" }
   };
 }
 
@@ -114,7 +123,20 @@ export async function loadConnections(): Promise<ProviderConnection[]> {
   const connections = stored[CONNECTIONS_KEY];
 
   if (Array.isArray(connections)) {
-    return connections as ProviderConnection[];
+    return (connections as ProviderConnection[]).map(
+      (connection) => ({
+        ...connection,
+        capabilities:
+          connection.capabilities ||
+          classifyModelCapabilities(connection.model),
+        chatHealth:
+          connection.chatHealth || { status: "unknown" },
+        agentHealth:
+          connection.agentHealth || { status: "unknown" },
+        embeddingHealth:
+          connection.embeddingHealth || { status: "unknown" }
+      })
+    );
   }
 
   const legacy = stored[LEGACY_KEY] as ProviderConfig | undefined;
@@ -142,9 +164,17 @@ export async function removeConnection(id: string): Promise<void> {
   const routing = await loadRoutingConfig();
   const updatedRouting: RuntimeRoutingConfig = {
     primaryConnectionId:
-      routing.primaryConnectionId === id ? undefined : routing.primaryConnectionId,
+      routing.primaryConnectionId === id
+        ? undefined
+        : routing.primaryConnectionId,
     fallbackConnectionId:
-      routing.fallbackConnectionId === id ? undefined : routing.fallbackConnectionId
+      routing.fallbackConnectionId === id
+        ? undefined
+        : routing.fallbackConnectionId,
+    embeddingConnectionId:
+      routing.embeddingConnectionId === id
+        ? undefined
+        : routing.embeddingConnectionId
   };
   await chrome.storage.local.set({
     [CONNECTIONS_KEY]: next,
@@ -168,9 +198,24 @@ export async function loadActiveConnection(): Promise<ProviderConnection | null>
   ]);
 
   return (
-    connections.find((item) => item.id === routing.primaryConnectionId) ||
-    connections.find((item) => item.chatHealth.status === "healthy") ||
-    connections[0] ||
+    connections.find(
+      (item) =>
+        item.id === routing.primaryConnectionId &&
+        (item.capabilities.chat ||
+          item.capabilities.agent ||
+          item.capabilities.vision ||
+          item.capabilities.unknown)
+    ) ||
+    connections.find(
+      (item) => item.chatHealth.status === "healthy"
+    ) ||
+    connections.find(
+      (item) =>
+        item.capabilities.chat ||
+        item.capabilities.agent ||
+        item.capabilities.vision ||
+        item.capabilities.unknown
+    ) ||
     null
   );
 }
@@ -181,7 +226,35 @@ export async function loadFallbackConnection(): Promise<ProviderConnection | nul
     loadRoutingConfig()
   ]);
   return (
-    connections.find((item) => item.id === routing.fallbackConnectionId) ||
+    connections.find(
+      (item) =>
+        item.id === routing.fallbackConnectionId &&
+        (item.capabilities.chat ||
+          item.capabilities.agent ||
+          item.capabilities.vision ||
+          item.capabilities.unknown)
+    ) || null
+  );
+}
+
+export async function loadEmbeddingConnection(): Promise<ProviderConnection | null> {
+  const [connections, routing] = await Promise.all([
+    loadConnections(),
+    loadRoutingConfig()
+  ]);
+
+  return (
+    connections.find(
+      (item) =>
+        item.id === routing.embeddingConnectionId &&
+        item.capabilities.embedding &&
+        item.embeddingHealth.status === "healthy"
+    ) ||
+    connections.find(
+      (item) =>
+        item.capabilities.embedding &&
+        item.embeddingHealth.status === "healthy"
+    ) ||
     null
   );
 }
