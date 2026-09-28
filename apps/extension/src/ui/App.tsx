@@ -57,7 +57,10 @@ import {
 import { SettingsView } from "./SettingsView";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
-import { saveTaskEpisodeMemory } from "../runtime/task-memory";
+import {
+  saveTaskEpisodeMemory,
+  searchTaskEpisodeMemory
+} from "../runtime/task-memory";
 import {
   clearBrowserWorkingMemory,
   saveBrowserWorkingMemory
@@ -542,6 +545,7 @@ export function App() {
             observation,
             trail,
             evidence,
+            recalled_memory,
             screenshotDataUrl,
             signal
           }) => {
@@ -553,7 +557,8 @@ export function App() {
               trail,
               signal,
               evidence,
-              screenshotDataUrl
+              screenshotDataUrl,
+              recalled_memory
             );
             return {
               decision: routed.result,
@@ -582,6 +587,11 @@ export function App() {
           },
           persistWorkingMemory: (memory) =>
             saveBrowserWorkingMemory(memory),
+          recallMemory: (browserTask, observation) =>
+            searchTaskEpisodeMemory(
+              `${browserTask} ${safeHostname(observation.url)}`,
+              3
+            ),
           requestUserAction: async (
             reason,
             observation,
