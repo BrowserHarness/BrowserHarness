@@ -4,6 +4,7 @@ import {
   getSiteSkillCandidate,
   getSiteSkillFamily,
   listSiteSkillCandidateSummaries,
+  listSiteSkillRevisionSummaries,
   listSiteSkillRevisions,
   loadSiteSkillCandidates,
   saveSiteSkillCandidate,
@@ -91,6 +92,18 @@ describe("versioned Site Skill storage", () => {
         revision_count: 1,
         latest_revision_id: "SK-SITE-1:r1"
       })
+    ]);
+    expect(
+      await listSiteSkillRevisionSummaries("SK-SITE-1")
+    ).toEqual([
+      {
+        revision_id: "SK-SITE-1:r1",
+        ordinal: 1,
+        created_at: "2026-09-28T03:00:00.000Z",
+        reason: "create",
+        name: "Example",
+        status: "candidate"
+      }
     ]);
 
     const family = await getSiteSkillFamily("SK-SITE-1");
@@ -180,9 +193,9 @@ describe("versioned Site Skill storage", () => {
       expect.objectContaining({
         revision_id: "SK-SITE-LEGACY:r1",
         reason: "migration",
-        candidate: {
+        candidate: expect.objectContaining({
           name: "Legacy"
-        }
+        })
       })
     ]);
 
