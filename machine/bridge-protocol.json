@@ -269,6 +269,7 @@
     "actions": [
       "active",
       "search",
+      "procedures",
       "list",
       "get",
       "delete"
@@ -310,6 +311,13 @@
         "consistent dimensions"
       ],
       "privacy": "only sanitized episode fields are embedded"
+    },
+    "procedures": {
+      "input": "query, limit?",
+      "output": "revision-aware procedural hits with exact Skill/revision/evidence provenance",
+      "source": "active and latest immutable Site Skill revisions",
+      "ranking": "hybrid lexical + semantic RRF; explicit evidence preference only breaks near-ties",
+      "execution": "retrieval never auto-runs; execution requires explicit site_skill run"
     }
   }
 }
