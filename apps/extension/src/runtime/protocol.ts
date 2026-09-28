@@ -4,6 +4,8 @@ export type ToolName =
   | "observe_page"
   | "read_page"
   | "ax_snapshot"
+  | "find"
+  | "evaluate"
   | "trusted_click"
   | "trusted_type"
   | "trusted_key"
