@@ -161,6 +161,62 @@ function configFingerprint(server) {
     .digest("hex");
 }
 
+export function mcpToolRequiresApproval(tool) {
+  const annotations =
+    tool?.annotations &&
+    typeof tool.annotations === "object"
+      ? tool.annotations
+      : {};
+
+  return !(
+    annotations.readOnlyHint === true &&
+    annotations.destructiveHint !== true
+  );
+}
+
+function boundedToolResult(result, maxChars = 100_000) {
+  let serialized;
+  try {
+    serialized = JSON.stringify(result);
+  } catch {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "External MCP tool returned a non-serializable result."
+        }
+      ],
+      isError: true,
+      _browsercrew: {
+        truncated: false,
+        serialization_failed: true
+      }
+    };
+  }
+
+  if (serialized.length <= maxChars) {
+    return result;
+  }
+
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `BrowserCrew truncated an oversized external MCP result. Original JSON length: ${serialized.length}.\n` +
+          serialized.slice(0, maxChars)
+      }
+    ],
+    ...(result?.isError === true ? { isError: true } : {}),
+    _browsercrew: {
+      truncated: true,
+      original_chars: serialized.length,
+      retained_chars: maxChars
+    }
+  };
+}
+
 function publicServer(server, connected = false) {
   return {
     id: server.id,
@@ -286,7 +342,12 @@ export function createMcpClientManager({
       };
     },
 
-    async callTool(id, name, args = {}) {
+    async callTool(
+      id,
+      name,
+      args = {},
+      { allowMutating = false } = {}
+    ) {
       if (
         typeof name !== "string" ||
         !name.trim()
@@ -314,6 +375,15 @@ export function createMcpClientManager({
         );
       }
 
+      if (
+        mcpToolRequiresApproval(tool) &&
+        !allowMutating
+      ) {
+        throw new Error(
+          `MCP_APPROVAL_REQUIRED: ${id}/${name}`
+        );
+      }
+
       const result = await entry.client.callTool({
         name,
         arguments: args
@@ -323,7 +393,7 @@ export function createMcpClientManager({
         server_id: id,
         tool: name,
         annotations: tool.annotations || {},
-        result
+        result: boundedToolResult(result)
       };
     },
 
