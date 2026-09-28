@@ -73,6 +73,7 @@ const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
   "trusted_type",
   "trusted_key",
   "dialog",
+  "evaluate",
   "cdp",
   "scroll",
   "open_tab",
