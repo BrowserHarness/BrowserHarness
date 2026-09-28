@@ -190,7 +190,7 @@
           "pair"
         ],
         "cdp": "available through primary BrowserCrew runtime",
-        "tools": 25
+        "tools": 26
       }
     },
     {
@@ -202,7 +202,24 @@
         "registry_persistence": "not yet wired; pure compiler contract first",
         "auto_promote": false,
         "session_to_skill": "verified pure compiler",
-        "next": "Site -> Skill v1 evidence/recipe compiler and user-facing persistence; never auto-promote"
+        "next": "Site -> Skill v1 evidence/recipe compiler and user-facing persistence; never auto-promote",
+        "site_to_skill": {
+          "status": "active-v1",
+          "tool": "site_skill",
+          "actions": [
+            "create",
+            "list",
+            "get",
+            "delete"
+          ],
+          "evidence": [
+            "fresh AX",
+            "bounded form structure",
+            "optional active network request summary"
+          ],
+          "persistence": "local candidate library",
+          "promotion": "candidate only; evaluation required"
+        }
       }
     },
     {
