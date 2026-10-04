@@ -19,6 +19,11 @@ import {
   parsePendingExplain
 } from "../runtime/quick-explain";
 import AddIcon from "@mui/icons-material/Add";
+import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import {
+  buildPolishPrompt,
+  cleanPolishedPrompt
+} from "../runtime/prompt-polish";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import PauseIcon from "@mui/icons-material/Pause";
 import ReplayIcon from "@mui/icons-material/Replay";
@@ -549,6 +554,25 @@ export function App() {
       }
     }
     if (fileInput.current) fileInput.current.value = "";
+  };
+
+  const [polishing, setPolishing] = useState(false);
+  const handlePolish = async () => {
+    const draft = prompt.trim();
+    if (!draft || polishing || !primary) return;
+    setPolishing(true);
+    try {
+      const routed = await directChatWithFallback(
+        primary,
+        fallback?.chatHealth.status === "healthy" ? fallback : null,
+        buildPolishPrompt(draft)
+      );
+      setPrompt(cleanPolishedPrompt(routed.result, draft));
+    } catch {
+      addAssistantMessage("Could not polish that request right now.");
+    } finally {
+      setPolishing(false);
+    }
   };
 
   const removeAttachment = async (id: string) => {
@@ -1382,6 +1406,18 @@ export function App() {
                         aria-label="Attach files"
                       >
                         <AddIcon />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Polish my request">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => void handlePolish()}
+                        disabled={!prompt.trim() || running || polishing}
+                        aria-label="Polish request"
+                      >
+                        <AutoFixHighIcon fontSize="small" />
                       </IconButton>
                     </span>
                   </Tooltip>

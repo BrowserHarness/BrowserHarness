@@ -33,6 +33,10 @@ const server = http
         const body = JSON.parse(raw);
         const user = String(body.messages.at(-1).content?.[0]?.text ?? body.messages.at(-1).content ?? "");
         const system = String(body.messages[0].content ?? "");
+        if (user.includes("Rewrite the browser-task request below")) {
+          res.setHeader("content-type", "application/json");
+          return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Open the current page and report its main heading." } }] }));
+        }
         const isWorker = user.includes("WORKER SUBTASK:");
         modelCalls.push(isWorker ? "worker" : "main");
         if (isWorker) {
@@ -123,6 +127,11 @@ try {
   };
   const assistantTexts = () =>
     side.evaluate(() => [...document.querySelectorAll("p, strong")].map((n) => n.textContent));
+
+  await side.locator("textarea").first().fill("whats on the page");
+  await side.getByRole("button", { name: "Polish request" }).click();
+  await side.waitForFunction(() => document.querySelector("textarea")?.value.includes("main heading"), null, { timeout: 10000 }).catch(() => {});
+  check("prompt polish rewrites the draft via the model", (await side.locator("textarea").first().inputValue()).includes("main heading"));
 
   await ask("Open the current page and read what it says");
   await side.waitForFunction(() => document.body.innerText.includes("hello mock"), null, { timeout: 20000 }).catch(() => {});
