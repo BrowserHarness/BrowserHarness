@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  renderIntentPrompt,
+  workflowToIntentSkill
+} from "../runtime/intent-skill";
+import {
   deleteAttachment,
   describeAttachmentsForPrompt,
   fileToBase64,
@@ -1196,6 +1200,23 @@ export function App() {
                 sx={{ alignSelf: "flex-start" }}
               >
                 Replay {lastWorkflow.name}
+              </Button>
+            )}
+            {lastWorkflow && (
+              <Button
+                variant="text"
+                size="small"
+                onClick={() =>
+                  setPrompt(
+                    renderIntentPrompt(
+                      workflowToIntentSkill(lastWorkflow)
+                    )
+                  )
+                }
+                disabled={running || recording}
+                sx={{ alignSelf: "flex-start" }}
+              >
+                Edit as intent skill
               </Button>
             )}
 
