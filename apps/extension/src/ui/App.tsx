@@ -1,4 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  addGrant,
+  isGrantableHost,
+  isHostGranted,
+  loadSiteGrants,
+  normalizeGrantHost,
+  saveSiteGrants,
+  type SiteGrant
+} from "../settings/site-grants";
 import { Markdown } from "./Markdown";
 import {
   renderIntentPrompt,
@@ -121,6 +130,7 @@ type Activity = { id: string; text: string; state: "working" | "done" | "error" 
 type CurrentTab = { tab_id: number; title?: string; url?: string };
 type Approval = {
   description: string;
+  host: string;
   resolve: (approved: boolean) => void;
 };
 type Handoff = {
@@ -275,8 +285,36 @@ export function App() {
     );
   };
 
-  const requestApproval = (description: string) =>
-    new Promise<boolean>((resolve) => setApproval({ description, resolve }));
+  const approvalHost = useRef("");
+  const siteGrants = useRef<SiteGrant[]>([]);
+  useEffect(() => {
+    void loadSiteGrants()
+      .then((items) => {
+        siteGrants.current = items;
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const requestApproval = async (
+    description: string,
+    hostOverride?: string
+  ) => {
+    const host =
+      hostOverride ?? (approvalHost.current || safeHostname(tab?.url));
+    if (host && isHostGranted(siteGrants.current, host)) {
+      addActivity(`Approved automatically (always allowed on ${host})`, "done");
+      return true;
+    }
+    return new Promise<boolean>((resolve) =>
+      setApproval({ description, host, resolve })
+    );
+  };
+
+  const grantSite = async (host: string) => {
+    const next = addGrant(siteGrants.current, host);
+    siteGrants.current = next;
+    await saveSiteGrants(next).catch(() => undefined);
+  };
 
   const showHandoffPrompt = (reason: string) =>
     new Promise<"continue" | "cancelled">((resolve) => {
@@ -457,7 +495,8 @@ export function App() {
             APPROVAL_WORDS.test(step.locator.accessible_name))
         ) {
           const approved = await requestApproval(
-            `Replay “${step.locator.accessible_name || "this action"}” on ${currentHost || "this page"}`
+            `Replay “${step.locator.accessible_name || "this action"}” on ${currentHost || "this page"}`,
+            currentHost || ""
           );
           setApproval(null);
           if (!approved) {
@@ -474,7 +513,8 @@ export function App() {
           step.locator?.enter_requires_approval
         ) {
           const approved = await requestApproval(
-            `Replay Enter in “${step.locator.accessible_name || step.locator.role}” on ${currentHost || "this page"}; this may submit a form`
+            `Replay Enter in “${step.locator.accessible_name || step.locator.role}” on ${currentHost || "this page"}; this may submit a form`,
+            currentHost || ""
           );
           setApproval(null);
           if (!approved) {
@@ -888,8 +928,10 @@ export function App() {
               approval_granted: execution?.approvalGranted
             });
           },
-          approvalDescription: (observation, tool, input) =>
-            approvalDescription(observation, tool, input),
+          approvalDescription: (observation, tool, input) => {
+            approvalHost.current = safeHostname(observation.url);
+            return approvalDescription(observation, tool, input);
+          },
           requestApproval: async (description) => {
             const approved = await requestApproval(description);
             setApproval(null);
@@ -1286,6 +1328,17 @@ export function App() {
                     <Button size="small" onClick={() => approval.resolve(false)}>
                       Cancel
                     </Button>
+                    {isGrantableHost(normalizeGrantHost(approval.host)) && (
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          void grantSite(approval.host);
+                          approval.resolve(true);
+                        }}
+                      >
+                        Always allow on this site
+                      </Button>
+                    )}
                     <Button
                       size="small"
                       variant="contained"

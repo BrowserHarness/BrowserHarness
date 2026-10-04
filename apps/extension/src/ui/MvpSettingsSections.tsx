@@ -19,6 +19,12 @@ import {
   type AppearanceMode,
   type UserPreferences
 } from "../settings/preferences";
+import {
+  loadSiteGrants,
+  removeGrant,
+  saveSiteGrants,
+  type SiteGrant
+} from "../settings/site-grants";
 import { clearTaskHistory } from "../runtime/history";
 import { BridgeSettingsSection } from "./BridgeSettingsSection";
 
@@ -28,6 +34,16 @@ export function MvpSettingsSections() {
   useEffect(() => {
     void loadPreferences().then(setPreferences);
   }, []);
+
+  const [grants, setGrants] = useState<SiteGrant[]>([]);
+  useEffect(() => {
+    void loadSiteGrants().then(setGrants).catch(() => undefined);
+  }, []);
+  const revokeGrant = async (host: string) => {
+    const next = removeGrant(grants, host);
+    await saveSiteGrants(next);
+    setGrants(next);
+  };
 
   const setAppearance = async (appearance: AppearanceMode) => {
     const next = await updatePreferences({ appearance });
@@ -66,11 +82,33 @@ export function MvpSettingsSections() {
           <Typography variant="subtitle1">Permissions</Typography>
           <Alert severity="info">
             Consequential actions such as send, submit, purchase, delete, or
-            account/security changes always require an explicit approval in the MVP.
+            account/security changes ask for approval. Choose “Always allow on this
+            site” on an approval card to skip those prompts on that site and its
+            subdomains.
           </Alert>
-          <Typography variant="body2" color="text.secondary">
-            This safety gate is not user-disableable in v0.1.
-          </Typography>
+          {grants.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No sites are always allowed.
+            </Typography>
+          ) : (
+            grants.map((grant) => (
+              <Stack
+                key={grant.host}
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+              >
+                <Typography variant="body2">{grant.host}</Typography>
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => void revokeGrant(grant.host)}
+                >
+                  Revoke
+                </Button>
+              </Stack>
+            ))
+          )}
         </Stack>
       </Paper>
 

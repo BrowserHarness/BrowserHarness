@@ -45,6 +45,13 @@ const server = http
           }
           return reply(res, { kind: "final", message: "Claim: the page is titled Mock Page." });
         }
+        if (user.includes("GOAL_APPROVE")) {
+          if (!user.includes("click:")) {
+            const id = /"element_id":"(@e\d+)"[^}]*"accessible_name":"Delete account"/.exec(user)?.[1] || /"element_id":"(@e\d+)"/.exec(user)?.[1];
+            return reply(res, { kind: "tool", tool: "click", input: { element_id: id }, note: "Clicking delete" });
+          }
+          return reply(res, { kind: "final", message: "Clicked it." });
+        }
         if (user.includes("GOAL_DAG")) {
           if (!user.includes("agent:")) {
             return reply(res, {
@@ -69,7 +76,7 @@ const server = http
       return;
     }
     res.setHeader("content-type", "text/html");
-    res.end("<html><head><title>Mock Page</title></head><body><h1>hello mock</h1></body></html>");
+    res.end("<html><head><title>Mock Page</title></head><body><h1>hello mock</h1><button>Delete account</button></body></html>");
   })
   .listen(0);
 const port = server.address().port;
@@ -144,6 +151,19 @@ try {
   const body2 = await side.locator("body").innerText();
   check("Task DAG with verifier completes", body2.includes("DAG finished"), body2.slice(-160).replace(/\n/g, " | "));
   check("DAG ran research + verifier workers", modelCalls.filter((c) => c === "worker").length === 2, modelCalls.join(","));
+
+  await ask("GOAL_APPROVE click the delete button on this page");
+  const grantButton = side.getByRole("button", { name: "Always allow on this site" });
+  await grantButton.waitFor({ timeout: 20000 }).catch(() => {});
+  check("risky click shows an approval card with a site-grant option", await grantButton.isVisible().catch(() => false));
+  await grantButton.click().catch(() => {});
+  await side.waitForFunction(() => document.body.innerText.includes("Clicked it."), null, { timeout: 20000 }).catch(() => {});
+  check("granting approves the action", (await side.locator("body").innerText()).includes("Clicked it."));
+
+  await ask("GOAL_APPROVE click the delete button on this page again");
+  await side.waitForFunction(() => document.body.innerText.split("Clicked it.").length > 2, null, { timeout: 20000 }).catch(() => {});
+  const text3 = await side.locator("body").innerText();
+  check("second risky click on the granted site needs no prompt", text3.split("Clicked it.").length > 2 && !(await grantButton.isVisible().catch(() => false)));
 } finally {
   await ctx.close();
   server.close();
