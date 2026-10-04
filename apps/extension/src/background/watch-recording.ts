@@ -4,7 +4,7 @@ import type {
   WorkflowRecordingSummary
 } from "../runtime/workflows";
 
-const STORAGE_KEY = "browsercrew.watchRecording";
+const STORAGE_KEY = "browserharness.watchRecording";
 const MAX_STEPS = 1_000;
 const MAX_EVENTS = 2_000;
 const MAX_TABS = 50;

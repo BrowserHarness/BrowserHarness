@@ -1,7 +1,7 @@
 import type { SiteCandidateSkill } from "./site-skill";
 
-const LEGACY_KEY = "browsercrew.siteSkillCandidates.v1";
-const KEY = "browsercrew.siteSkillLibrary.v2";
+const LEGACY_KEY = "browserharness.siteSkillCandidates.v1";
+const KEY = "browserharness.siteSkillLibrary.v2";
 const MAX_FAMILIES = 100;
 const MAX_REVISIONS_PER_FAMILY = 50;
 

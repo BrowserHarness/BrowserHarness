@@ -3,7 +3,7 @@ import type {
   BrowserTaskSessionEvidence
 } from "./session-evidence";
 
-const KEY = "browsercrew.taskEpisodes.v1";
+const KEY = "browserharness.taskEpisodes.v1";
 const MAX_EPISODES = 500;
 const MAX_TEXT = 1000;
 const MAX_TARGETS = 40;

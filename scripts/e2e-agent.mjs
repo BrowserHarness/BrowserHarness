@@ -111,8 +111,8 @@ try {
   await side.evaluate(
     ([connection]) =>
       chrome.storage.local.set({
-        "browsercrew.providerConnections": [connection],
-        "browsercrew.runtimeRouting": { primaryConnectionId: connection.id }
+        "browserharness.providerConnections": [connection],
+        "browserharness.runtimeRouting": { primaryConnectionId: connection.id }
       }),
     [connection]
   );

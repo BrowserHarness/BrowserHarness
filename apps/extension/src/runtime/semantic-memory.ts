@@ -9,7 +9,7 @@ import {
   type ProviderConnection
 } from "../settings/provider-store";
 
-const KEY = "browsercrew.taskEpisodeVectors.v1";
+const KEY = "browserharness.taskEpisodeVectors.v1";
 const MAX_INDEX = 500;
 const MAX_REINDEX_PER_SEARCH = 32;
 const INDEX_SOURCE_LIMIT = 100;

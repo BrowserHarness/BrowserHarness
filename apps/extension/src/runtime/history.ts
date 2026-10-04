@@ -8,7 +8,7 @@ export interface TaskHistoryEntry {
   url?: string;
 }
 
-const HISTORY_KEY = "browsercrew.taskHistory";
+const HISTORY_KEY = "browserharness.taskHistory";
 const MAX_HISTORY = 50;
 
 export async function loadTaskHistory(): Promise<TaskHistoryEntry[]> {

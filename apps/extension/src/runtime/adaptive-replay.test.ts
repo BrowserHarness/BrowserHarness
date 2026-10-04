@@ -129,7 +129,7 @@ function skill(): CandidateSkill {
       maximum_demonstrated_action_ordinal: 2,
       maximum_demonstrated_plan_index: 3,
       allow_undemonstrated_actions_after_boundary: false,
-      approval_policy: "preserve_browsercrew_approval_rules"
+      approval_policy: "preserve_browserharness_approval_rules"
     },
     provenance: {
       source_kind: "watch_me_v3",

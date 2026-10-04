@@ -9,7 +9,7 @@ let store: Record<string, unknown>;
 
 beforeEach(() => {
   store = {
-    "browsercrew.preferences": {
+    "browserharness.preferences": {
       appearance: "system",
       retainTaskHistory: true
     }
@@ -49,7 +49,7 @@ describe("task history privacy", () => {
   });
 
   it("does not retain history when privacy retention is disabled", async () => {
-    store["browsercrew.preferences"] = {
+    store["browserharness.preferences"] = {
       appearance: "system",
       retainTaskHistory: false
     };

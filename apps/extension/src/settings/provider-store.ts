@@ -72,9 +72,9 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
   }
 };
 
-const LEGACY_KEY = "browsercrew.providerConfig";
-const CONNECTIONS_KEY = "browsercrew.providerConnections";
-const ROUTING_KEY = "browsercrew.runtimeRouting";
+const LEGACY_KEY = "browserharness.providerConfig";
+const CONNECTIONS_KEY = "browserharness.providerConnections";
+const ROUTING_KEY = "browserharness.runtimeRouting";
 
 export function providerBaseUrl(
   provider: ProviderId,

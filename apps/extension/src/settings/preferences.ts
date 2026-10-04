@@ -5,7 +5,7 @@ export interface UserPreferences {
   retainTaskHistory: boolean;
 }
 
-const KEY = "browsercrew.preferences";
+const KEY = "browserharness.preferences";
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   appearance: "system",

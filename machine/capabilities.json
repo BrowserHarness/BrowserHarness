@@ -4,7 +4,7 @@
   "capability_domains": [
     {
       "id": "browser-harness",
-      "owner": "BrowserHarness/browsercrew",
+      "owner": "BrowserHarness/browserharness",
       "runtime_contract": {
         "task_sessions": "one browser task = one session",
         "starting_tab": "borrowed user tab",
@@ -211,7 +211,7 @@
     },
     {
       "id": "model-routing",
-      "owner": "BrowserHarness/browsercrew + BrowserHarness/Automation",
+      "owner": "BrowserHarness/browserharness + BrowserHarness/Automation",
       "runtime_contract": {
         "model_capabilities": [
           "chat",
@@ -257,7 +257,7 @@
     },
     {
       "id": "local-bridge",
-      "owner": "BrowserHarness/browsercrew",
+      "owner": "BrowserHarness/browserharness",
       "runtime_contract": {
         "transport": "loopback HTTP + WebSocket",
         "default_address": "127.0.0.1:10087",
@@ -285,7 +285,7 @@
           "sdk": "@modelcontextprotocol/server v2",
           "transport": "stdio via serveStdio",
           "protocol": "supports current MCP v2 negotiation while preserving legacy compatibility through SDK",
-          "tool_surface": "browsercrew_status + 34 exported BrowserHarness action tools; outbound mcp is deliberately not re-exported to prevent recursive MCP chaining",
+          "tool_surface": "browserharness_status + 34 exported BrowserHarness action tools; outbound mcp is deliberately not re-exported to prevent recursive MCP chaining",
           "execution_path": "MCP -> authenticated loopback POST /command -> paired WebSocket -> BrowserHarness extension runtime",
           "session_contract": "MCP session input maps unchanged to BrowserHarness task session",
           "safety": [
@@ -415,7 +415,7 @@
     },
     {
       "id": "workflows-watch-learn",
-      "owner": "BrowserHarness/Workflows + BrowserHarness/browsercrew",
+      "owner": "BrowserHarness/Workflows + BrowserHarness/browserharness",
       "runtime_contract": {
         "watch_me_v2": "verified cross-page/multi-tab recorder",
         "workflow_version": 3,
@@ -498,11 +498,11 @@
     },
     {
       "id": "agents-teams",
-      "owner": "BrowserHarness/Agent-Registry + BrowserHarness/browsercrew"
+      "owner": "BrowserHarness/Agent-Registry + BrowserHarness/browserharness"
     },
     {
       "id": "memory",
-      "owner": "BrowserHarness/browsercrew",
+      "owner": "BrowserHarness/browserharness",
       "runtime_contract": {
         "working_memory": {
           "status": "verified",
@@ -639,15 +639,15 @@
     },
     {
       "id": "mcp-integrations",
-      "owner": "BrowserHarness/browsercrew + BrowserHarness/Automation"
+      "owner": "BrowserHarness/browserharness + BrowserHarness/Automation"
     },
     {
       "id": "security-permissions",
-      "owner": "BrowserHarness/Security-Trust + BrowserHarness/browsercrew"
+      "owner": "BrowserHarness/Security-Trust + BrowserHarness/browserharness"
     },
     {
       "id": "agents",
-      "owner": "BrowserHarness/browsercrew",
+      "owner": "BrowserHarness/browserharness",
       "runtime_contract": {
         "supervisor": {
           "tool": "agent",

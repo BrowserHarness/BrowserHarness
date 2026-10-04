@@ -66,7 +66,7 @@ function candidate(): SiteCandidateSkill {
             form_index: 0,
             method: "POST",
             action: "https://shop.example/submit",
-            approval: "browsercrew_runtime"
+            approval: "browserharness_runtime"
           }
         ],
         verification: {
@@ -86,7 +86,7 @@ function candidate(): SiteCandidateSkill {
     network_candidates: [],
     safety: {
       execution_requires_fresh_resolution: true,
-      approval_policy: "preserve_browsercrew_approval_rules",
+      approval_policy: "preserve_browserharness_approval_rules",
       structural_analysis_is_not_execution_proof: true
     },
     provenance: {

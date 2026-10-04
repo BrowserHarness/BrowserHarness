@@ -7,7 +7,7 @@ const MAX_SERVERS = 6;
 const MAX_TOOLS_TOTAL = 18;
 const MAX_TOOL_DESCRIPTION = 240;
 
-export interface BrowserCrewMcpCatalogTool {
+export interface BrowserHarnessMcpCatalogTool {
   server_id: string;
   server_label: string;
   name: string;
@@ -17,9 +17,9 @@ export interface BrowserCrewMcpCatalogTool {
   trust_mode: McpServerTrustMode;
 }
 
-export interface BrowserCrewMcpCatalog {
+export interface BrowserHarnessMcpCatalog {
   servers_considered: number;
-  tools: BrowserCrewMcpCatalogTool[];
+  tools: BrowserHarnessMcpCatalogTool[];
 }
 
 type McpRuntimeTool = (
@@ -103,7 +103,7 @@ export async function discoverMcpCatalog(
   query: string,
   runMcpTool: McpRuntimeTool,
   trustModeLoader: TrustModeLoader
-): Promise<BrowserCrewMcpCatalog> {
+): Promise<BrowserHarnessMcpCatalog> {
   const serverResult = await runMcpTool({
     action: "servers"
   });
@@ -129,7 +129,7 @@ export async function discoverMcpCatalog(
     : [];
 
   const discovered: Array<
-    BrowserCrewMcpCatalogTool & { relevance: number }
+    BrowserHarnessMcpCatalogTool & { relevance: number }
   > = [];
 
   for (const server of servers) {

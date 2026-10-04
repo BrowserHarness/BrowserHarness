@@ -47,7 +47,7 @@ function iconPixels(size) {
     }
   }
 
-  // Temporary BrowserCrew mark: a high-contrast browser frame + two crew panes.
+  // Temporary BrowserHarness mark: a high-contrast browser frame + two crew panes.
   for (let y = margin; y < size - margin; y += 1) {
     for (let x = margin; x < size - margin; x += 1) {
       const border =
@@ -118,4 +118,4 @@ for (const size of [16, 32, 48, 128]) {
   await writeFile(resolve(OUT, `icon${size}.png`), encodePng(size));
 }
 
-console.log("Generated temporary BrowserCrew extension icons.");
+console.log("Generated temporary BrowserHarness extension icons.");

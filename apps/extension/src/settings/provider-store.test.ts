@@ -35,7 +35,7 @@ beforeEach(() => {
 
 describe("provider connection routing", () => {
   it("migrates saved connections missing embedding health", async () => {
-    store["browsercrew.providerConnections"] = [
+    store["browserharness.providerConnections"] = [
       {
         ...createConnection({
           provider: "openai-compatible",

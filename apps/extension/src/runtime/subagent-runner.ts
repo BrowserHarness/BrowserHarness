@@ -19,7 +19,7 @@ import type {
   ProceduralSearchHit
 } from "./procedural-memory";
 import type {
-  BrowserCrewMcpCatalog
+  BrowserHarnessMcpCatalog
 } from "./mcp-catalog";
 import {
   newReadOnlyWorkerToolState,
@@ -51,7 +51,7 @@ export interface ReadOnlySubagentDependencies {
   discoverMcpCatalog?(
     task: string,
     observation: BrowserDecisionContext["observation"]
-  ): Promise<BrowserCrewMcpCatalog>;
+  ): Promise<BrowserHarnessMcpCatalog>;
   isCancelled(): boolean;
   waitWhilePaused(): Promise<void>;
   withActivity?<T>(

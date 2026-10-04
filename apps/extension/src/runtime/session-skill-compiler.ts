@@ -88,7 +88,7 @@ export interface SessionCandidateSkill {
     maximum_demonstrated_action_ordinal: number;
     maximum_demonstrated_plan_index: number;
     allow_undemonstrated_actions_after_boundary: false;
-    approval_policy: "preserve_browsercrew_approval_rules";
+    approval_policy: "preserve_browserharness_approval_rules";
   };
   provenance: {
     source_kind: "browser_task_session_v1";
@@ -519,7 +519,7 @@ export function compileSessionEvaluations(
         "Consequential session actions still obey BrowserHarness approval rules.",
       expect: {
         source_action_ids: approvalActionIds,
-        policy: "preserve_browsercrew_approval_rules"
+        policy: "preserve_browserharness_approval_rules"
       }
     });
   }
@@ -574,7 +574,7 @@ export function compileSessionToSkill(
         session.actions.length,
       maximum_demonstrated_plan_index: plan.steps.length - 1,
       allow_undemonstrated_actions_after_boundary: false,
-      approval_policy: "preserve_browsercrew_approval_rules"
+      approval_policy: "preserve_browserharness_approval_rules"
     },
     provenance: {
       source_kind: "browser_task_session_v1",

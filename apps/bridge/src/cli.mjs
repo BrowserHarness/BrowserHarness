@@ -11,14 +11,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBridgeServer } from "./core.mjs";
-import { serveBrowserCrewMcp } from "./mcp.mjs";
+import { serveBrowserHarnessMcp } from "./mcp.mjs";
 import {
   createMcpClientManager,
   DEFAULT_MCP_SERVERS_FILE
 } from "./mcp-client.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
-const HOME = path.join(os.homedir(), ".browsercrew-bridge");
+const HOME = path.join(os.homedir(), ".browserharness-bridge");
 const CONFIG_FILE = path.join(HOME, "config.json");
 const PID_FILE = path.join(HOME, "daemon.pid");
 const ADDR_FILE = path.join(HOME, "daemon.addr");
@@ -249,7 +249,7 @@ try {
   if (command === "serve") {
     await serve(config);
   } else if (command === "mcp") {
-    await serveBrowserCrewMcp(config);
+    await serveBrowserHarnessMcp(config);
   } else if (command === "start") {
     await start(config, created);
   } else if (command === "status") {
@@ -271,7 +271,7 @@ try {
     });
   } else {
     throw new Error(
-      "Usage: browserharness-bridge (alias: browsercrew-bridge) [start|status|stop|restart|logs|pair|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [start|status|stop|restart|logs|pair|mcp|mcp-servers]"
     );
   }
 } catch (error) {

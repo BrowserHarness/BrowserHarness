@@ -4,7 +4,7 @@ import * as z from "zod/v4";
 
 function createServer() {
   const server = new McpServer({
-    name: "browsercrew-test-external",
+    name: "browserharness-test-external",
     version: "1.0.0"
   });
 

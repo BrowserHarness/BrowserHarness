@@ -3,7 +3,7 @@
 ## MVP support channel
 Use the issue tracker for the BrowserHarness product repository:
 
-`BrowserHarness/browsercrew`
+`BrowserHarness/browserharness`
 
 When reporting an MVP issue, include:
 - BrowserHarness version/build SHA;

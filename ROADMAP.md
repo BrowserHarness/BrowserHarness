@@ -195,8 +195,8 @@ It is a reference architecture audit, not copied implementation. BrowserHarness 
    - procedural retrieval must never execute implicitly; the planner must explicitly call `site_skill run` with the exact revision after checking the current goal and fresh page
    - CI: 240/240 extension tests across 48 files; typecheck/build/MV3/contract/package PASS
 10. **MCP stdio server — verified at `ea4433d7efacb760bf5aab060a9f96b9e72c3b25` (CI `36377928834`)**
-   - `browsercrew-bridge mcp` serves MCP over stdio using the current v2 server SDK
-   - exposes `browsercrew_status` plus all 34 Local Bridge browser actions as MCP tools
+   - `browserharness-bridge mcp` serves MCP over stdio using the current v2 server SDK
+   - exposes `browserharness_status` plus all 34 Local Bridge browser actions as MCP tools
    - every action relays through authenticated loopback `POST /command` and the paired extension; MCP is not a second browser executor
    - stable MCP session id maps directly to BrowserHarness task-session ownership
    - `APPROVAL_REQUIRED` and other Bridge failures remain visible MCP tool errors

@@ -10,8 +10,8 @@ export interface BridgeStatus {
   changed_at: string;
 }
 
-const SETTINGS_KEY = "browsercrew.bridgeSettings";
-const STATUS_KEY = "browsercrew.bridgeStatus";
+const SETTINGS_KEY = "browserharness.bridgeSettings";
+const STATUS_KEY = "browserharness.bridgeStatus";
 
 export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   enabled: false,
