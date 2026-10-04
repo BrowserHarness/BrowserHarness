@@ -1219,6 +1219,101 @@ async function runTool(
             ? input.recipe_id
             : undefined
         );
+        if (recipe.form_index < 0) {
+          // API recipe: read-only GET against the page's own origin; no form verification or approval needed.
+          const apiParameters =
+            input.parameters &&
+            typeof input.parameters === "object" &&
+            !Array.isArray(input.parameters)
+              ? (input.parameters as Record<string, unknown>)
+              : {};
+          const apiStartedAt = new Date().toISOString();
+          const apiEvidenceId =
+            existing.provenance.evidence_id;
+          try {
+            const run = await runSiteSkillRecipe({
+              tab_id: tabId,
+              candidate: existing,
+              recipe_id: recipe.id,
+              parameters: apiParameters
+            });
+            await recordSiteSkillEvaluation(
+              input.id,
+              revision.revision_id,
+              {
+                kind: "execution",
+                outcome: "passed",
+                detail: `API recipe ${recipe.id} returned HTTP ${run.output?.http_status}`
+              }
+            );
+            const execution =
+              await recordSiteSkillExecutionEvidence(
+                input.id,
+                revision.revision_id,
+                {
+                  recipe_id: recipe.id,
+                  started_at: apiStartedAt,
+                  outcome: "passed",
+                  evidence_id: apiEvidenceId,
+                  executed_steps: run.executed_steps,
+                  submitted: false,
+                  parameter_names: Object.keys(apiParameters).sort()
+                }
+              );
+            return {
+              ok: true,
+              data: {
+                candidate_id: existing.id,
+                revision_id: revision.revision_id,
+                run,
+                execution
+              }
+            };
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Site Skill API recipe failed";
+            const code =
+              error instanceof SiteSkillRunError && error.code
+                ? error.code
+                : "SITE_SKILL_RUN_FAILED";
+            await recordSiteSkillEvaluation(
+              input.id,
+              revision.revision_id,
+              {
+                kind: "execution",
+                outcome: "failed",
+                detail: message
+              }
+            ).catch(() => undefined);
+            await recordSiteSkillExecutionEvidence(
+              input.id,
+              revision.revision_id,
+              {
+                recipe_id: recipe.id,
+                started_at: apiStartedAt,
+                outcome: "failed",
+                evidence_id: apiEvidenceId,
+                executed_steps: 0,
+                submitted: false,
+                parameter_names: Object.keys(apiParameters).sort(),
+                error_code: code,
+                error_message: message
+              }
+            ).catch(() => null);
+            return {
+              ok: false,
+              data: {
+                candidate_id: existing.id,
+                revision_id: revision.revision_id,
+                refinement_recommended: true,
+                next_action: "site_skill refine"
+              },
+              error: { code, message }
+            };
+          }
+        }
         const fresh = await collectCurrentSiteSkill({
           tab_id: tabId,
           url: tab.url,

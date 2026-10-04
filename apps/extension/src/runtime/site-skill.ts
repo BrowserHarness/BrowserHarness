@@ -1,5 +1,6 @@
 import type { AxSnapshot } from "../background/cdp-semantic";
 import type { NetworkRecord } from "../background/network-capture";
+import { deriveApiRecipes } from "./site-skill-api";
 
 export interface SiteFormFieldEvidence {
   tag: string;
@@ -104,6 +105,22 @@ export type SiteSkillRecipeStep =
       method: string;
       action: string;
       approval: "browsercrew_runtime";
+    }
+  | {
+      kind: "api_fetch";
+      method: "GET";
+      /** Same-origin path; never an absolute URL. */
+      path: string;
+      query: Array<{
+        key: string;
+        parameter: string;
+        default?: string;
+      }>;
+      response: {
+        format: "json" | "text";
+        max_chars: number;
+      };
+      approval: "none_read_only";
     };
 
 export interface SiteSkillRecipe {
@@ -332,7 +349,8 @@ export function compileSiteEvidenceToCandidate(
   if (!evidence.site.url || !evidence.site.origin) {
     throw new Error("SITE_SKILL_REQUIRES_SITE_IDENTITY");
   }
-  if (!evidence.forms.length) {
+  const apiRecipes = deriveApiRecipes(evidence);
+  if (!evidence.forms.length && !apiRecipes.recipes.length) {
     throw new Error("SITE_SKILL_REQUIRES_ACTIONABLE_FORM_EVIDENCE");
   }
 
@@ -373,7 +391,7 @@ export function compileSiteEvidenceToCandidate(
     }
   }
 
-  const recipes = evidence.forms.map((form) => {
+  const formRecipes = evidence.forms.map((form) => {
     const inputSteps: SiteSkillRecipeStep[] = [];
     const parameterNames: string[] = [];
     const checks: SiteSkillRecipe["verification"]["checks"] = [
@@ -464,6 +482,29 @@ export function compileSiteEvidenceToCandidate(
       }
     };
   });
+
+  const recipes = [...formRecipes, ...apiRecipes.recipes];
+  for (const parameter of apiRecipes.parameters) {
+    const unique = uniqueName(parameter.name, used);
+    if (unique !== parameter.name) {
+      for (const recipe of apiRecipes.recipes) {
+        recipe.parameters = recipe.parameters.map((name) =>
+          name === parameter.name ? unique : name
+        );
+        for (const step of recipe.steps) {
+          if (step.kind === "api_fetch") {
+            for (const query of step.query) {
+              if (query.parameter === parameter.name) {
+                query.parameter = unique;
+              }
+            }
+          }
+        }
+      }
+      parameter.name = unique;
+    }
+    parameters.push(parameter);
+  }
 
   const baseName =
     requestedName?.trim() ||

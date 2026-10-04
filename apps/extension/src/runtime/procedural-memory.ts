@@ -24,7 +24,7 @@ export interface ProceduralRecipeContract {
   action: string;
   parameters: string[];
   steps: Array<{
-    kind: "input" | "submit";
+    kind: "input" | "submit" | "api_fetch";
     input_mode?: "type" | "select" | "upload" | "toggle";
     parameter?: string;
     role?: string;
@@ -112,6 +112,14 @@ function recipeStep(
       ...(step.target.accessible_name
         ? { accessible_name: step.target.accessible_name }
         : {})
+    };
+  }
+
+  if (step.kind === "api_fetch") {
+    return {
+      kind: "api_fetch",
+      method: step.method,
+      action: step.path
     };
   }
 

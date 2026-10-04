@@ -55,6 +55,8 @@ export function verifySiteSkillCandidate(
   });
 
   for (const recipe of candidate.recipes) {
+    // API recipes have no form; their contract is the origin check above plus a live fetch at run time.
+    if (recipe.form_index < 0) continue;
     const observedForm = evidence.forms.find(
       (form) => form.index === recipe.form_index
     );
