@@ -418,3 +418,35 @@ export async function runTaskDag(
     cancelled
   };
 }
+
+/** Worker prompt for a node; verifier nodes get the claims to check and the verdict contract. */
+export function buildDagWorkerTask(
+  node: TaskDagNodeSpec,
+  prerequisites: TaskDagNode[]
+): string {
+  if (node.type !== "verify") {
+    return prerequisites.length
+      ? `${node.task}\n\nContext from completed prerequisite nodes:\n${describePrerequisites(prerequisites)}`
+      : node.task;
+  }
+  return [
+    "You are an independent read-only VERIFIER. Do not trust the claims below; check them against primary sources you open yourself.",
+    `Verification task: ${node.task}`,
+    "Claims under review:",
+    describePrerequisites(prerequisites),
+    "Finish with one line exactly of the form `VERDICT: supported`, `VERDICT: contradicted` or `VERDICT: insufficient`, followed by the evidence (URLs) behind it."
+  ].join("\n");
+}
+
+function describePrerequisites(
+  prerequisites: TaskDagNode[]
+): string {
+  return prerequisites
+    .map((item) => {
+      const sources = (item.finding?.sources || [])
+        .map((source) => source.url)
+        .join(", ");
+      return `- [${item.id}] ${item.finding?.message || ""}${sources ? ` (sources: ${sources})` : ""}`;
+    })
+    .join("\n");
+}

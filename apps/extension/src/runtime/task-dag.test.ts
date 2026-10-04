@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseTaskDag,
   parseVerifierVerdict,
+  buildDagWorkerTask,
   runTaskDag,
   selectReadyNodes,
   createTaskDagState,
@@ -191,5 +192,22 @@ describe("parseVerifierVerdict", () => {
     expect(parseVerifierVerdict("VERDICT: contradicted - page says no")).toBe("contradicted");
     expect(parseVerifierVerdict("verdict=Supported")).toBe("supported");
     expect(parseVerifierVerdict("looks fine to me")).toBe("insufficient");
+  });
+});
+
+describe("buildDagWorkerTask", () => {
+  it("gives verifiers the claims and the verdict contract", () => {
+    const prereq = {
+      ...createTaskDagState([spec("a")])[0],
+      status: "completed" as const,
+      finding: finding("a", { message: "Price is $5" })
+    };
+    const text = buildDagWorkerTask(spec("v", ["a"], "verify"), [prereq]);
+    expect(text).toContain("Price is $5");
+    expect(text).toContain("https://x/a");
+    expect(text).toContain("VERDICT: supported");
+  });
+  it("leaves research nodes without prerequisites unchanged", () => {
+    expect(buildDagWorkerTask(spec("a"), [])).toBe("task a");
   });
 });

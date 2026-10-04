@@ -83,6 +83,11 @@ import {
   runReadOnlySubagent
 } from "../runtime/subagent-runner";
 import {
+  buildDagWorkerTask,
+  parseTaskDag,
+  runTaskDag
+} from "../runtime/task-dag";
+import {
   parseReadOnlySubagentTasks,
   runReadOnlySubagentBatch
 } from "../runtime/subagent-supervisor";
@@ -595,19 +600,7 @@ export function App() {
             execution?: BrowserToolExecution
           ): Promise<ToolResult<T>> => {
             if (tool === "agent") {
-              const parsed =
-                parseReadOnlySubagentTasks(input);
-              if (!parsed.ok) {
-                return {
-                  ok: false,
-                  error: parsed.error
-                } as ToolResult<T>;
-              }
-
-              const batch =
-                await runReadOnlySubagentBatch(
-                  parsed.tasks,
-                  async (spec, index) => {
+              const launchWorker = async (spec: { task: string; max_steps: number }, index: number) => {
                     const workerTask = spec.task;
                     const workerSessionId =
                       `${taskSessionId}:worker:${index + 1}:${crypto.randomUUID()}`;
@@ -721,7 +714,52 @@ export function App() {
                       controller.signal,
                       spec.max_steps
                     );
-                  },
+                  };
+
+              if (Array.isArray(input.dag)) {
+                const dag = parseTaskDag(input.dag);
+                if (!dag.ok) {
+                  return {
+                    ok: false,
+                    error: dag.error
+                  } as ToolResult<T>;
+                }
+                const outcome = await runTaskDag(
+                  dag.nodes,
+                  ({ node, prerequisites }, ) =>
+                    launchWorker(
+                      {
+                        task: buildDagWorkerTask(
+                          node,
+                          prerequisites
+                        ),
+                        max_steps: node.step_budget
+                      },
+                      dag.nodes.findIndex(
+                        (item) => item.id === node.id
+                      )
+                    ),
+                  controller.signal
+                );
+                return {
+                  ok: true,
+                  data: outcome as T
+                };
+              }
+
+              const parsed =
+                parseReadOnlySubagentTasks(input);
+              if (!parsed.ok) {
+                return {
+                  ok: false,
+                  error: parsed.error
+                } as ToolResult<T>;
+              }
+
+              const batch =
+                await runReadOnlySubagentBatch(
+                  parsed.tasks,
+                  launchWorker,
                   controller.signal
                 );
 
