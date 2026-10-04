@@ -85,6 +85,24 @@ try {
   const obs = await tool("observe_page");
   check("observe_page sees the form", obs.ok && obs.data.snapshot.includes('textbox "email"'));
 
+  const ax = await tool("ax_snapshot");
+  const emailRef = ax.ok
+    ? ax.data.elements.find((e) => e.role === "textbox")?.element_id
+    : undefined;
+  const typed = await tool("trusted_type", { element_id: emailRef, text: "me@example.com" });
+  check("trusted_type enters text", typed.ok, JSON.stringify(typed.ok ? typed.data : typed.error));
+  const keyed = await tool("send_keys", { keys: "Enter" });
+  await page.waitForTimeout(800);
+  check(
+    "send_keys Enter submits the form",
+    keyed.ok && page.url().includes("/s?email=me%40example.com"),
+    page.url()
+  );
+  const read = await tool("read_page");
+  check("read_page returns page text", read.ok);
+  await page.goto(`http://localhost:${port}/`);
+  await page.waitForTimeout(500);
+
   const net = await tool("network", { action: "start" });
   check("network capture starts", net.ok);
   await page.reload();
