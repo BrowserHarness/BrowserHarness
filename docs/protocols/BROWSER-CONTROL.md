@@ -3,10 +3,10 @@
 ## Principles
 - Tools expose semantic browser intent before raw CDP.
 - Page content is untrusted data.
-- Browser tasks own explicit task sessions; the user's starting tab is borrowed and BrowserCrew-created tabs are owned.
+- Browser tasks own explicit task sessions; the user's starting tab is borrowed and BrowserHarness-created tabs are owned.
 - Observation/AX evidence is refreshed before adaptive execution; stale recorded refs are evidence hints, not live selectors.
 - Mutating or context-changing actions are followed by verification.
-- Consequential actions keep BrowserCrew approval semantics.
+- Consequential actions keep BrowserHarness approval semantics.
 - Functionality and reliability take priority over minimizing the browser permission envelope.
 
 ## Core observation
@@ -32,11 +32,11 @@ The primary runtime and authenticated Local Bridge expose 27 tools:
 ## High-value contracts
 
 ### site_skill
-`create` inspects the selected http(s) task tab with fresh AX evidence and bounded form structure evaluation. If network capture is already active, bounded request evidence is summarized without retaining header/body secret values. BrowserCrew compiles and persists an inspectable candidate Skill with inferred parameters, fresh-resolution targets, recipe verification checks and runtime approval policy.
+`create` inspects the selected http(s) task tab with fresh AX evidence and bounded form structure evaluation. If network capture is already active, bounded request evidence is summarized without retaining header/body secret values. BrowserHarness compiles and persists an inspectable candidate Skill with inferred parameters, fresh-resolution targets, recipe verification checks and runtime approval policy.
 
 `verify` recollects live origin/form/field/submit evidence and persists an explicit verified/failed result.
 
-`run` re-verifies immediately before execution, resolves every recipe target from a fresh AX snapshot, rejects ambiguous matches, binds user parameters, and executes text/select/upload/toggle + submit steps. Non-GET or risky submission returns `APPROVAL_REQUIRED`; only the BrowserCrew extension UI can provide the one-shot approval proof. Run parameter values are redacted from session evidence.
+`run` re-verifies immediately before execution, resolves every recipe target from a fresh AX snapshot, rejects ambiguous matches, binds user parameters, and executes text/select/upload/toggle + submit steps. Non-GET or risky submission returns `APPROVAL_REQUIRED`; only the BrowserHarness extension UI can provide the one-shot approval proof. Run parameter values are redacted from session evidence.
 
 `list`, `get` and `delete` manage the local candidate library. Site Skills remain candidate status; verified execution does not auto-promote them.
 
@@ -48,31 +48,31 @@ Resolves the native select through CDP, matches by option value/text/label, upda
 ### hover
 Input: fresh AX `element_id`, optional `tab_id`.
 
-Moves the real CDP pointer to the target box center. BrowserCrew rejects an occluded point and verifies the intended target enters `:hover` before reporting success.
+Moves the real CDP pointer to the target box center. BrowserHarness rejects an occluded point and verifies the intended target enters `:hover` before reporting success.
 
 ### drag
 Input: fresh `source_element_id` and `target_element_id`, optional `steps` and `tab_id`.
 
-BrowserCrew hit-tests both semantic endpoints, presses the real left mouse button, follows a bounded interpolated CDP pointer path, releases over the target, and verifies source-down/target-up delivery before reporting success.
+BrowserHarness hit-tests both semantic endpoints, presses the real left mouse button, follows a bounded interpolated CDP pointer path, releases over the target, and verifies source-down/target-up delivery before reporting success.
 
 ### send_keys
 Input: `keys`, optional `repeat` (1-100) and `tab_id`.
 
-Supports Alt/Ctrl/Cmd/Meta/Shift, OS-aware `Mod` (Cmd on macOS, Ctrl elsewhere), Enter/Escape/Tab/Backspace/Delete/Space, arrows, Home/End/PageUp/PageDown, F1-F12, single letters/digits, modifier chords such as `Mod+A`, and space-separated sequences such as `Enter Escape`. Sequences containing Enter preserve BrowserCrew approval rules.
+Supports Alt/Ctrl/Cmd/Meta/Shift, OS-aware `Mod` (Cmd on macOS, Ctrl elsewhere), Enter/Escape/Tab/Backspace/Delete/Space, arrows, Home/End/PageUp/PageDown, F1-F12, single letters/digits, modifier chords such as `Mod+A`, and space-separated sequences such as `Enter Escape`. Sequences containing Enter preserve BrowserHarness approval rules.
 
 ### await_user_action
 Planner/orchestrator-only; intentionally not exposed as a Local Bridge daemon command.
 
 Input: `reason`.
 
-Use when progress requires a human-only page step such as login/sign-in, an expired authenticated session, CAPTCHA/slider/human verification, 2FA/SMS/authenticator approval, or explicit manual consent. BrowserCrew waits up to 10 seconds for natural navigation first. If the page has not advanced, the side panel shows “Need you to take over” with “I’m done, continue” and “Cancel task”. Navigation remains a live resume path while the card is visible. Continuation always triggers a fresh page observation before planning resumes.
+Use when progress requires a human-only page step such as login/sign-in, an expired authenticated session, CAPTCHA/slider/human verification, 2FA/SMS/authenticator approval, or explicit manual consent. BrowserHarness waits up to 10 seconds for natural navigation first. If the page has not advanced, the side panel shows “Need you to take over” with “I’m done, continue” and “Cancel task”. Navigation remains a live resume path while the card is visible. Continuation always triggers a fresh page observation before planning resumes.
 
 Manual handoffs are recorded as non-executable session evidence. They do not advance `boundary_action_id`, and Session → Skill compilation rejects sessions crossing a manual-handoff precondition instead of pretending the human-only step is automated.
 
 ### trusted_click
 Input: fresh AX `element_id`, optional `tab_id`.
 
-BrowserCrew scrolls the target into view, calculates its box center, verifies `document.elementFromPoint` resolves to the target or one of its descendants, arms temporary pointer/mouse delivery proof listeners, dispatches real CDP mouse events, then refuses success unless delivery to the intended target was observed.
+BrowserHarness scrolls the target into view, calculates its box center, verifies `document.elementFromPoint` resolves to the target or one of its descendants, arms temporary pointer/mouse delivery proof listeners, dispatches real CDP mouse events, then refuses success unless delivery to the intended target was observed.
 
 ### evaluate
 Input: `expression`, optional `max_chars` and `tab_id`.
@@ -82,7 +82,7 @@ Runs bounded `Runtime.evaluate` with `awaitPromise`, `returnByValue` and `userGe
 ### screenshot
 Input: optional `tab_id`, `full_page`, `element_id`.
 
-Uses `Page.captureScreenshot`, so BrowserCrew can capture its selected task tab while it remains backgrounded. Modes:
+Uses `Page.captureScreenshot`, so BrowserHarness can capture its selected task tab while it remains backgrounded. Modes:
 - viewport
 - full page via `Page.getLayoutMetrics`
 - semantic element clip via fresh AX ref + `DOM.getBoxModel`
@@ -107,7 +107,7 @@ The extension UI may send a one-shot `approval_granted` proof after explicit use
 A newly risky AX-only trusted action therefore follows:
 1. attempt without privileged proof;
 2. service worker returns `APPROVAL_REQUIRED`;
-3. BrowserCrew UI asks the user;
+3. BrowserHarness UI asks the user;
 4. approval retries once with privileged proof;
 5. denial stops replay.
 
@@ -130,4 +130,4 @@ Tools return typed failures such as:
 The agent may re-observe and retry boundedly. It must not loop indefinitely.
 
 ## Consequential action boundary
-Send/publish/submit/purchase/delete/payment/account-security actions remain approval-gated when BrowserCrew's current evidence marks them consequential. Generated/replayed Skills preserve those approval semantics and may not execute beyond their demonstrated boundary.
+Send/publish/submit/purchase/delete/payment/account-security actions remain approval-gated when BrowserHarness's current evidence marks them consequential. Generated/replayed Skills preserve those approval semantics and may not execute beyond their demonstrated boundary.

@@ -208,7 +208,7 @@ test("Bridge exposes authenticated outbound MCP discovery and calls", async () =
     callTool: async (serverId, tool, args) => {
       assert.equal(serverId, "notes");
       assert.equal(tool, "search_notes");
-      assert.deepEqual(args, { query: "BrowserCrew" });
+      assert.deepEqual(args, { query: "BrowserHarness" });
       return {
         server_id: serverId,
         tool,
@@ -219,7 +219,7 @@ test("Bridge exposes authenticated outbound MCP discovery and calls", async () =
           content: [
             {
               type: "text",
-              text: "Found BrowserCrew"
+              text: "Found BrowserHarness"
             }
           ]
         }
@@ -289,7 +289,7 @@ test("Bridge exposes authenticated outbound MCP discovery and calls", async () =
           server_id: "notes",
           tool: "search_notes",
           arguments: {
-            query: "BrowserCrew"
+            query: "BrowserHarness"
           }
         })
       }
@@ -299,7 +299,7 @@ test("Bridge exposes authenticated outbound MCP discovery and calls", async () =
     assert.equal(callBody.ok, true);
     assert.equal(
       callBody.data.result.content[0].text,
-      "Found BrowserCrew"
+      "Found BrowserHarness"
     );
   } finally {
     await env.bridge.close();

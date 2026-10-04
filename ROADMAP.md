@@ -1,4 +1,4 @@
-# BrowserCrew Roadmap
+# BrowserHarness Roadmap
 
 ## Foundation
 - Organization operating layer
@@ -10,7 +10,7 @@
 ## v0.1 — Ship-fast MVP
 **Status:** automated feature-complete; final real-Chrome acceptance pending.
 
-Goal: install BrowserCrew, connect an AI provider, give the current tab a task, and reliably observe/act/verify with visible activity and approval gates.
+Goal: install BrowserHarness, connect an AI provider, give the current tab a task, and reliably observe/act/verify with visible activity and approval gates.
 
 ### Required
 - Chrome Manifest V3 side panel
@@ -36,7 +36,7 @@ Goal: install BrowserCrew, connect an AI provider, give the current tab a task, 
 - Scheduled/background agents
 - Marketplace/community Skills
 - Team/enterprise administration
-- BrowserCrew-hosted inference
+- BrowserHarness-hosted inference
 
 ## v0.1.1 — Reliable Model + Agent Runtime
 **Status:** integrated into the v0.1 MVP candidate; automated gate green.
@@ -69,7 +69,7 @@ Goal: make provider/model behavior predictable before expanding product scope.
 ### Verified reliability work
 - One browser task = one task session
 - User starting tab is borrowed, not owned
-- BrowserCrew-created tabs are task-owned and grouped
+- BrowserHarness-created tabs are task-owned and grouped
 - Session cleanup can only close owned tabs
 - Session-scoped `list_tabs` and `find_tab`
 - Stable semantic `@e` element references
@@ -96,12 +96,12 @@ Goal: make provider/model behavior predictable before expanding product scope.
 - Screenshot targets the selected task tab through CDP even when backgrounded, with viewport, full-page and semantic-element clip modes
 
 ### Verified Local Bridge foundation
-- Loopback-only BrowserCrew Bridge daemon workspace
+- Loopback-only BrowserHarness Bridge daemon workspace
 - Pairing-token authentication
 - `GET /status` and authenticated `POST /command`
 - MV3 WebSocket client with protocol/version handshake
 - 20-second heartbeat + reconnect path
-- Bridge session IDs map directly to BrowserCrew task sessions
+- Bridge session IDs map directly to BrowserHarness task sessions
 - External bridge commands use the same semantic refs and browser tools
 - Risky bridge click/Enter actions return `APPROVAL_REQUIRED`
 - Settings UI for address/token/connection state
@@ -112,7 +112,7 @@ Goal: make provider/model behavior predictable before expanding product scope.
 A behavioral clean-room audit of the shipped Kimi Browser Extension 2.0.22 is recorded at:
 `docs/research/KIMI-EXTENSION-REFERENCE-AUDIT.md`
 
-It is a reference architecture audit, not copied implementation. BrowserCrew keeps its own provider-neutral model layer, safety approvals, full browser-control runtime, deterministic tests, Local Bridge, and Skill evaluation policy.
+It is a reference architecture audit, not copied implementation. BrowserHarness keeps its own provider-neutral model layer, safety approvals, full browser-control runtime, deterministic tests, Local Bridge, and Skill evaluation policy.
 
 ### Next
 1. **Skill compiler — verified**
@@ -139,7 +139,7 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - `list/get/delete` candidate library operations
    - candidate status is preserved after verified execution; no auto-promotion
    - Site Skill library now supports immutable history, compare/refine/promote/rollback and inspectable execution evidence
-   - Local Bridge surface: **33 tools**; BrowserCrew runtime surface: **34 tools** including orchestrator-only human handoff
+   - Local Bridge surface: **33 tools**; BrowserHarness runtime surface: **34 tools** including orchestrator-only human handoff
    - CI run `36369232137`: 181/181 extension tests across 38 files + 3/3 Bridge tests, all typecheck/build/MV3/contract/package gates green
 5. **Kimi-reference interaction parity — verified**
    - hover — verified
@@ -174,7 +174,7 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - episodic memory keeps task outcome, sites, tools, semantic targets, handoffs and Skill/revision references while excluding typed/uploaded parameter payloads
    - task-start recall uses current goal + hostname, returns at most three episodes and labels them historical evidence only
    - `memory` tool exposes current-session active memory plus bounded search/list/get/delete of durable episodes
-   - Local Bridge surface: **34 tools**; BrowserCrew runtime surface: **35 tools** including orchestrator-only human handoff
+   - Local Bridge surface: **34 tools**; BrowserHarness runtime surface: **35 tools** including orchestrator-only human handoff
 8. **Semantic episodic memory — verified at `54844255e208fccf46867d85eb3f78cacb6fb4a6` (CI `36376927539`)**
    - dedicated first-class embedding connections with independent health/routing
    - embedding-only models cannot accidentally become chat primary/fallback routes
@@ -198,7 +198,7 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - `browsercrew-bridge mcp` serves MCP over stdio using the current v2 server SDK
    - exposes `browsercrew_status` plus all 34 Local Bridge browser actions as MCP tools
    - every action relays through authenticated loopback `POST /command` and the paired extension; MCP is not a second browser executor
-   - stable MCP session id maps directly to BrowserCrew task-session ownership
+   - stable MCP session id maps directly to BrowserHarness task-session ownership
    - `APPROVAL_REQUIRED` and other Bridge failures remain visible MCP tool errors
    - non-loopback Bridge targets are rejected; stdout remains protocol-only
    - verified gate: 9/9 Bridge tests + 240/240 extension tests; build/contracts/package PASS
@@ -206,19 +206,19 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - daemon accepts familiar `mcpServers` stdio configuration and owns all external process lifetimes
    - environment-variable values stay daemon-side; Chrome/model surfaces see only server metadata and environment key names
    - extension `mcp` tool supports server discovery, fresh tool discovery and tool execution through the paired Bridge WebSocket
-   - mutating/unannotated tools require the existing privileged BrowserCrew approval retry; daemon also rejects unapproved mutating calls
+   - mutating/unannotated tools require the existing privileged BrowserHarness approval retry; daemon also rejects unapproved mutating calls
    - per-server trust modes: allow read-only / ask all / blocked
    - Settings shows configured servers, connection state, tool annotations and per-server trust policy
    - external MCP call arguments are redacted from BrowserTaskSessionEvidence
    - planner receives a task-ranked catalog capped at 6 servers / 18 tools with explicit approval metadata; blocked servers are excluded
-   - external MCP descriptions/results remain untrusted data and cannot override user goals or BrowserCrew policy
+   - external MCP descriptions/results remain untrusted data and cannot override user goals or BrowserHarness policy
 12. **Supervisor + bounded read-only subagents — verified at `a159bef5c3c086d9b18f0afd5d0af49fcbccf5b1` (CI `36382897733`)**
    - supervisor `agent` delegation is orchestrator-only and never Bridge-exposed
-   - each worker receives an isolated child BrowserCrew task session with a hard maximum of 8 steps
+   - each worker receives an isolated child BrowserHarness task session with a hard maximum of 8 steps
    - borrowed current tab is read-only; independent navigation requires a worker-owned background tab
    - worker-owned tabs are automatically cleaned by child `close_session` in `finally`
    - code-level policy rejects click/type/upload/submit/raw-CDP/Skill mutation and recursive `agent`
-   - workers never receive or forward BrowserCrew approval proofs; mutating/unannotated MCP calls cannot execute
+   - workers never receive or forward BrowserHarness approval proofs; mutating/unannotated MCP calls cannot execute
    - worker planner advertises only the bounded read-only surface and uses normal primary/fallback model routing
    - findings return status/message plus up to 6 source URL/title records and up to 20 tools used
    - verified gate: 16/16 Bridge tests + 263/263 extension tests across 53 files; typecheck/build/MV3/contracts/package PASS
@@ -242,7 +242,7 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
    - verifier workers receive evidence but no mutation authority
    - independent verification of important worker claims before supervisor synthesis
 16. **SK-BROWSER-001 v0.3.0 cross-runtime evaluation — parallel external-runtime blocker**
-   - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserCrew Local Bridge
+   - run the existing 25-case evaluation only when a real external agent runtime is paired to BrowserHarness Local Bridge
    - do not substitute product unit tests or fabricate cross-runtime results
 
 ### Verified full browser-control parity
@@ -264,9 +264,9 @@ It is a reference architecture audit, not copied implementation. BrowserCrew kee
 - human handoff for login/CAPTCHA/2FA/manual consent
 
 ### Browser capability rule
-BrowserCrew is an autonomous browser agent. Functionality and reliability take priority over minimizing the permission envelope.
+BrowserHarness is an autonomous browser agent. Functionality and reliability take priority over minimizing the permission envelope.
 
-The primary BrowserCrew build now intentionally targets the proven high-capability browser-agent surface:
+The primary BrowserHarness build now intentionally targets the proven high-capability browser-agent surface:
 - debugger / Chrome DevTools Protocol
 - <all_urls>
 - webNavigation
@@ -276,7 +276,7 @@ The primary BrowserCrew build now intentionally targets the proven high-capabili
 - scripting
 - alarms / notifications / context menus
 
-The permissions must map to real BrowserCrew capabilities and remain covered by automated tests, but they are no longer deferred into a separate reduced-capability edition.
+The permissions must map to real BrowserHarness capabilities and remain covered by automated tests, but they are no longer deferred into a separate reduced-capability edition.
 
 ## v0.3 — Memory + MCP
 - Working/episodic/semantic/procedural memory

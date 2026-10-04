@@ -68,7 +68,7 @@ async function readStatus(config, timeoutMs = 900) {
     });
     const body = await response.json();
     if (!response.ok || body?.running !== true) {
-      throw new Error("Not BrowserCrew Bridge");
+      throw new Error("Not BrowserHarness Bridge");
     }
     return body;
   } catch {
@@ -130,7 +130,7 @@ async function start(config, created) {
     print({
       ...current,
       ws: wsBase(config),
-      note: "BrowserCrew Bridge is already running"
+      note: "BrowserHarness Bridge is already running"
     });
     return;
   }
@@ -152,7 +152,7 @@ async function start(config, created) {
   const status = await waitForState(config, true);
   if (!status.running) {
     throw new Error(
-      `BrowserCrew Bridge did not start. Check ${LOG_FILE}`
+      `BrowserHarness Bridge did not start. Check ${LOG_FILE}`
     );
   }
 
@@ -164,7 +164,7 @@ async function start(config, created) {
       ? {
           pairing_token: config.token,
           note:
-            "Pairing token created. Paste it into BrowserCrew Settings → Local Agent Bridge."
+            "Pairing token created. Paste it into BrowserHarness Settings → Local Agent Bridge."
         }
       : {})
   });
@@ -194,7 +194,7 @@ async function stop(config) {
   }
 
   if (!Number.isInteger(pid) || pid <= 0) {
-    throw new Error("Invalid BrowserCrew Bridge PID file");
+    throw new Error("Invalid BrowserHarness Bridge PID file");
   }
 
   process.kill(pid, "SIGTERM");
@@ -202,7 +202,7 @@ async function stop(config) {
 
   if (status.running) {
     throw new Error(
-      "BrowserCrew Bridge did not stop within the expected window"
+      "BrowserHarness Bridge did not stop within the expected window"
     );
   }
 
@@ -271,7 +271,7 @@ try {
     });
   } else {
     throw new Error(
-      "Usage: browsercrew-bridge [start|status|stop|restart|logs|pair|mcp|mcp-servers]"
+      "Usage: browserharness-bridge (alias: browsercrew-bridge) [start|status|stop|restart|logs|pair|mcp|mcp-servers]"
     );
   }
 } catch (error) {

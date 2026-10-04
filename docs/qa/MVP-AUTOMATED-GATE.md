@@ -1,4 +1,4 @@
-# BrowserCrew v0.1 Automated MVP Gate
+# BrowserHarness v0.1 Automated MVP Gate
 
 ## Status
 **PASS on the feature-complete code candidate.**
@@ -39,7 +39,7 @@ Automated tests cover:
 - model discovery/sorting/errors;
 - model capability classification;
 - separate Chat + Agent health contracts;
-- structured BrowserCrew action parsing;
+- structured BrowserHarness action parsing;
 - multimodal screenshot requests for vision models;
 - screenshot rejection for non-vision models.
 

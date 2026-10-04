@@ -1,4 +1,4 @@
-# AGENTS.md — BrowserCrew
+# AGENTS.md — BrowserHarness
 
 ## Required behavior
 1. Read before writing.
@@ -14,3 +14,9 @@
 
 ## Completion
 Runtime work is complete only when tests/evaluations pass, behavior is verified, affected contracts are updated, and live project state is reconciled.
+
+## GitHub safety
+- Do not create or modify `.github/workflows/*`; there are no GitHub Actions in this repo by user decision.
+- Test locally: `npm test`, `npm run build`, `npm run validate:mvp`, `npm run smoke:e2e`, `npm run smoke:agent` (the last two need playwright-core and Chromium).
+- Push or pull once per unit of work. Full policy: BrowserHarness-Progress-Memory `docs/policies/GITHUB-SAFETY-GUARDRAILS.md`.
+- Naming: the Local Bridge MCP server, tool names (`browsercrew_*`), config dir (`~/.browsercrew-bridge`) and storage keys keep the legacy `browsercrew` prefix so existing pairings and data keep working.

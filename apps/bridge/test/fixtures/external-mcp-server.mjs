@@ -11,7 +11,7 @@ function createServer() {
   server.registerTool(
     "echo",
     {
-      description: "Echo text for BrowserCrew MCP client tests.",
+      description: "Echo text for BrowserHarness MCP client tests.",
       inputSchema: z.object({
         text: z.string()
       }),

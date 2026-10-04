@@ -204,7 +204,7 @@ function boundedToolResult(result, maxChars = 100_000) {
       {
         type: "text",
         text:
-          `BrowserCrew truncated an oversized external MCP result. Original JSON length: ${serialized.length}.\n` +
+          `BrowserHarness truncated an oversized external MCP result. Original JSON length: ${serialized.length}.\n` +
           serialized.slice(0, maxChars)
       }
     ],

@@ -1,4 +1,4 @@
-# BrowserCrew System Architecture
+# BrowserHarness System Architecture
 
 ## Runtime layers
 1. Chrome extension surfaces and service worker.

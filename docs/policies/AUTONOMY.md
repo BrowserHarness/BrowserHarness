@@ -1,6 +1,6 @@
 # Progressive Autonomy
 
-| Level | Name | BrowserCrew authority |
+| Level | Name | BrowserHarness authority |
 |---|---|---|
 | A0 | Observe | Read-only observation/extraction |
 | A1 | Draft | Plans/drafts; no external mutation |

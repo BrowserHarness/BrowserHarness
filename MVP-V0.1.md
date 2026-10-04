@@ -1,10 +1,10 @@
-# BrowserCrew v0.1 MVP Contract
+# BrowserHarness v0.1 MVP Contract
 
 **Status:** automated implementation complete; final real-Chrome acceptance pending  
 **Priority:** ship a useful product fast.
 
 ## Product promise
-A user can install BrowserCrew, connect a supported AI provider, open a normal webpage, give BrowserCrew a browser task, watch structured activity, and approve consequential actions before they happen.
+A user can install BrowserHarness, connect a supported AI provider, open a normal webpage, give BrowserHarness a browser task, watch structured activity, and approve consequential actions before they happen.
 
 ## Verified automated baseline
 - Product code SHA: `76218f69e16afae0f079d0cf4b4956754df39dfa`
@@ -34,7 +34,7 @@ Persistent surfaces now include:
 3. NVIDIA hosted NIM
 4. OpenAI-compatible endpoints, including Groq
 
-BrowserCrew supports:
+BrowserHarness supports:
 - automatic model discovery where a compatible `/models` endpoint exists;
 - capability classification;
 - separate Chat and Agent health probes;
@@ -103,7 +103,7 @@ CI cannot prove live Chrome/provider/site behavior. Before public release, one f
 - a vision model consumes a real captured screenshot if vision is included in release acceptance.
 
 ## Non-goals
-Multi-agent teams, deep semantic/episodic memory, Skill marketplace, automatic Skill promotion, MCP, scheduling, cloud sync, team administration, BrowserCrew-hosted inference, audio/image-generation execution, and more than one fallback hop.
+Multi-agent teams, deep semantic/episodic memory, Skill marketplace, automatic Skill promotion, MCP, scheduling, cloud sync, team administration, BrowserHarness-hosted inference, audio/image-generation execution, and more than one fallback hop.
 
 ## Ship rule
 No post-MVP features block v0.1. Public release requires the final real-Chrome acceptance pass after this automated-complete baseline.

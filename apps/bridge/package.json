@@ -20,6 +20,7 @@
     "@modelcontextprotocol/client": "^2.1.0"
   },
   "bin": {
-    "browsercrew-bridge": "src/cli.mjs"
+    "browsercrew-bridge": "src/cli.mjs",
+    "browserharness-bridge": "src/cli.mjs"
   }
 }

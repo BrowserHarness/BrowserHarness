@@ -1,16 +1,16 @@
-# BrowserCrew Support
+# BrowserHarness Support
 
 ## MVP support channel
-Use the issue tracker for the BrowserCrew product repository:
+Use the issue tracker for the BrowserHarness product repository:
 
-`BrowserCrew/browsercrew`
+`BrowserHarness/browsercrew`
 
 When reporting an MVP issue, include:
-- BrowserCrew version/build SHA;
+- BrowserHarness version/build SHA;
 - Chrome version;
 - provider type and model ID, but **never the API key**;
 - the task that was attempted;
-- visible BrowserCrew error/activity text;
+- visible BrowserHarness error/activity text;
 - whether the issue is reproducible on a normal website, Google Docs, or a protected Chrome page.
 
 ## Never include
@@ -21,4 +21,4 @@ When reporting an MVP issue, include:
 - payment or identity information.
 
 ## Provider outages and limits
-HTTP 401/403/429/5xx errors may originate from the configured AI provider. BrowserCrew surfaces these errors and can use one validated fallback model for recoverable failures when configured.
+HTTP 401/403/429/5xx errors may originate from the configured AI provider. BrowserHarness surfaces these errors and can use one validated fallback model for recoverable failures when configured.

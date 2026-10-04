@@ -128,14 +128,14 @@ test("outbound MCP client discovers and calls a real stdio server", async () => 
     const called = await manager.callTool(
       "fixture",
       "echo",
-      { text: "BrowserCrew" }
+      { text: "BrowserHarness" }
     );
 
     assert.equal(called.server_id, "fixture");
     assert.equal(called.tool, "echo");
     assert.equal(
       called.result.content[0].text,
-      "BrowserCrew"
+      "BrowserHarness"
     );
     assert.equal(
       called.annotations.readOnlyHint,

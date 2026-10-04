@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "product": "BrowserCrew",
+  "product": "BrowserHarness",
   "milestone": "v0.1 MVP",
   "status": "automated_complete_manual_acceptance_pending",
   "verified_baseline": {
