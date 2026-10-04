@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "canonical_owner": "BrowserCrew/browsercrew",
+  "canonical_owner": "BrowserHarness/browserharness",
   "repositories": [
     {
-      "slug": "browsercrew",
+      "slug": "browserharness",
       "role": "product-runtime"
     },
     {
@@ -81,7 +81,7 @@
       "role": "org-governance"
     },
     {
-      "slug": "browsercrew.github.io",
+      "slug": "browserharness.github.io",
       "role": "thin-public-pages"
     }
   ]

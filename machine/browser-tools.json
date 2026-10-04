@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "owner": "BrowserHarness/browsercrew",
+  "owner": "BrowserHarness/browserharness",
   "version": "0.5",
   "tools": [
     {

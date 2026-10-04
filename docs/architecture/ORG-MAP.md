@@ -1,8 +1,8 @@
-# BrowserCrew Organization Map
+# BrowserHarness Organization Map
 
 | Repository | Canonical responsibility |
 |---|---|
-| browsercrew | Product, runtime, browser harness, architecture, roadmap |
+| browserharness | Product, runtime, browser harness, architecture, roadmap |
 | Progress-Memory | Current state, routing, blockers, handoffs |
 | Workflows | Demonstrated and designed procedures |
 | Skills- | Reusable versioned capability contracts |
@@ -21,7 +21,7 @@
 | Customer-Ops | Onboarding, support, feedback lifecycle |
 | Security-Trust | Security, privacy, permissions, trust |
 | .github | Org-wide GitHub defaults |
-| browsercrew.github.io | Thin public GitHub Pages/org surface |
+| browserharness.github.io | Thin public GitHub Pages/org surface |
 
 ## One owner per truth
 If two repositories independently maintain the same fact, one is wrong architecturally. The non-owner should link to the owner.

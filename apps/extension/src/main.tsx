@@ -9,7 +9,7 @@ import "@fontsource/poppins/600.css";
 import "@fontsource/poppins/700.css";
 import { App } from "./ui/App";
 import {
-  createBrowserCrewTheme,
+  createBrowserHarnessTheme,
   resolvePaletteMode
 } from "./ui/theme";
 import {
@@ -61,7 +61,7 @@ function Root() {
 
   const theme = useMemo(
     () =>
-      createBrowserCrewTheme(
+      createBrowserHarnessTheme(
         resolvePaletteMode(appearance, prefersDark)
       ),
     [appearance, prefersDark]

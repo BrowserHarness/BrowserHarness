@@ -136,7 +136,7 @@ describe("Site -> Skill v1", () => {
       },
       safety: {
         execution_requires_fresh_resolution: true,
-        approval_policy: "preserve_browsercrew_approval_rules",
+        approval_policy: "preserve_browserharness_approval_rules",
         structural_analysis_is_not_execution_proof: true
       }
     });
@@ -177,7 +177,7 @@ describe("Site -> Skill v1", () => {
       }),
       expect.objectContaining({
         kind: "submit",
-        approval: "browsercrew_runtime",
+        approval: "browserharness_runtime",
         method: "POST"
       })
     ]);
@@ -207,13 +207,13 @@ describe("Site -> Skill v1", () => {
         request_headers: {
           cookie: "secret"
         },
-        post_data: "query=browsercrew&page=2",
+        post_data: "query=browserharness&page=2",
         started_at: 1
       }
     ]);
 
     expect(summary[0].post_data_keys).toEqual(["page", "query"]);
-    expect(JSON.stringify(summary)).not.toContain("browsercrew");
+    expect(JSON.stringify(summary)).not.toContain("browserharness");
     expect(JSON.stringify(summary)).not.toContain("secret");
   });
 });

@@ -12,7 +12,7 @@ export function resolvePaletteMode(
   return appearance;
 }
 
-export function createBrowserCrewTheme(mode: PaletteMode) {
+export function createBrowserHarnessTheme(mode: PaletteMode) {
   return createTheme({
     cssVariables: true,
     palette: { mode },

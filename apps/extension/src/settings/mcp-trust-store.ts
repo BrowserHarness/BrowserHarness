@@ -9,7 +9,7 @@ export interface McpServerTrustPolicy {
   updated_at: string;
 }
 
-const KEY = "browsercrew.mcpServerTrust.v1";
+const KEY = "browserharness.mcpServerTrust.v1";
 
 function validMode(value: unknown): value is McpServerTrustMode {
   return (

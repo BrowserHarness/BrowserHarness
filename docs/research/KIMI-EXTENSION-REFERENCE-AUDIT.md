@@ -1,8 +1,8 @@
 # Kimi Browser Extension 2.0.22 — Reference Architecture Audit
 
-> Purpose: accelerate BrowserCrew engineering by studying the behavior and architecture of a proven shipped browser-agent extension.
+> Purpose: accelerate BrowserHarness engineering by studying the behavior and architecture of a proven shipped browser-agent extension.
 >
-> This document records independently observed mechanisms and product patterns. It is **not** a source-code copy. BrowserCrew implementations must remain independently authored and preserve BrowserCrew's own safety, permissions, provider-neutrality, and evaluation contracts.
+> This document records independently observed mechanisms and product patterns. It is **not** a source-code copy. BrowserHarness implementations must remain independently authored and preserve BrowserHarness's own safety, permissions, provider-neutrality, and evaluation contracts.
 
 ## Reference package
 Observed package:
@@ -10,7 +10,7 @@ Observed package:
 - Manifest version: MV3
 - Extension version: 2.0.22
 
-The shipped reference package uses a much broader permission envelope than BrowserCrew core, including:
+The shipped reference package uses a much broader permission envelope than BrowserHarness core, including:
 - debugger
 - tabs / activeTab
 - storage
@@ -27,7 +27,7 @@ The shipped reference package uses a much broader permission envelope than Brows
 - unlimitedStorage
 - <all_urls>
 
-BrowserCrew now intentionally uses a comparable high-capability permission envelope in its primary build because browser-control functionality is a first-class product requirement, not an optional add-on.
+BrowserHarness now intentionally uses a comparable high-capability permission envelope in its primary build because browser-control functionality is a first-class product requirement, not an optional add-on.
 
 ## 1. Layered browser-control runtime
 
@@ -39,7 +39,7 @@ Observed layers:
 3. CDP mouse and keyboard input for trusted/real input cases;
 4. explicit low-level CDP escape hatch.
 
-### BrowserCrew decision
+### BrowserHarness decision
 Adopt the same layered control concept directly in the primary product:
 1. ordinary semantic DOM tools;
 2. real Accessibility.getFullAXTree/backend-node refs;
@@ -48,7 +48,7 @@ Adopt the same layered control concept directly in the primary product:
 5. structured network/upload/PDF tools;
 6. raw CDP escape hatch.
 
-BrowserCrew keeps its provider-neutral model layer, task sessions, Bridge, approvals, tests and Skills on top of that full browser-control substrate.
+BrowserHarness keeps its provider-neutral model layer, task sessions, Bridge, approvals, tests and Skills on top of that full browser-control substrate.
 
 ## 2. Semantic references
 
@@ -62,14 +62,14 @@ Observed properties:
 - interactive-only snapshot mode exists;
 - text search can return an interactive ancestor ref.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented:
 - semantic @e refs;
 - compact accessibility-style snapshot;
 - stale-ref recovery via re-observation.
 
 Difference:
-- BrowserCrew Core currently derives refs from page DOM rather than Chrome Accessibility.getFullAXTree/backendDOMNodeId because that richer mechanism requires debugger/CDP.
+- BrowserHarness Core currently derives refs from page DOM rather than Chrome Accessibility.getFullAXTree/backendDOMNodeId because that richer mechanism requires debugger/CDP.
 
 ### Improvement path
 Advanced/Bridge should eventually use real AX/backend-node refs while keeping the Core ref contract compatible.
@@ -85,7 +85,7 @@ Observed behavior:
 - reports a timeout instead of allowing the agent to act on a half-loaded page;
 - returns final tab state after redirects.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented from this pattern:
 - bounded page-usability gate;
 - document-ready polling;
@@ -103,16 +103,16 @@ Observed semantics:
 - tab/group bindings are persisted and stale bindings are pruned;
 - tab grouping is retried because Chrome grouping can race.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented:
-- one task = one BrowserCrew session;
+- one task = one BrowserHarness session;
 - starting user tab borrowed;
-- BrowserCrew-created tabs owned and grouped;
+- BrowserHarness-created tabs owned and grouped;
 - borrowed/unrelated tabs cannot be closed as owned;
 - session-scoped list_tabs / find_tab;
-- Local Bridge session ID maps directly to BrowserCrew task session.
+- Local Bridge session ID maps directly to BrowserHarness task session.
 
-Improvement added beyond the first BrowserCrew implementation:
+Improvement added beyond the first BrowserHarness implementation:
 - serialized session mutations to prevent concurrent tab events from losing state.
 
 ## 5. Storage race handling
@@ -122,7 +122,7 @@ The reference contains explicit serialized/confirmed storage update logic instea
 Why it matters:
 MV3 service-worker events can interleave. Tab creation, activation, navigation, grouping, recording, and bridge commands can update the same state concurrently.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented:
 - serialized task-session mutations;
 - mutators re-read current state before merging their change;
@@ -151,7 +151,7 @@ Observed trusted mouse path:
 - verify pointer events reached the page;
 - account for background-tab rendering/focus limitations.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented in the primary build:
 - DOM click with semantic refs and verification;
 - Accessibility-tree/backend-node refs;
@@ -170,7 +170,7 @@ Observed reference paths:
 - trusted text insertion via CDP Input.insertText;
 - structured key sequences via Input.dispatchKeyEvent.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented in Core:
 - native value setters;
 - beforeinput/input/change event sequencing;
@@ -189,7 +189,7 @@ Observed strategy:
 - only bring a tab/window to front as a last resort;
 - surface whether the browser actually stole foreground focus.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented:
 1. task tabs stay backgrounded by default;
 2. trusted CDP input enables focus emulation;
@@ -206,7 +206,7 @@ Observed behavior:
 - explicitly handles accept/dismiss;
 - reports when an action ran but was interrupted by a newly opened dialog.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented in the primary build:
 - Page.javascriptDialogOpening/Closed tracking;
 - dialog status;
@@ -230,7 +230,7 @@ Observed behavior:
 - reads large frames separately;
 - special-cases PDF.js viewers.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented independently:
 - dedicated read_page tool;
 - compact observe_page remains fast;
@@ -243,7 +243,7 @@ Implemented independently:
 - shadow-host signal;
 - readable frame metadata / frame-targeted reads.
 
-BrowserCrew improvement:
+BrowserHarness improvement:
 - default extraction is intentionally 12k chars rather than a very large dump, reducing provider TPM/context pressure observed during Groq testing.
 
 ## 11. Iframe model
@@ -258,7 +258,7 @@ Observed behavior:
 - reads a selected frame independently;
 - identifies PDF.js-like viewers.
 
-### BrowserCrew state
+### BrowserHarness state
 Initial independent implementation:
 - read_page exposes accessible frame metadata and #f<frameId> handles;
 - selected readable frames can be scanned independently.
@@ -279,7 +279,7 @@ Observed capabilities:
 - response body retrieval;
 - explicit lifecycle.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented in the primary build:
 - network start/list/detail/stop;
 - request/response lifecycle metadata;
@@ -298,7 +298,7 @@ Observed behavior:
 - uses browser-level file injection where required;
 - handles Chrome's separate file-URL access limitation.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented:
 - upload uses DOM.setFileInputFiles against an AX-referenced file input;
 - file paths are supplied by the local agent/runtime rather than discovered by the extension.
@@ -307,7 +307,7 @@ Implemented:
 
 The reference can render a page to PDF with paper/scale/background options.
 
-### BrowserCrew state
+### BrowserHarness state
 Implemented:
 - Page.printToPDF;
 - Chrome downloads integration for generated PDFs.
@@ -347,7 +347,7 @@ Observed workflow distillation:
 - the agent is instructed not to silently add irreversible actions beyond the recorded boundary;
 - runtime adjustments can override the recorded plan without mutating the saved workflow.
 
-### BrowserCrew priority
+### BrowserHarness priority
 This is one of the highest-value next areas.
 
 Recommended independent implementation:
@@ -369,8 +369,8 @@ This directly supports:
 
 The reference monitors session-storage usage and has explicit quota behavior.
 
-### BrowserCrew opportunity
-As BrowserCrew starts recording richer evidence, add:
+### BrowserHarness opportunity
+As BrowserHarness starts recording richer evidence, add:
 - per-session evidence budgets;
 - size accounting;
 - compaction/eviction policy;
@@ -387,16 +387,16 @@ The reference has large independent bundles for:
 - frame reader;
 - document/PDF rendering helpers.
 
-### BrowserCrew lesson
+### BrowserHarness lesson
 Keep runtime capabilities modular. Do not let the chat UI become the owner of browser mechanics.
 
-BrowserCrew already moved in this direction with:
+BrowserHarness already moved in this direction with:
 - deterministic browser engine;
 - background task sessions;
 - Local Bridge daemon;
 - content adapter boundary.
 
-## BrowserCrew advantages to preserve
+## BrowserHarness advantages to preserve
 
 Do not lose these while adopting proven browser mechanics:
 - provider-neutral model routing;
@@ -413,7 +413,7 @@ Do not lose these while adopting proven browser mechanics:
 
 ## Adoption matrix
 
-### Implemented in the primary BrowserCrew build
+### Implemented in the primary BrowserHarness build
 - task/session ownership
 - semantic refs/snapshots
 - serialized storage mutation
@@ -476,6 +476,6 @@ Do not lose these while adopting proven browser mechanics:
 
 ## Current conclusion
 
-The source confirms that BrowserCrew's direction is correct, but also shows where mature browser-agent reliability comes from: not one better prompt, but layered control, explicit browser state, bounded evidence extraction, session ownership, robust storage, and adaptive workflow replay.
+The source confirms that BrowserHarness's direction is correct, but also shows where mature browser-agent reliability comes from: not one better prompt, but layered control, explicit browser state, bounded evidence extraction, session ownership, robust storage, and adaptive workflow replay.
 
-BrowserCrew should use the reference to avoid rediscovering those engineering lessons while continuing to improve on permission minimization, provider neutrality, approval safety, deterministic testing, and portable Skills.
+BrowserHarness should use the reference to avoid rediscovering those engineering lessons while continuing to improve on permission minimization, provider neutrality, approval safety, deterministic testing, and portable Skills.

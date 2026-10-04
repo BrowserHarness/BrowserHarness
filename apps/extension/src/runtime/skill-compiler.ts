@@ -149,7 +149,7 @@ export interface CandidateSkill {
     maximum_demonstrated_action_ordinal: number;
     maximum_demonstrated_plan_index: number;
     allow_undemonstrated_actions_after_boundary: false;
-    approval_policy: "preserve_browsercrew_approval_rules";
+    approval_policy: "preserve_browserharness_approval_rules";
   };
   provenance: CandidateSkillProvenance;
   evaluations: CandidateSkillEvaluation[];
@@ -622,7 +622,7 @@ export function compileWorkflowEvaluations(
         "Consequential recorded actions still obey BrowserHarness approval rules.",
       expect: {
         source_step_ids: approvalStepIds,
-        policy: "preserve_browsercrew_approval_rules"
+        policy: "preserve_browserharness_approval_rules"
       }
     });
   }
@@ -683,7 +683,7 @@ export function compileWorkflowToSkill(
         maximumDemonstratedActionOrdinal,
       maximum_demonstrated_plan_index: maximumDemonstratedPlanIndex,
       allow_undemonstrated_actions_after_boundary: false,
-      approval_policy: "preserve_browsercrew_approval_rules"
+      approval_policy: "preserve_browserharness_approval_rules"
     },
     provenance: buildSkillProvenance(workflow, parameters),
     evaluations: compileWorkflowEvaluations(

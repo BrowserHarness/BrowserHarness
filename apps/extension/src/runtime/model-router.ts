@@ -2,7 +2,7 @@ import type { PageObservation } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
 import type { TaskEpisodeMemory } from "./task-memory";
 import type { ProceduralSearchHit } from "./procedural-memory";
-import type { BrowserCrewMcpCatalog } from "./mcp-catalog";
+import type { BrowserHarnessMcpCatalog } from "./mcp-catalog";
 import {
   directChatCompletion,
   nextAgentDecision,
@@ -77,7 +77,7 @@ export async function readOnlyWorkerDecisionWithFallback(
   trail: string[],
   signal?: AbortSignal,
   evidence: TabEvidence[] = [],
-  mcpCatalog: BrowserCrewMcpCatalog = {
+  mcpCatalog: BrowserHarnessMcpCatalog = {
     servers_considered: 0,
     tools: []
   }
@@ -106,7 +106,7 @@ export async function agentDecisionWithFallback(
   screenshotDataUrl?: string,
   recalledMemory: TaskEpisodeMemory[] = [],
   recalledProcedures: ProceduralSearchHit[] = [],
-  mcpCatalog: BrowserCrewMcpCatalog = {
+  mcpCatalog: BrowserHarnessMcpCatalog = {
     servers_considered: 0,
     tools: []
   }

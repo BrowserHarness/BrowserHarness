@@ -7,7 +7,7 @@ import type { PageObservation, ToolName } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
 import type { TaskEpisodeMemory } from "./task-memory";
 import type { ProceduralSearchHit } from "./procedural-memory";
-import type { BrowserCrewMcpCatalog } from "./mcp-catalog";
+import type { BrowserHarnessMcpCatalog } from "./mcp-catalog";
 import { classifyModelCapabilities } from "../settings/model-capabilities";
 
 export type AgentDecision =
@@ -253,7 +253,7 @@ function workerPrompt(
   observation: PageObservation,
   trail: string[],
   evidence: TabEvidence[],
-  mcpCatalog: BrowserCrewMcpCatalog
+  mcpCatalog: BrowserHarnessMcpCatalog
 ) {
   return `WORKER SUBTASK:
 ${task}
@@ -284,7 +284,7 @@ function agentPrompt(
   screenshotAttached: boolean,
   recalledMemory: TaskEpisodeMemory[],
   recalledProcedures: ProceduralSearchHit[],
-  mcpCatalog: BrowserCrewMcpCatalog
+  mcpCatalog: BrowserHarnessMcpCatalog
 ) {
   return `USER GOAL:
 ${task}
@@ -721,7 +721,7 @@ export async function nextReadOnlyWorkerDecision(
   trail: string[],
   signal?: AbortSignal,
   evidence: TabEvidence[] = [],
-  mcpCatalog: BrowserCrewMcpCatalog = {
+  mcpCatalog: BrowserHarnessMcpCatalog = {
     servers_considered: 0,
     tools: []
   }
@@ -805,7 +805,7 @@ export async function testAgentCapability(
   const started = performance.now();
   const probeObservation: PageObservation = {
     tab_id: 0,
-    url: "https://browsercrew.local/health-check",
+    url: "https://browserharness.local/health-check",
     title: "BrowserHarness Agent Health Check",
     visible_text: "A button named Continue is available.",
     elements: [
@@ -864,7 +864,7 @@ export async function nextAgentDecision(
   screenshotDataUrl?: string,
   recalledMemory: TaskEpisodeMemory[] = [],
   recalledProcedures: ProceduralSearchHit[] = [],
-  mcpCatalog: BrowserCrewMcpCatalog = {
+  mcpCatalog: BrowserHarnessMcpCatalog = {
     servers_considered: 0,
     tools: []
   }

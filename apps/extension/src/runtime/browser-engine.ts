@@ -6,7 +6,7 @@ import type {
 import type { AgentDecision } from "./model-client";
 import type { TaskEpisodeMemory } from "./task-memory";
 import type { ProceduralSearchHit } from "./procedural-memory";
-import type { BrowserCrewMcpCatalog } from "./mcp-catalog";
+import type { BrowserHarnessMcpCatalog } from "./mcp-catalog";
 import { createLoopGuard, registerDecision } from "./loop-guard";
 import {
   TabEvidenceStore,
@@ -34,7 +34,7 @@ export interface BrowserDecisionContext {
   evidence: TabEvidence[];
   recalled_memory: TaskEpisodeMemory[];
   recalled_procedures: ProceduralSearchHit[];
-  mcp_catalog: BrowserCrewMcpCatalog;
+  mcp_catalog: BrowserHarnessMcpCatalog;
   screenshotDataUrl?: string;
   signal?: AbortSignal;
 }
@@ -88,7 +88,7 @@ export interface BrowserEngineDependencies {
   discoverMcpCatalog?(
     task: string,
     observation: PageObservation
-  ): Promise<BrowserCrewMcpCatalog>;
+  ): Promise<BrowserHarnessMcpCatalog>;
   isCancelled(): boolean;
   waitWhilePaused(): Promise<void>;
   withActivity<T>(

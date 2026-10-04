@@ -49,7 +49,7 @@ test("normalizes common mcpServers config and interpolates environment secrets",
 
 test("missing MCP config is an empty server registry", async () => {
   const dir = await mkdtemp(
-    path.join(os.tmpdir(), "browsercrew-mcp-empty-")
+    path.join(os.tmpdir(), "browserharness-mcp-empty-")
   );
   try {
     const servers = await loadMcpServersConfig(
@@ -63,7 +63,7 @@ test("missing MCP config is an empty server registry", async () => {
 
 test("outbound MCP client discovers and calls a real stdio server", async () => {
   const dir = await mkdtemp(
-    path.join(os.tmpdir(), "browsercrew-mcp-client-")
+    path.join(os.tmpdir(), "browserharness-mcp-client-")
   );
   const configPath = path.join(dir, "mcp-servers.json");
 
@@ -173,7 +173,7 @@ test("outbound MCP client discovers and calls a real stdio server", async () => 
 
 test("outbound MCP client rejects unknown tools before calling", async () => {
   const dir = await mkdtemp(
-    path.join(os.tmpdir(), "browsercrew-mcp-client-")
+    path.join(os.tmpdir(), "browserharness-mcp-client-")
   );
   const configPath = path.join(dir, "mcp-servers.json");
 

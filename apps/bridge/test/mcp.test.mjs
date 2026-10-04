@@ -3,14 +3,14 @@ import test from "node:test";
 import { WebSocket } from "ws";
 import { createBridgeServer } from "../src/core.mjs";
 import {
-  BROWSERCREW_MCP_TOOLS,
+  BROWSERHARNESS_MCP_TOOLS,
   bridgeHttpBase,
   bridgeResultToMcp,
   createBridgeHttpClient
 } from "../src/mcp.mjs";
 
 test("MCP tool registry exposes the full Local Bridge action surface", () => {
-  const actions = BROWSERCREW_MCP_TOOLS.map(
+  const actions = BROWSERHARNESS_MCP_TOOLS.map(
     (tool) => tool.action
   );
   assert.equal(actions.length, 34);
@@ -26,7 +26,7 @@ test("MCP Bridge transport rejects non-loopback configuration", () => {
   assert.throws(
     () =>
       bridgeHttpBase({
-        host: "browsercrew.example.com",
+        host: "browserharness.example.com",
         port: 10087,
         token: "secret"
       }),

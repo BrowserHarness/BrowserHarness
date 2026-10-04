@@ -12,7 +12,7 @@ import {
   type ProviderConnection
 } from "../settings/provider-store";
 
-const KEY = "browsercrew.proceduralVectors.v1";
+const KEY = "browserharness.proceduralVectors.v1";
 const MAX_INDEX = 300;
 const MAX_REINDEX_PER_SEARCH = 32;
 

@@ -22,7 +22,7 @@
     },
     "artifact": {
       "id": 10913037268,
-      "name": "browsercrew-extension",
+      "name": "browserharness-extension",
       "digest": "sha256:18208b3fa3dc075b61ee075124983a2edb74f605c9d1cd9f93cd96028602c706"
     }
   },

@@ -23,23 +23,23 @@ type ContentRequest =
   | { type: "WATCH_REPLAY_STEP"; step: RecordedWorkflowStep };
 
 type ContentRuntimeGlobal = typeof globalThis & {
-  __browsercrewContentRuntime?: {
+  __browserharnessContentRuntime?: {
     abortController: AbortController;
     messageListener?: (...args: any[]) => any;
   };
 };
 
 const runtimeGlobal = globalThis as ContentRuntimeGlobal;
-runtimeGlobal.__browsercrewContentRuntime?.abortController.abort();
-if (runtimeGlobal.__browsercrewContentRuntime?.messageListener) {
+runtimeGlobal.__browserharnessContentRuntime?.abortController.abort();
+if (runtimeGlobal.__browserharnessContentRuntime?.messageListener) {
   chrome.runtime.onMessage.removeListener(
-    runtimeGlobal.__browsercrewContentRuntime.messageListener
+    runtimeGlobal.__browserharnessContentRuntime.messageListener
   );
 }
 const contentAbortController = new AbortController();
 
-const ID_ATTR = "data-browsercrew-id";
-const REF_ATTR = "data-browsercrew-ref";
+const ID_ATTR = "data-browserharness-id";
+const REF_ATTR = "data-browserharness-ref";
 let idCounter = 0;
 let refCounter = 0;
 let recording = false;
@@ -946,7 +946,7 @@ const contentMessageListener = (
 };
 
 chrome.runtime.onMessage.addListener(contentMessageListener);
-runtimeGlobal.__browsercrewContentRuntime = {
+runtimeGlobal.__browserharnessContentRuntime = {
   abortController: contentAbortController,
   messageListener: contentMessageListener
 };

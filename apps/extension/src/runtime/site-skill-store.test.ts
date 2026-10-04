@@ -45,7 +45,7 @@ function candidate(id: string, name = "Example"): SiteCandidateSkill {
     network_candidates: [],
     safety: {
       execution_requires_fresh_resolution: true,
-      approval_policy: "preserve_browsercrew_approval_rules",
+      approval_policy: "preserve_browserharness_approval_rules",
       structural_analysis_is_not_execution_proof: true
     },
     provenance: {

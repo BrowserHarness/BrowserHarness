@@ -2,9 +2,9 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 
-export const BROWSERCREW_MCP_VERSION = "0.1.0";
+export const BROWSERHARNESS_MCP_VERSION = "0.1.0";
 
-export const BROWSERCREW_MCP_TOOLS = [
+export const BROWSERHARNESS_MCP_TOOLS = [
   ["observe_page", "Observe the selected BrowserHarness task tab and return fresh semantic page evidence."],
   ["read_page", "Read bounded page/document content using BrowserHarness extraction limits and continuation."],
   ["ax_snapshot", "Capture a fresh accessibility-tree snapshot for semantic targeting."],
@@ -217,15 +217,15 @@ const commandInputSchema = z.object({
     .describe("Arguments for this BrowserHarness browser tool.")
 });
 
-export function createBrowserCrewMcpServer(
+export function createBrowserHarnessMcpServer(
   config,
   options = {}
 ) {
   const client = createBridgeHttpClient(config, options);
   const server = new McpServer(
     {
-      name: "browsercrew",
-      version: BROWSERCREW_MCP_VERSION
+      name: "browserharness",
+      version: BROWSERHARNESS_MCP_VERSION
     },
     {
       instructions:
@@ -234,7 +234,7 @@ export function createBrowserCrewMcpServer(
   );
 
   server.registerTool(
-    "browsercrew_status",
+    "browserharness_status",
     {
       description:
         "Check whether the local BrowserHarness Bridge and paired Chrome extension are available.",
@@ -243,9 +243,9 @@ export function createBrowserCrewMcpServer(
     async () => bridgeResultToMcp(await client.status())
   );
 
-  for (const spec of BROWSERCREW_MCP_TOOLS) {
+  for (const spec of BROWSERHARNESS_MCP_TOOLS) {
     server.registerTool(
-      `browsercrew_${spec.action}`,
+      `browserharness_${spec.action}`,
       {
         description: spec.description,
         inputSchema: commandInputSchema
@@ -265,9 +265,9 @@ export function createBrowserCrewMcpServer(
   return server;
 }
 
-export async function serveBrowserCrewMcp(config) {
+export async function serveBrowserHarnessMcp(config) {
   console.error(
     "BrowserHarness MCP server is using the local BrowserHarness Bridge over stdio"
   );
-  await serveStdio(() => createBrowserCrewMcpServer(config));
+  await serveStdio(() => createBrowserHarnessMcpServer(config));
 }

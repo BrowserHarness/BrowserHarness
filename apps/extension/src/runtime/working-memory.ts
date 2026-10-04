@@ -4,7 +4,7 @@ import type {
   BrowserSessionPageContext
 } from "./session-evidence";
 
-const KEY = "browsercrew.workingMemory.v1";
+const KEY = "browserharness.workingMemory.v1";
 const MAX_SESSIONS = 20;
 const MAX_RECENT_ACTIONS = 12;
 const MAX_HANDOFFS = 5;

@@ -8,7 +8,7 @@ export interface TaskSession {
   group_id?: number;
 }
 
-const STORAGE_KEY = "browsercrew.taskSessions";
+const STORAGE_KEY = "browserharness.taskSessions";
 const MAX_SESSIONS = 20;
 
 let writeQueue: Promise<void> = Promise.resolve();

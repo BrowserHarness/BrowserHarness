@@ -7,7 +7,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 export const DEFAULT_MCP_SERVERS_FILE = path.join(
   os.homedir(),
-  ".browsercrew-bridge",
+  ".browserharness-bridge",
   "mcp-servers.json"
 );
 
@@ -188,7 +188,7 @@ function boundedToolResult(result, maxChars = 100_000) {
         }
       ],
       isError: true,
-      _browsercrew: {
+      _browserharness: {
         truncated: false,
         serialization_failed: true
       }
@@ -209,7 +209,7 @@ function boundedToolResult(result, maxChars = 100_000) {
       }
     ],
     ...(result?.isError === true ? { isError: true } : {}),
-    _browsercrew: {
+    _browserharness: {
       truncated: true,
       original_chars: serialized.length,
       retained_chars: maxChars
@@ -280,7 +280,7 @@ export function createMcpClientManager({
 
     const client = new Client(
       {
-        name: "browsercrew-bridge",
+        name: "browserharness-bridge",
         version: "0.3.0"
       },
       {

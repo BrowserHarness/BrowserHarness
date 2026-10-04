@@ -5,9 +5,9 @@ import {
 } from "./approval-grant";
 
 describe("privileged trusted-input approval grants", () => {
-  const extensionId = "browsercrew-extension-id";
+  const extensionId = "browserharness-extension-id";
   const extensionBaseUrl =
-    "chrome-extension://browsercrew-extension-id/";
+    "chrome-extension://browserharness-extension-id/";
 
   it("accepts an explicit grant only from an extension page sender", () => {
     expect(

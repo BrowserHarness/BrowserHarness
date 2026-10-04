@@ -470,7 +470,7 @@ async function armDeliveryProof(
     {
       objectId,
       functionDeclaration:
-        "function(token){const key='__browsercrewTrustedClickProofs';const root=window;const store=root[key]||(root[key]={});const target=this;const proof={received:false,handler:null};const handler=(event)=>{const node=event.target;proof.received=Boolean(node&&(node===target||target.contains(node)));};proof.handler=handler;store[token]=proof;document.addEventListener('pointerdown',handler,true);document.addEventListener('mousedown',handler,true);return true;}",
+        "function(token){const key='__browserharnessTrustedClickProofs';const root=window;const store=root[key]||(root[key]={});const target=this;const proof={received:false,handler:null};const handler=(event)=>{const node=event.target;proof.received=Boolean(node&&(node===target||target.contains(node)));};proof.handler=handler;store[token]=proof;document.addEventListener('pointerdown',handler,true);document.addEventListener('mousedown',handler,true);return true;}",
       arguments: [{ value: token }],
       returnByValue: true
     }
@@ -488,7 +488,7 @@ async function collectDeliveryProof(
     {
       objectId,
       functionDeclaration:
-        "function(token){const key='__browsercrewTrustedClickProofs';const store=window[key];const proof=store&&store[token];if(!proof)return false;document.removeEventListener('pointerdown',proof.handler,true);document.removeEventListener('mousedown',proof.handler,true);const received=Boolean(proof.received);delete store[token];return received;}",
+        "function(token){const key='__browserharnessTrustedClickProofs';const store=window[key];const proof=store&&store[token];if(!proof)return false;document.removeEventListener('pointerdown',proof.handler,true);document.removeEventListener('mousedown',proof.handler,true);const received=Boolean(proof.received);delete store[token];return received;}",
       arguments: [{ value: token }],
       returnByValue: true
     }
@@ -508,7 +508,7 @@ async function armDragDeliveryProof(
     {
       objectId: sourceObjectId,
       functionDeclaration:
-        "function(token,target){const key='__browsercrewTrustedDragProofs';const store=window[key]||(window[key]={});const source=this;const owns=(root,node)=>Boolean(root&&node&&(node===root||root.contains(node)));const proof={down:false,up:false,downHandler:null,upHandler:null};const down=(event)=>{if(owns(source,event.target))proof.down=true;};const up=(event)=>{if(owns(target,event.target))proof.up=true;};proof.downHandler=down;proof.upHandler=up;store[token]=proof;document.addEventListener('pointerdown',down,true);document.addEventListener('mousedown',down,true);document.addEventListener('pointerup',up,true);document.addEventListener('mouseup',up,true);return true;}",
+        "function(token,target){const key='__browserharnessTrustedDragProofs';const store=window[key]||(window[key]={});const source=this;const owns=(root,node)=>Boolean(root&&node&&(node===root||root.contains(node)));const proof={down:false,up:false,downHandler:null,upHandler:null};const down=(event)=>{if(owns(source,event.target))proof.down=true;};const up=(event)=>{if(owns(target,event.target))proof.up=true;};proof.downHandler=down;proof.upHandler=up;store[token]=proof;document.addEventListener('pointerdown',down,true);document.addEventListener('mousedown',down,true);document.addEventListener('pointerup',up,true);document.addEventListener('mouseup',up,true);return true;}",
       arguments: [
         { value: token },
         { objectId: targetObjectId }
@@ -528,7 +528,7 @@ async function collectDragDeliveryProof(
     "Runtime.evaluate",
     {
       expression:
-        "(function(){const key='__browsercrewTrustedDragProofs';const store=window[key];const proof=store&&store[" +
+        "(function(){const key='__browserharnessTrustedDragProofs';const store=window[key];const proof=store&&store[" +
         encodedToken +
         "];if(!proof)return false;document.removeEventListener('pointerdown',proof.downHandler,true);document.removeEventListener('mousedown',proof.downHandler,true);document.removeEventListener('pointerup',proof.upHandler,true);document.removeEventListener('mouseup',proof.upHandler,true);const delivered=Boolean(proof.down&&proof.up);delete store[" +
         encodedToken +

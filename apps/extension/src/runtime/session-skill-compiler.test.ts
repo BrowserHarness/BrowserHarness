@@ -153,7 +153,7 @@ describe("Browser task Session to Skill compiler", () => {
         maximum_demonstrated_action_ordinal: 3,
         maximum_demonstrated_plan_index: 2,
         allow_undemonstrated_actions_after_boundary: false,
-        approval_policy: "preserve_browsercrew_approval_rules"
+        approval_policy: "preserve_browserharness_approval_rules"
       }
     });
   });

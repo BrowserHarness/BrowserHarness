@@ -23,7 +23,7 @@ BrowserHarness browser runtime
 - Status: `GET /status`
 - Commands: `POST /command`
 
-The daemon creates a local pairing token in `~/.browsercrew-bridge/config.json`. The extension stores the token only in Chrome extension-local storage.
+The daemon creates a local pairing token in `~/.browserharness-bridge/config.json`. The extension stores the token only in Chrome extension-local storage.
 
 ## Command envelope
 
@@ -117,7 +117,7 @@ BrowserHarness Bridge can expose the same browser runtime to MCP hosts:
 ```text
 MCP host
    ↓ stdio MCP
-browsercrew-bridge mcp
+browserharness-bridge mcp
    ↓ authenticated loopback POST /command
 BrowserHarness Bridge daemon
    ↓ paired WebSocket
@@ -129,10 +129,10 @@ BrowserHarness browser runtime
 Run:
 
 ```bash
-browsercrew-bridge mcp
+browserharness-bridge mcp
 ```
 
-The MCP server uses the current v2 `@modelcontextprotocol/server` stdio path and exposes `browsercrew_status` plus one `browsercrew_<action>` tool for every Local Bridge browser action.
+The MCP server uses the current v2 `@modelcontextprotocol/server` stdio path and exposes `browserharness_status` plus one `browserharness_<action>` tool for every Local Bridge browser action.
 
 Every browser-action tool requires a stable `session` value. Reuse the same value across calls for one task so the normal BrowserHarness task-session ownership rules remain in force.
 

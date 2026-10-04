@@ -323,11 +323,11 @@
   },
   "mcp_server": {
     "transport": "stdio",
-    "command": "browsercrew-bridge mcp",
+    "command": "browserharness-bridge mcp",
     "sdk": "@modelcontextprotocol/server v2",
     "tools": {
       "count": 35,
-      "composition": "browsercrew_status plus 34 exported action tools; outbound mcp is intentionally omitted to prevent recursive MCP chaining",
+      "composition": "browserharness_status plus 34 exported action tools; outbound mcp is intentionally omitted to prevent recursive MCP chaining",
       "input": "session, optional title, optional args object"
     },
     "relay": "MCP tool -> authenticated loopback Bridge /command -> paired extension",

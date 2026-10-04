@@ -104,7 +104,7 @@ export type SiteSkillRecipeStep =
       target?: SiteSkillTarget;
       method: string;
       action: string;
-      approval: "browsercrew_runtime";
+      approval: "browserharness_runtime";
     }
   | {
       kind: "api_fetch";
@@ -162,7 +162,7 @@ export interface SiteCandidateSkill {
   network_candidates: SiteNetworkEvidence[];
   safety: {
     execution_requires_fresh_resolution: true;
-    approval_policy: "preserve_browsercrew_approval_rules";
+    approval_policy: "preserve_browserharness_approval_rules";
     structural_analysis_is_not_execution_proof: true;
   };
   provenance: {
@@ -473,7 +473,7 @@ export function compileSiteEvidenceToCandidate(
           ...(submitTarget ? { target: submitTarget } : {}),
           method: form.method,
           action: form.action,
-          approval: "browsercrew_runtime" as const
+          approval: "browserharness_runtime" as const
         }
       ],
       verification: {
@@ -536,7 +536,7 @@ export function compileSiteEvidenceToCandidate(
     network_candidates: evidence.network,
     safety: {
       execution_requires_fresh_resolution: true,
-      approval_policy: "preserve_browsercrew_approval_rules",
+      approval_policy: "preserve_browserharness_approval_rules",
       structural_analysis_is_not_execution_proof: true
     },
     provenance: {

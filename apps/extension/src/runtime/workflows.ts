@@ -104,7 +104,7 @@ export interface SavedWorkflow {
   recording?: WorkflowRecordingSummary;
 }
 
-const KEY = "browsercrew.workflows";
+const KEY = "browserharness.workflows";
 
 function slug(value: string): string {
   const normalized = value

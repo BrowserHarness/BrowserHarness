@@ -75,7 +75,7 @@ function safeFilename(value: string): string {
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, " ")
     .trim();
-  return cleaned || "browsercrew-page.pdf";
+  return cleaned || "browserharness-page.pdf";
 }
 
 export async function savePageAsPdf(
@@ -109,7 +109,7 @@ export async function savePageAsPdf(
   }
 
   const filename = safeFilename(
-    options.filename || "browsercrew-page.pdf"
+    options.filename || "browserharness-page.pdf"
   );
   const url = `data:application/pdf;base64,${result.data}`;
   const downloadId = await chrome.downloads.download({
