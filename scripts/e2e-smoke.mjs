@@ -67,6 +67,19 @@ try {
   await side.waitForTimeout(1000);
   check("side panel renders", (await side.locator("body").innerText()).includes("Give your browser a task"));
 
+  await side.evaluate(() =>
+    chrome.storage.session.set({
+      "browserharness.pendingExplain.v1": {
+        text: "Quantum entanglement",
+        url: "https://example.com/a",
+        created_at: Date.now()
+      }
+    })
+  );
+  await side.waitForTimeout(500);
+  const prefilled = await side.locator("textarea").first().inputValue();
+  check("quick-explain prefills the prompt", prefilled.includes("Quantum entanglement") && prefilled.includes("example.com"), prefilled.slice(0, 60));
+
   const tool = async (name, input = {}) => {
     await page.bringToFront();
     return side.evaluate(

@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  QUICK_EXPLAIN_STORAGE_KEY,
+  buildExplainPrompt,
+  parsePendingExplain
+} from "../runtime/quick-explain";
 import AddIcon from "@mui/icons-material/Add";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import PauseIcon from "@mui/icons-material/Pause";
@@ -197,6 +202,38 @@ export function App() {
   useEffect(() => {
     void refreshContext();
   }, [view]);
+
+  useEffect(() => {
+    const consume = async () => {
+      try {
+        const stored = await chrome.storage.session.get(
+          QUICK_EXPLAIN_STORAGE_KEY
+        );
+        const pending = parsePendingExplain(
+          stored[QUICK_EXPLAIN_STORAGE_KEY]
+        );
+        if (!pending) return;
+        await chrome.storage.session.remove(
+          QUICK_EXPLAIN_STORAGE_KEY
+        );
+        setView("chat");
+        setPrompt(buildExplainPrompt(pending.text, pending.url));
+      } catch {
+        // Session storage unavailable; quick-explain is a convenience only.
+      }
+    };
+    void consume();
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string
+    ) => {
+      if (area === "session" && QUICK_EXPLAIN_STORAGE_KEY in changes) {
+        void consume();
+      }
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
 
   const addAssistantMessage = (text: string) => {
     setMessages((items) => [

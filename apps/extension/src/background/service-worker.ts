@@ -6,6 +6,11 @@ import type {
   ToolResult
 } from "../runtime/protocol";
 import {
+  QUICK_EXPLAIN_MENU_ID,
+  QUICK_EXPLAIN_STORAGE_KEY,
+  type PendingExplain
+} from "../runtime/quick-explain";
+import {
   startBridgeClient,
   type BridgeCommand
 } from "./bridge-client";
@@ -124,6 +129,36 @@ chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(() => undefined);
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: QUICK_EXPLAIN_MENU_ID,
+      title: "Explain selection with BrowserHarness",
+      contexts: ["selection"]
+    });
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (
+    info.menuItemId !== QUICK_EXPLAIN_MENU_ID ||
+    !info.selectionText
+  ) {
+    return;
+  }
+  const pending: PendingExplain = {
+    text: info.selectionText,
+    url: info.pageUrl,
+    created_at: Date.now()
+  };
+  // Open first: sidePanel.open needs the user gesture from this click.
+  if (tab?.id !== undefined) {
+    void chrome.sidePanel
+      .open({ tabId: tab.id })
+      .catch(() => undefined);
+  }
+  void chrome.storage.session.set({
+    [QUICK_EXPLAIN_STORAGE_KEY]: pending
+  });
 });
 
 async function activeTab() {
