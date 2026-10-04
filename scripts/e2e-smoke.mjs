@@ -29,7 +29,7 @@ const server = http
     }
     res.setHeader("content-type", "text/html");
     res.end(`<html><head><title>Smoke Shop</title></head><body><h1>Shop</h1>
-<form action="/s" method="get"><label>Email <input name="email" type="text"></label><button type="submit">Go</button></form>
+<input type="file" id="f" aria-label="Resume"><form action="/s" method="get"><label>Email <input name="email" type="text"></label><button type="submit">Go</button></form>
 <script>fetch("/api/items?q=shoes&page=1").then(r=>r.json()).then(d=>document.title="Smoke Shop "+d.items.length)</script></body></html>`);
   })
   .listen(0);
@@ -115,6 +115,25 @@ try {
   check("read_page returns page text", read.ok);
   await page.goto(`http://localhost:${port}/`);
   await page.waitForTimeout(500);
+
+  await side.locator('[data-testid="attach-input"]').setInputFiles({
+    name: "cv.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("hello attachment")
+  });
+  await side.waitForTimeout(500);
+  const stored = await side.evaluate(async () =>
+    (await chrome.storage.local.get("browserharness.attachments.v1"))["browserharness.attachments.v1"]
+  );
+  check("side panel stores an attachment", stored?.length === 1 && stored[0].name === "cv.txt");
+  const ax2 = await tool("ax_snapshot");
+  const fileRef = ax2.ok ? ax2.data.elements.find((e) => /resume/i.test(e.name || e.accessible_name || ""))?.element_id : undefined;
+  const up = await tool("upload", { element_id: fileRef, attachment_ids: [stored?.[0]?.id] });
+  const pageFile = await page.evaluate(async () => {
+    const f = document.getElementById("f").files[0];
+    return f ? `${f.name}:${await f.text()}` : null;
+  });
+  check("upload by attachment id fills the file input", up.ok && pageFile === "cv.txt:hello attachment", JSON.stringify(up.ok ? pageFile : up.error));
 
   const net = await tool("network", { action: "start" });
   check("network capture starts", net.ok);

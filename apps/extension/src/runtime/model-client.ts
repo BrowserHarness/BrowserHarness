@@ -96,7 +96,7 @@ Escalate browser control in layers:
 5. trusted_click / trusted_type / trusted_key for sites that reject synthetic DOM input;
 6. dialog for native alert/confirm/prompt state;
 7. network with action start/list/detail/stop when API/network evidence is more reliable than visual guessing;
-8. upload after ax_snapshot when the task explicitly requires selecting local file paths supplied by the user/agent runtime;
+8. upload after ax_snapshot when the task explicitly requires selecting local file paths supplied by the user/agent runtime; when the user message lists USER ATTACHMENTS, upload with {"element_id":"...","attachment_ids":["<id>"]} instead of file paths (the file is built in the page from the stored attachment);
 9. save_pdf to export the current page through Chrome's print-to-PDF path;
 10. raw cdp only when higher-level BrowserCrew tools cannot express the required browser action.
 Use hover after a fresh ax_snapshot when menus, tooltips, previews, or controls require a real pointer hover; pass a fresh element_id and BrowserCrew will verify the intended target is actually hovered, then re-observe the page.

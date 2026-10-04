@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  deleteAttachment,
+  describeAttachmentsForPrompt,
+  fileToBase64,
+  listAttachments,
+  saveAttachment,
+  toMeta,
+  type AttachmentMeta
+} from "../runtime/attachments";
+import {
   QUICK_EXPLAIN_STORAGE_KEY,
   buildExplainPrompt,
   parsePendingExplain
@@ -166,6 +175,8 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [prompt, setPrompt] = useState("");
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -508,9 +519,42 @@ export function App() {
     }
   };
 
+  useEffect(() => {
+    void listAttachments()
+      .then((items) => setAttachments(items.map(toMeta)))
+      .catch(() => undefined);
+  }, []);
+
+  const handleAttach = async (files: FileList | null) => {
+    for (const file of Array.from(files || [])) {
+      try {
+        const record = await saveAttachment({
+          name: file.name,
+          mime: file.type,
+          size: file.size,
+          data_b64: await fileToBase64(file)
+        });
+        setAttachments((items) => [...items, toMeta(record)]);
+      } catch (error) {
+        addAssistantMessage(
+          error instanceof Error
+            ? error.message.replace(/^[A-Z_]+: /, "")
+            : "Could not attach that file."
+        );
+      }
+    }
+    if (fileInput.current) fileInput.current.value = "";
+  };
+
+  const removeAttachment = async (id: string) => {
+    await deleteAttachment(id).catch(() => undefined);
+    setAttachments((items) => items.filter((item) => item.id !== id));
+  };
+
   const runTask = async () => {
     const task = prompt.trim();
     if (!task || running) return;
+    const attachmentNote = describeAttachmentsForPrompt(attachments);
 
     if (
       !primary?.apiKey ||
@@ -596,7 +640,7 @@ export function App() {
         task.length > 48 ? `${task.slice(0, 45)}…` : task;
 
       const result = await runBrowserTask(
-        task,
+        task + attachmentNote,
         {
           session: {
             id: taskSessionId,
@@ -1264,6 +1308,26 @@ export function App() {
             </Button>
           </Stack>
         )}
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          data-testid="attach-input"
+          onChange={(event) => void handleAttach(event.target.files)}
+        />
+        {attachments.length > 0 && (
+          <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", mb: 0.5 }}>
+            {attachments.map((item) => (
+              <Chip
+                key={item.id}
+                size="small"
+                label={item.name}
+                onDelete={() => void removeAttachment(item.id)}
+              />
+            ))}
+          </Stack>
+        )}
         <TextField
           multiline
           maxRows={5}
@@ -1281,9 +1345,14 @@ export function App() {
             input: {
               endAdornment: (
                 <Stack direction="row" alignItems="center">
-                  <Tooltip title="Attach/context — next MVP slice">
+                  <Tooltip title="Attach files for uploads (up to 5 MB each)">
                     <span>
-                      <IconButton size="small" disabled>
+                      <IconButton
+                        size="small"
+                        onClick={() => fileInput.current?.click()}
+                        disabled={running}
+                        aria-label="Attach files"
+                      >
                         <AddIcon />
                       </IconButton>
                     </span>

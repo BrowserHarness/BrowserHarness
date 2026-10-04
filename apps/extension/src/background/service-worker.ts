@@ -5,6 +5,7 @@ import type {
   ToolName,
   ToolResult
 } from "../runtime/protocol";
+import { getAttachmentsByIds } from "../runtime/attachments";
 import {
   QUICK_EXPLAIN_MENU_ID,
   QUICK_EXPLAIN_STORAGE_KEY,
@@ -37,6 +38,7 @@ import {
 } from "./cdp-input";
 import {
   savePageAsPdf,
+  uploadAttachments,
   uploadFiles
 } from "./file-tools";
 import {
@@ -2365,6 +2367,38 @@ async function runTool(
   }
 
   if (tool === "upload") {
+    if (
+      typeof input.element_id === "string" &&
+      Array.isArray(input.attachment_ids) &&
+      input.attachment_ids.length > 0 &&
+      input.attachment_ids.every((id) => typeof id === "string")
+    ) {
+      try {
+        const records = await getAttachmentsByIds(
+          input.attachment_ids as string[]
+        );
+        return {
+          ok: true,
+          data: await uploadAttachments(
+            tabId,
+            input.element_id,
+            records
+          )
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "UPLOAD_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Attachment upload failed"
+          }
+        };
+      }
+    }
+
     if (
       typeof input.element_id !== "string" ||
       !Array.isArray(input.files) ||
