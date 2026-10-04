@@ -1,7 +1,7 @@
-# BrowserCrew Local Bridge Protocol v0.1
+# BrowserHarness Local Bridge Protocol v0.1
 
 ## Purpose
-BrowserCrew Local Bridge lets a user-authorized local agent drive the BrowserCrew extension through the same browser runtime, task-session ownership, semantic element refs, and safety policy used by the built-in agent.
+BrowserHarness Local Bridge lets a user-authorized local agent drive the BrowserHarness extension through the same browser runtime, task-session ownership, semantic element refs, and safety policy used by the built-in agent.
 
 The bridge is **not** a remote web API. The daemon binds only to loopback.
 
@@ -10,11 +10,11 @@ The bridge is **not** a remote web API. The daemon binds only to loopback.
 ```
 Local agent
    ↓ authenticated HTTP
-BrowserCrew Bridge daemon
+BrowserHarness Bridge daemon
    ↓ paired WebSocket
-BrowserCrew MV3 service worker
+BrowserHarness MV3 service worker
    ↓
-BrowserCrew browser runtime
+BrowserHarness browser runtime
 ```
 
 ## Default endpoints
@@ -36,9 +36,9 @@ The daemon creates a local pairing token in `~/.browsercrew-bridge/config.json`.
 }
 ```
 
-Every command must reuse the same `session` for one task. That session is the BrowserCrew task-session ID:
+Every command must reuse the same `session` for one task. That session is the BrowserHarness task-session ID:
 - the user's starting tab is borrowed;
-- BrowserCrew-created tabs are owned;
+- BrowserHarness-created tabs are owned;
 - owned tabs are grouped under the task;
 - unrelated tabs remain outside the session.
 
@@ -63,9 +63,9 @@ Failure:
 ```
 
 ## Safety
-External agents do not bypass BrowserCrew safety.
+External agents do not bypass BrowserHarness safety.
 
-Before bridge `click` or Enter submission, BrowserCrew re-observes the target page. If the semantic element is marked consequential, the command returns `APPROVAL_REQUIRED` rather than executing.
+Before bridge `click` or Enter submission, BrowserHarness re-observes the target page. If the semantic element is marked consequential, the command returns `APPROVAL_REQUIRED` rather than executing.
 
 Borrowed tabs cannot be closed by session-owned cleanup.
 
@@ -78,9 +78,9 @@ Use `read_page` only when the compact `observe_page` view is insufficient for re
 The default extraction window is intentionally smaller than many browser agents (12k chars) to reduce provider token/rate-limit pressure. A top-frame read can also return readable frame IDs/handles for separate frame reads.
 
 ## Full browser-control layer
-The primary BrowserCrew build exposes its full browser-agent runtime through the authenticated Local Bridge, including accessibility-tree/CDP targeting, trusted mouse/text/key input, native dialog handling, network inspection, upload, PDF export, and raw CDP escape-hatch commands.
+The primary BrowserHarness build exposes its full browser-agent runtime through the authenticated Local Bridge, including accessibility-tree/CDP targeting, trusted mouse/text/key input, native dialog handling, network inspection, upload, PDF export, and raw CDP escape-hatch commands.
 
-External agents use the same BrowserCrew task-session and result envelopes rather than maintaining a second browser-control implementation.
+External agents use the same BrowserHarness task-session and result envelopes rather than maintaining a second browser-control implementation.
 
 ## Current tool surface
 - observe_page
@@ -112,18 +112,18 @@ The v0.1 command envelope remains stable while the tool surface expands.
 
 ## MCP stdio server
 
-BrowserCrew Bridge can expose the same browser runtime to MCP hosts:
+BrowserHarness Bridge can expose the same browser runtime to MCP hosts:
 
 ```text
 MCP host
    ↓ stdio MCP
 browsercrew-bridge mcp
    ↓ authenticated loopback POST /command
-BrowserCrew Bridge daemon
+BrowserHarness Bridge daemon
    ↓ paired WebSocket
-BrowserCrew MV3 service worker
+BrowserHarness MV3 service worker
    ↓
-BrowserCrew browser runtime
+BrowserHarness browser runtime
 ```
 
 Run:
@@ -134,8 +134,8 @@ browsercrew-bridge mcp
 
 The MCP server uses the current v2 `@modelcontextprotocol/server` stdio path and exposes `browsercrew_status` plus one `browsercrew_<action>` tool for every Local Bridge browser action.
 
-Every browser-action tool requires a stable `session` value. Reuse the same value across calls for one task so the normal BrowserCrew task-session ownership rules remain in force.
+Every browser-action tool requires a stable `session` value. Reuse the same value across calls for one task so the normal BrowserHarness task-session ownership rules remain in force.
 
-MCP does not bypass BrowserCrew approvals. A Bridge result such as `APPROVAL_REQUIRED` is returned as an MCP tool error result. Borrowed user tabs remain protected by the extension's existing ownership policy.
+MCP does not bypass BrowserHarness approvals. A Bridge result such as `APPROVAL_REQUIRED` is returned as an MCP tool error result. Borrowed user tabs remain protected by the extension's existing ownership policy.
 
-The MCP process only accepts loopback BrowserCrew Bridge configuration. Stdout is reserved for MCP JSON-RPC; diagnostics are written to stderr.
+The MCP process only accepts loopback BrowserHarness Bridge configuration. Stdout is reserved for MCP JSON-RPC; diagnostics are written to stderr.

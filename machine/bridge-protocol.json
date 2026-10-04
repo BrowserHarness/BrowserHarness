@@ -20,7 +20,7 @@
       "request": {
         "session": "stable task/session id",
         "title": "optional human-readable task label",
-        "action": "BrowserCrew tool id",
+        "action": "BrowserHarness tool id",
         "args": "tool arguments object"
       },
       "response": {
@@ -72,7 +72,7 @@
     ]
   },
   "safety": {
-    "task_sessions": "bridge session maps directly to BrowserCrew task session",
+    "task_sessions": "bridge session maps directly to BrowserHarness task session",
     "borrowed_tabs": "not owned and cannot be closed by session cleanup",
     "approval": "risky click or Enter returns APPROVAL_REQUIRED",
     "unknown_actions": "rejected by extension allowlist",
@@ -184,7 +184,7 @@
     ],
     "create": "fresh AX + bounded form evaluate + optional active network evidence -> persisted immutable candidate revision",
     "verify": "append fresh structural evaluation evidence to a specific immutable revision",
-    "run": "active revision by default -> fresh verification -> fresh semantic target resolution -> parameterized execution; records inspectable execution evidence; non-GET/risky submission requires BrowserCrew approval proof",
+    "run": "active revision by default -> fresh verification -> fresh semantic target resolution -> parameterized execution; records inspectable execution evidence; non-GET/risky submission requires BrowserHarness approval proof",
     "refine": "recollect fresh site evidence -> deterministic contract diff -> create a new candidate revision only when the contract changed; active revision is never mutated or moved",
     "history": "immutable revisions + structural/execution evaluations + execution evidence + lifecycle events + active pointer + promotion gate",
     "promote": "explicit only; same revision must have passing latest structural verification and execution evaluation; promotion responses include the candidate-vs-active comparison snapshot",
@@ -241,12 +241,12 @@
       "Enter Escape"
     ],
     "mod_resolution": "Cmd on macOS; Ctrl on Windows/Linux/ChromeOS",
-    "approval": "Enter-containing sequences preserve BrowserCrew approval policy"
+    "approval": "Enter-containing sequences preserve BrowserHarness approval policy"
   },
   "orchestrator_tools": {
     "await_user_action": {
       "bridge_exposed": false,
-      "purpose": "pause BrowserCrew planning for a human-only page step, then re-observe fresh state",
+      "purpose": "pause BrowserHarness planning for a human-only page step, then re-observe fresh state",
       "use_cases": [
         "login",
         "CAPTCHA/human verification",
@@ -262,7 +262,7 @@
     "reload": "reload selected task tab with optional bypass_cache + bounded usable-document verification"
   },
   "close_session": {
-    "purpose": "close all task-owned tabs and delete the BrowserCrew task session",
+    "purpose": "close all task-owned tabs and delete the BrowserHarness task session",
     "preserves": "borrowed user tabs are never closed",
     "output": "session_id, closed_owned_tabs count, borrowed_tabs_preserved count"
   },
@@ -277,7 +277,7 @@
     ],
     "working": {
       "storage": "chrome.storage.session",
-      "scope": "current BrowserCrew task session only",
+      "scope": "current BrowserHarness task session only",
       "automatic_updates": "initial page + successful browser actions + human handoffs",
       "payload_policy": "tool input payloads are excluded; stores task/page/tool/target/Skill references only",
       "retirement": "cleared after final durable task episode is saved or when close_session runs"
@@ -332,7 +332,7 @@
     },
     "relay": "MCP tool -> authenticated loopback Bridge /command -> paired extension",
     "safety": [
-      "same BrowserCrew task-session ownership",
+      "same BrowserHarness task-session ownership",
       "same approval boundaries",
       "APPROVAL_REQUIRED returned with isError=true",
       "non-loopback Bridge configuration rejected",
@@ -350,8 +350,8 @@
     },
     "trust_modes": {
       "allow-read-only": "freshly annotated read-only/non-destructive tools may run without approval; everything else asks",
-      "ask-all": "all calls require BrowserCrew approval",
-      "blocked": "server cannot execute through BrowserCrew"
+      "ask-all": "all calls require BrowserHarness approval",
+      "blocked": "server cannot execute through BrowserHarness"
     },
     "call_contract": "fresh list_tools immediately before execution; trust/annotations evaluated before call",
     "evidence": "external MCP arguments redacted from BrowserTaskSessionEvidence",

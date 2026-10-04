@@ -1,7 +1,7 @@
-# BrowserCrew MVP Smoke Findings — 2026-09-26
+# BrowserHarness MVP Smoke Findings — 2026-09-26
 
 ## Environment
-- Chrome unpacked extension build from BrowserCrew v0.1 development artifact.
+- Chrome unpacked extension build from BrowserHarness v0.1 development artifact.
 - Provider: Groq through the OpenAI-compatible adapter.
 - Base URL used successfully: `https://api.groq.com/openai/v1`.
 - Model tested: `openai/gpt-oss-120b`.
@@ -10,7 +10,7 @@
 ### Current-page summary
 **Result:** PASS
 
-The user connected Groq successfully and BrowserCrew completed a page-summary task.
+The user connected Groq successfully and BrowserHarness completed a page-summary task.
 
 This confirms the following path works in real Chrome:
 extension → local provider config → OpenAI-compatible Groq endpoint → page observation → model response → chat result.
@@ -24,7 +24,7 @@ Observed behavior:
 - no text was written into the Google Doc.
 
 Root cause identified:
-- BrowserCrew v0.1 initially supported normal input/textarea DOM editing only;
+- BrowserHarness v0.1 initially supported normal input/textarea DOM editing only;
 - Google Docs uses canvas-based document rendering and a hidden text-event target, so ordinary DOM typing is insufficient.
 
 Remediation in progress:
@@ -44,7 +44,7 @@ Remediation:
 
 ## Next verification
 Install the next CI-green artifact and rerun:
-1. Google Docs: click into the document, ask BrowserCrew to write a short sentence, verify insertion;
+1. Google Docs: click into the document, ask BrowserHarness to write a short sentence, verify insertion;
 2. while the model is deciding, press the header Stop button and verify the request aborts immediately;
 3. verify ordinary page summary still passes with Groq.
 
@@ -54,7 +54,7 @@ Do not mark Google Docs writing passed until this is confirmed in real Chrome.
 ## Additional runtime finding
 ### Content script unavailable after extension reload
 Observed error:
-`BrowserCrew cannot control this page. Chrome internal pages and some protected pages are not supported.`
+`BrowserHarness cannot control this page. Chrome internal pages and some protected pages are not supported.`
 
 Likely cause on a normal Google Docs tab:
 - the extension was reloaded while the tab was already open;
@@ -62,7 +62,7 @@ Likely cause on a normal Google Docs tab:
 
 Remediation:
 - add the `scripting` permission;
-- when a message to a normal HTTP(S) tab fails, BrowserCrew attempts to inject `assets/content.js` and retries automatically;
+- when a message to a normal HTTP(S) tab fails, BrowserHarness attempts to inject `assets/content.js` and retries automatically;
 - true protected browser pages return `UNSUPPORTED_PAGE` instead of the misleading generic content-script message;
 - if injection still fails, the UI instructs the user to reload that tab once.
 
@@ -71,8 +71,8 @@ This keeps normal-page recovery automatic while preserving an explicit protected
 
 ## Mixed Google Docs / Groq retest
 User-reported sequence:
-- `write 30 sec video script about ai and its future` → **Model did not return a BrowserCrew action**
-- `Write "BrowserCrew Google Docs test" at the current cursor position.` → parse failure
+- `write 30 sec video script about ai and its future` → **Model did not return a BrowserHarness action**
+- `Write "BrowserHarness Google Docs test" at the current cursor position.` → parse failure
 - same Docs command → **PASS**, text inserted successfully
 - same Docs command again → parse failure while activity stayed at **Reading the current page**
 
@@ -88,7 +88,7 @@ Remediation shipped in candidate build:
 - use low reasoning effort for Groq GPT-OSS models to keep the browser-control loop responsive;
 - parse balanced JSON objects defensively;
 - accept a small set of equivalent action/message shapes;
-- perform one bounded repair retry when the first response is not a valid BrowserCrew action.
+- perform one bounded repair retry when the first response is not a valid BrowserHarness action.
 
 Latest parser-fix commit: `c507d8f05916e8e016add31a0cd69aa23735b55b`.
 GitHub Actions run: `36250049822` — success.
@@ -108,11 +108,11 @@ User-reported behavior on the first NVIDIA/model-discovery build:
 Interpretation:
 - every prompt was unnecessarily observing the current Google Doc before the model decided whether browser state was needed;
 - NVIDIA chat requests were not bounded by a client timeout;
-- NVIDIA reasoning-capable models could spend a large default output/reasoning budget before returning the BrowserCrew JSON action;
+- NVIDIA reasoning-capable models could spend a large default output/reasoning budget before returning the BrowserHarness JSON action;
 - abort-like provider/network failures were displayed as `Stopped.`, conflating user cancellation with provider interruption.
 
 Remediation:
-1. BrowserCrew now asks the model to route the task before observing the page.
+1. BrowserHarness now asks the model to route the task before observing the page.
 2. Conversational/writing tasks can return `kind=final` without touching the browser.
 3. Browser tasks explicitly request `observe_page` when page state is needed.
 4. NVIDIA requests use bounded `max_tokens`, JSON Object Mode, and reasoning-disabled template kwargs for common reasoning model families.

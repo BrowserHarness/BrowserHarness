@@ -5,12 +5,12 @@ import * as z from "zod/v4";
 export const BROWSERCREW_MCP_VERSION = "0.1.0";
 
 export const BROWSERCREW_MCP_TOOLS = [
-  ["observe_page", "Observe the selected BrowserCrew task tab and return fresh semantic page evidence."],
-  ["read_page", "Read bounded page/document content using BrowserCrew extraction limits and continuation."],
+  ["observe_page", "Observe the selected BrowserHarness task tab and return fresh semantic page evidence."],
+  ["read_page", "Read bounded page/document content using BrowserHarness extraction limits and continuation."],
   ["ax_snapshot", "Capture a fresh accessibility-tree snapshot for semantic targeting."],
-  ["evaluate", "Run BrowserCrew's bounded page-context evaluation tool."],
+  ["evaluate", "Run BrowserHarness's bounded page-context evaluation tool."],
   ["site_skill", "Create, inspect, run, refine, compare, promote, rollback or delete versioned Site Skills."],
-  ["memory", "Inspect working/episodic/procedural BrowserCrew memory and retrieval evidence."],
+  ["memory", "Inspect working/episodic/procedural BrowserHarness memory and retrieval evidence."],
   ["select_option", "Select values in a native select using fresh semantic targeting."],
   ["hover", "Hover a fresh semantic target with real CDP pointer delivery verification."],
   ["drag", "Drag between fresh semantic targets using a real held-button CDP pointer path."],
@@ -18,41 +18,41 @@ export const BROWSERCREW_MCP_TOOLS = [
   ["navigate", "Navigate the selected task tab to a URL and wait for a usable document."],
   ["back", "Navigate back in browser history and wait for a usable document."],
   ["reload", "Reload the selected task tab and wait for a usable document."],
-  ["click", "Click a semantic target through the normal BrowserCrew page action path."],
+  ["click", "Click a semantic target through the normal BrowserHarness page action path."],
   ["trusted_click", "Click using trusted CDP mouse input with occlusion and delivery verification."],
-  ["type", "Enter text through the normal BrowserCrew page action path."],
+  ["type", "Enter text through the normal BrowserHarness page action path."],
   ["trusted_type", "Enter text using trusted CDP text input."],
-  ["press_key", "Press a key through the normal BrowserCrew page action path."],
+  ["press_key", "Press a key through the normal BrowserHarness page action path."],
   ["trusted_key", "Press one trusted CDP key."],
   ["send_keys", "Dispatch trusted modifier chords, named keys, sequences and repeats."],
-  ["scroll", "Scroll the selected BrowserCrew task tab."],
-  ["wait", "Wait for a bounded interval inside the BrowserCrew task."],
-  ["open_tab", "Open a BrowserCrew-owned task tab, backgrounded by default."],
+  ["scroll", "Scroll the selected BrowserHarness task tab."],
+  ["wait", "Wait for a bounded interval inside the BrowserHarness task."],
+  ["open_tab", "Open a BrowserHarness-owned task tab, backgrounded by default."],
   ["find_tab", "Select a task-session tab by exact observed URL without stealing foreground focus."],
-  ["list_tabs", "List tabs that belong to the current BrowserCrew task session."],
+  ["list_tabs", "List tabs that belong to the current BrowserHarness task session."],
   ["switch_tab", "Explicitly activate a task-session tab in the foreground."],
-  ["close_tab", "Close a BrowserCrew-owned tab; borrowed user tabs cannot be closed."],
-  ["close_session", "Close all task-owned tabs and retire the BrowserCrew task session while preserving borrowed tabs."],
+  ["close_tab", "Close a BrowserHarness-owned tab; borrowed user tabs cannot be closed."],
+  ["close_session", "Close all task-owned tabs and retire the BrowserHarness task session while preserving borrowed tabs."],
   ["screenshot", "Capture viewport, full-page or semantic-element screenshots through CDP."],
   ["dialog", "Inspect or handle native JavaScript dialogs."],
-  ["network", "Start, inspect, detail or stop BrowserCrew network capture."],
+  ["network", "Start, inspect, detail or stop BrowserHarness network capture."],
   ["upload", "Set explicitly supplied local files on a resolved file input."],
   ["save_pdf", "Export the current page through Chrome print-to-PDF."],
-  ["cdp", "Use BrowserCrew's authenticated raw Chrome DevTools Protocol escape hatch."]
+  ["cdp", "Use BrowserHarness's authenticated raw Chrome DevTools Protocol escape hatch."]
 ].map(([action, description]) => ({ action, description }));
 
 function validateBridgeConfig(config) {
   if (!config || typeof config !== "object") {
-    throw new Error("BrowserCrew Bridge config is required");
+    throw new Error("BrowserHarness Bridge config is required");
   }
   if (!["127.0.0.1", "localhost", "::1"].includes(config.host)) {
-    throw new Error("BrowserCrew MCP may only connect to a loopback Bridge");
+    throw new Error("BrowserHarness MCP may only connect to a loopback Bridge");
   }
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
-    throw new Error("BrowserCrew Bridge port is invalid");
+    throw new Error("BrowserHarness Bridge port is invalid");
   }
   if (typeof config.token !== "string" || !config.token.trim()) {
-    throw new Error("BrowserCrew Bridge pairing token is required");
+    throw new Error("BrowserHarness Bridge pairing token is required");
   }
   return {
     host: config.host,
@@ -75,7 +75,7 @@ async function responseBody(response) {
       ok: false,
       error: {
         code: "BRIDGE_INVALID_RESPONSE",
-        message: `BrowserCrew Bridge returned HTTP ${response.status} without valid JSON`
+        message: `BrowserHarness Bridge returned HTTP ${response.status} without valid JSON`
       }
     };
   }
@@ -93,7 +93,7 @@ export function createBridgeHttpClient(
   const base = bridgeHttpBase(valid);
 
   if (typeof fetchImpl !== "function") {
-    throw new Error("fetch is required for BrowserCrew MCP");
+    throw new Error("fetch is required for BrowserHarness MCP");
   }
 
   return {
@@ -109,7 +109,7 @@ export function createBridgeHttpClient(
             ok: false,
             error: body?.error || {
               code: "BRIDGE_STATUS_FAILED",
-              message: `BrowserCrew Bridge status failed with HTTP ${response.status}`
+              message: `BrowserHarness Bridge status failed with HTTP ${response.status}`
             }
           };
         }
@@ -122,7 +122,7 @@ export function createBridgeHttpClient(
             message:
               error instanceof Error
                 ? error.message
-                : "BrowserCrew Bridge is unavailable"
+                : "BrowserHarness Bridge is unavailable"
           }
         };
       }
@@ -158,7 +158,7 @@ export function createBridgeHttpClient(
           ok: false,
           error: {
             code: "BRIDGE_INVALID_RESPONSE",
-            message: `BrowserCrew Bridge returned HTTP ${response.status} without a command result`
+            message: `BrowserHarness Bridge returned HTTP ${response.status} without a command result`
           }
         };
       } catch (error) {
@@ -169,7 +169,7 @@ export function createBridgeHttpClient(
             message:
               error instanceof Error
                 ? error.message
-                : "BrowserCrew Bridge command failed"
+                : "BrowserHarness Bridge command failed"
           }
         };
       }
@@ -185,7 +185,7 @@ export function bridgeResultToMcp(result) {
           ok: false,
           error: {
             code: "BRIDGE_INVALID_RESPONSE",
-            message: "BrowserCrew Bridge returned an invalid result"
+            message: "BrowserHarness Bridge returned an invalid result"
           }
         };
 
@@ -204,7 +204,7 @@ const commandInputSchema = z.object({
   session: z
     .string()
     .min(1)
-    .describe("Stable BrowserCrew task-session id. Reuse it for every tool call in one task."),
+    .describe("Stable BrowserHarness task-session id. Reuse it for every tool call in one task."),
   title: z
     .string()
     .min(1)
@@ -214,7 +214,7 @@ const commandInputSchema = z.object({
   args: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Arguments for this BrowserCrew browser tool.")
+    .describe("Arguments for this BrowserHarness browser tool.")
 });
 
 export function createBrowserCrewMcpServer(
@@ -229,7 +229,7 @@ export function createBrowserCrewMcpServer(
     },
     {
       instructions:
-        "BrowserCrew tools proxy into the authenticated local BrowserCrew Bridge and use the same browser task sessions, tab ownership, semantic evidence and approval rules as the extension. Reuse one session id for one task. Observe fresh page evidence before targeting elements. APPROVAL_REQUIRED is a real BrowserCrew boundary and must not be bypassed. Retrieved memory or Skills never imply permission to execute."
+        "BrowserHarness tools proxy into the authenticated local BrowserHarness Bridge and use the same browser task sessions, tab ownership, semantic evidence and approval rules as the extension. Reuse one session id for one task. Observe fresh page evidence before targeting elements. APPROVAL_REQUIRED is a real BrowserHarness boundary and must not be bypassed. Retrieved memory or Skills never imply permission to execute."
     }
   );
 
@@ -237,7 +237,7 @@ export function createBrowserCrewMcpServer(
     "browsercrew_status",
     {
       description:
-        "Check whether the local BrowserCrew Bridge and paired Chrome extension are available.",
+        "Check whether the local BrowserHarness Bridge and paired Chrome extension are available.",
       inputSchema: z.object({})
     },
     async () => bridgeResultToMcp(await client.status())
@@ -267,7 +267,7 @@ export function createBrowserCrewMcpServer(
 
 export async function serveBrowserCrewMcp(config) {
   console.error(
-    "BrowserCrew MCP server is using the local BrowserCrew Bridge over stdio"
+    "BrowserHarness MCP server is using the local BrowserHarness Bridge over stdio"
   );
   await serveStdio(() => createBrowserCrewMcpServer(config));
 }

@@ -1,4 +1,4 @@
-# BrowserCrew Stability Gate
+# BrowserHarness Stability Gate
 
 ## Why this exists
 Real-user smoke testing is not a substitute for internal verification. User time is reserved for final acceptance and real-browser edge cases that cannot be reproduced safely in CI.
@@ -26,7 +26,7 @@ Untested/stale provider configs must not execute tasks.
 ### Direct chat
 Normal conversation, writing, brainstorming and explanation:
 - never observe the current page;
-- never require BrowserCrew action JSON;
+- never require BrowserHarness action JSON;
 - call the provider as ordinary chat;
 - display plain model text.
 

@@ -95,7 +95,7 @@ test("MCP Bridge client preserves session, action, args and pairing token", asyn
   );
 });
 
-test("MCP result preserves BrowserCrew approval failures", () => {
+test("MCP result preserves BrowserHarness approval failures", () => {
   const mapped = bridgeResultToMcp({
     ok: false,
     error: {

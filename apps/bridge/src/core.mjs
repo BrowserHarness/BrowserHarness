@@ -67,7 +67,7 @@ export function createBridgeServer({
 } = {}) {
   if (!token) throw new Error("Bridge pairing token is required");
   if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
-    throw new Error("BrowserCrew Bridge must bind to loopback");
+    throw new Error("BrowserHarness Bridge must bind to loopback");
   }
 
   const startedAt = Date.now();
@@ -108,7 +108,7 @@ export function createBridgeServer({
           ok: false,
           error: {
             code: "UNAUTHORIZED",
-            message: "Invalid BrowserCrew Bridge token"
+            message: "Invalid BrowserHarness Bridge token"
           }
         });
         return;
@@ -124,7 +124,7 @@ export function createBridgeServer({
             error: {
               code: "MCP_CLIENT_UNAVAILABLE",
               message:
-                "BrowserCrew Bridge MCP client is not enabled"
+                "BrowserHarness Bridge MCP client is not enabled"
             }
           });
           return;
@@ -162,7 +162,7 @@ export function createBridgeServer({
             error: {
               code: "MCP_CLIENT_UNAVAILABLE",
               message:
-                "BrowserCrew Bridge MCP client is not enabled"
+                "BrowserHarness Bridge MCP client is not enabled"
             }
           });
           return;
@@ -207,7 +207,7 @@ export function createBridgeServer({
             error: {
               code: "MCP_CLIENT_UNAVAILABLE",
               message:
-                "BrowserCrew Bridge MCP client is not enabled"
+                "BrowserHarness Bridge MCP client is not enabled"
             }
           });
           return;
@@ -265,7 +265,7 @@ export function createBridgeServer({
             ok: false,
             error: {
               code: "UNAUTHORIZED",
-              message: "Invalid BrowserCrew Bridge token"
+              message: "Invalid BrowserHarness Bridge token"
             }
           });
           return;
@@ -276,7 +276,7 @@ export function createBridgeServer({
             ok: false,
             error: {
               code: "EXTENSION_NOT_CONNECTED",
-              message: "BrowserCrew extension is not connected"
+              message: "BrowserHarness extension is not connected"
             }
           });
           return;
@@ -310,7 +310,7 @@ export function createBridgeServer({
         ok: false,
         error: {
           code: "NOT_FOUND",
-          message: "Unknown BrowserCrew Bridge endpoint"
+          message: "Unknown BrowserHarness Bridge endpoint"
         }
       });
     } catch (error) {
@@ -400,7 +400,7 @@ export function createBridgeServer({
                 error: {
                   code: "MCP_EXTENSION_REQUIRED",
                   message:
-                    "Outbound MCP requests must come from the paired BrowserCrew extension"
+                    "Outbound MCP requests must come from the paired BrowserHarness extension"
                 }
               })
             );
@@ -416,7 +416,7 @@ export function createBridgeServer({
                 error: {
                   code: "MCP_CLIENT_UNAVAILABLE",
                   message:
-                    "BrowserCrew Bridge MCP client is not enabled"
+                    "BrowserHarness Bridge MCP client is not enabled"
                 }
               })
             );

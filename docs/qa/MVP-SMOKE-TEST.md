@@ -1,4 +1,4 @@
-# BrowserCrew v0.1 Final Real-Chrome Acceptance Gate
+# BrowserHarness v0.1 Final Real-Chrome Acceptance Gate
 
 **Purpose:** perform the smallest necessary manual acceptance pass after the automated MVP gate is green.
 
@@ -43,7 +43,7 @@ The deterministic runtime suite covers:
 2. Open `chrome://extensions`.
 3. Enable Developer mode.
 4. Load the unpacked folder containing `manifest.json`.
-5. Open the BrowserCrew side panel.
+5. Open the BrowserHarness side panel.
 
 Pass:
 - side panel renders;
@@ -69,7 +69,7 @@ Prompt:
 
 Pass:
 - response is returned as ordinary chat;
-- BrowserCrew does not read the current webpage.
+- BrowserHarness does not read the current webpage.
 
 ### D. Normal browser task
 Use a safe normal website task such as current-page summary, navigation, or site search.
@@ -91,7 +91,7 @@ Pass:
 Open Google Docs, place the cursor, and request a short insertion.
 
 Pass:
-- BrowserCrew detects the Google Docs adapter;
+- BrowserHarness detects the Google Docs adapter;
 - text is inserted at the active document editor target;
 - activity finishes instead of hanging.
 
@@ -108,7 +108,7 @@ Pass:
 Attempt a harmless test flow whose final control is classified as send/submit/purchase/delete/security-changing, without completing a real transaction.
 
 Pass:
-- BrowserCrew stops before the action;
+- BrowserHarness stops before the action;
 - Cancel prevents it;
 - Approve permits only that proposed action.
 
