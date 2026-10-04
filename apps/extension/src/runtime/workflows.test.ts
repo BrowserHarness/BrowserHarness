@@ -42,7 +42,7 @@ describe("workflow storage", () => {
             role: "textbox",
             accessible_name: "Search"
           },
-          text: "BrowserCrew"
+          text: "BrowserHarness"
         }
       ]
     };

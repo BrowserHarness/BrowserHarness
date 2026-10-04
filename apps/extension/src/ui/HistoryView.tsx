@@ -52,7 +52,7 @@ export function HistoryView({ onBack }: { onBack: () => void }) {
 
       {entries.length === 0 ? (
         <Alert severity="info">
-          No local task history yet. BrowserCrew keeps up to 50 completed tasks on this device.
+          No local task history yet. BrowserHarness keeps up to 50 completed tasks on this device.
         </Alert>
       ) : (
         <Stack spacing={1.5}>

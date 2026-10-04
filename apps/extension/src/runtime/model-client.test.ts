@@ -626,7 +626,7 @@ describe("bounded subagent planning", () => {
     const system = String(body.messages[0].content);
 
     expect(system).toContain(
-      "bounded BrowserCrew read-only worker"
+      "bounded BrowserHarness read-only worker"
     );
     expect(system).toContain(
       "Never click, type, press keys, upload files"

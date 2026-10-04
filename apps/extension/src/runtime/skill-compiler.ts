@@ -619,7 +619,7 @@ export function compileWorkflowEvaluations(
       id: "approval-policy-preserved",
       kind: "approval",
       description:
-        "Consequential recorded actions still obey BrowserCrew approval rules.",
+        "Consequential recorded actions still obey BrowserHarness approval rules.",
       expect: {
         source_step_ids: approvalStepIds,
         policy: "preserve_browsercrew_approval_rules"

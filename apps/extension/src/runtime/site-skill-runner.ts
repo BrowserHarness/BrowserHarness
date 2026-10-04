@@ -9,6 +9,11 @@ import {
 } from "../background/cdp-input";
 import { selectOptions } from "../background/cdp-select";
 import { uploadFiles } from "../background/file-tools";
+import { evaluatePageExpression } from "../background/page-evaluate";
+import {
+  apiFetchExpression,
+  buildApiFetchUrl
+} from "./site-skill-api";
 import type {
   SiteCandidateSkill,
   SiteSkillParameter,
@@ -20,6 +25,13 @@ export interface SiteSkillRunResult {
   recipe_id: string;
   executed_steps: number;
   submitted: boolean;
+  /** Present for api_fetch recipes: bounded response of the site's own endpoint. */
+  output?: {
+    http_status: number;
+    content_type: string;
+    truncated: boolean;
+    data: unknown;
+  };
 }
 
 export class SiteSkillRunError extends Error {
@@ -229,7 +241,61 @@ export async function runSiteSkillRecipe(input: {
       );
     }
 
+    let output: SiteSkillRunResult["output"];
+
     for (const step of recipe.steps) {
+      if (step.kind === "api_fetch") {
+        const tab = await chrome.tabs.get(input.tab_id);
+        if (
+          !tab.url ||
+          new URL(tab.url).origin !== input.candidate.site.origin
+        ) {
+          throw new Error(
+            `SITE_SKILL_ORIGIN_MISMATCH: open ${input.candidate.site.origin} before running this recipe`
+          );
+        }
+        const url = buildApiFetchUrl(
+          input.candidate.site.origin,
+          step,
+          input.parameters
+        );
+        const evaluated = await evaluatePageExpression(
+          input.tab_id,
+          apiFetchExpression(url, step.response.max_chars),
+          step.response.max_chars + 2000
+        );
+        const response = evaluated.value as {
+          status: number;
+          ok: boolean;
+          content_type: string;
+          truncated: boolean;
+          body: string;
+        };
+        if (!response?.ok) {
+          throw new Error(
+            `SITE_SKILL_API_HTTP_${response?.status ?? "ERROR"}: ${step.path}`
+          );
+        }
+        let data: unknown = response.body;
+        if (step.response.format === "json" && !response.truncated) {
+          try {
+            data = JSON.parse(response.body);
+          } catch {
+            throw new Error(
+              `SITE_SKILL_API_NOT_JSON: ${step.path}`
+            );
+          }
+        }
+        output = {
+          http_status: response.status,
+          content_type: response.content_type,
+          truncated: response.truncated,
+          data
+        };
+        executedSteps += 1;
+        continue;
+      }
+
       if (step.kind === "input") {
         const parameter = parameterDefinition(
           input.candidate,
@@ -309,7 +375,8 @@ export async function runSiteSkillRecipe(input: {
     return {
       recipe_id: recipe.id,
       executed_steps: executedSteps,
-      submitted
+      submitted,
+      ...(output ? { output } : {})
     };
   } catch (error) {
     if (error instanceof SiteSkillRunError) throw error;

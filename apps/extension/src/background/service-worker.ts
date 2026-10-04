@@ -5,6 +5,12 @@ import type {
   ToolName,
   ToolResult
 } from "../runtime/protocol";
+import { getAttachmentsByIds } from "../runtime/attachments";
+import {
+  QUICK_EXPLAIN_MENU_ID,
+  QUICK_EXPLAIN_STORAGE_KEY,
+  type PendingExplain
+} from "../runtime/quick-explain";
 import {
   startBridgeClient,
   type BridgeCommand
@@ -32,6 +38,7 @@ import {
 } from "./cdp-input";
 import {
   savePageAsPdf,
+  uploadAttachments,
   uploadFiles
 } from "./file-tools";
 import {
@@ -124,6 +131,36 @@ chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(() => undefined);
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: QUICK_EXPLAIN_MENU_ID,
+      title: "Explain selection with BrowserHarness",
+      contexts: ["selection"]
+    });
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (
+    info.menuItemId !== QUICK_EXPLAIN_MENU_ID ||
+    !info.selectionText
+  ) {
+    return;
+  }
+  const pending: PendingExplain = {
+    text: info.selectionText,
+    url: info.pageUrl,
+    created_at: Date.now()
+  };
+  // Open first: sidePanel.open needs the user gesture from this click.
+  if (tab?.id !== undefined) {
+    void chrome.sidePanel
+      .open({ tabId: tab.id })
+      .catch(() => undefined);
+  }
+  void chrome.storage.session.set({
+    [QUICK_EXPLAIN_STORAGE_KEY]: pending
+  });
 });
 
 async function activeTab() {
@@ -142,7 +179,7 @@ async function requestSession(
   if (!sessionId) return null;
   return ensureTaskSession(
     sessionId,
-    sessionTitle?.trim() || "BrowserCrew task"
+    sessionTitle?.trim() || "BrowserHarness task"
   );
 }
 
@@ -228,7 +265,7 @@ async function sendToTab(
         error: {
           code: "UNSUPPORTED_PAGE",
           message:
-            "BrowserCrew cannot control Chrome internal pages, the Chrome Web Store, or other protected browser pages."
+            "BrowserHarness cannot control Chrome internal pages, the Chrome Web Store, or other protected browser pages."
         }
       };
     }
@@ -251,7 +288,7 @@ async function sendToTab(
           error: {
             code: "PERMISSION_REQUIRED",
             message:
-              "BrowserCrew needs website access for this tab. Grant all-sites access in Settings for cross-site and multi-tab automation.",
+              "BrowserHarness needs website access for this tab. Grant all-sites access in Settings for cross-site and multi-tab automation.",
             details:
               error instanceof Error
                 ? error.message
@@ -265,7 +302,7 @@ async function sendToTab(
         error: {
           code: "CONTENT_SCRIPT_UNAVAILABLE",
           message:
-            "BrowserCrew could not attach to this page even though site access is granted. Reload this tab once and try again.",
+            "BrowserHarness could not attach to this page even though site access is granted. Reload this tab once and try again.",
           details:
             error instanceof Error
               ? error.message
@@ -359,7 +396,7 @@ async function runTool(
         ok: false,
         error: {
           code: "SESSION_REQUIRED",
-          message: "list_tabs requires an active BrowserCrew task session"
+          message: "list_tabs requires an active BrowserHarness task session"
         }
       };
     }
@@ -403,7 +440,7 @@ async function runTool(
         ok: false,
         error: {
           code: "SESSION_REQUIRED",
-          message: "find_tab requires an active BrowserCrew task session"
+          message: "find_tab requires an active BrowserHarness task session"
         }
       };
     }
@@ -467,7 +504,7 @@ async function runTool(
         error: {
           code: "TAB_NOT_FOUND",
           message:
-            "No tab with that exact URL belongs to this BrowserCrew task session"
+            "No tab with that exact URL belongs to this BrowserHarness task session"
         }
       };
     }
@@ -535,7 +572,7 @@ async function runTool(
         error: {
           code: "TAB_NOT_OWNED",
           message:
-            "BrowserCrew will not close a borrowed or unrelated user tab."
+            "BrowserHarness will not close a borrowed or unrelated user tab."
         }
       };
     }
@@ -554,7 +591,7 @@ async function runTool(
         error: {
           code: "SESSION_REQUIRED",
           message:
-            "close_session requires a BrowserCrew task session"
+            "close_session requires a BrowserHarness task session"
         }
       };
     }
@@ -589,7 +626,7 @@ async function runTool(
           error: {
             code: "SESSION_REQUIRED",
             message:
-              "memory active requires a BrowserCrew task session"
+              "memory active requires a BrowserHarness task session"
           }
         };
       }
@@ -1219,6 +1256,101 @@ async function runTool(
             ? input.recipe_id
             : undefined
         );
+        if (recipe.form_index < 0) {
+          // API recipe: read-only GET against the page's own origin; no form verification or approval needed.
+          const apiParameters =
+            input.parameters &&
+            typeof input.parameters === "object" &&
+            !Array.isArray(input.parameters)
+              ? (input.parameters as Record<string, unknown>)
+              : {};
+          const apiStartedAt = new Date().toISOString();
+          const apiEvidenceId =
+            existing.provenance.evidence_id;
+          try {
+            const run = await runSiteSkillRecipe({
+              tab_id: tabId,
+              candidate: existing,
+              recipe_id: recipe.id,
+              parameters: apiParameters
+            });
+            await recordSiteSkillEvaluation(
+              input.id,
+              revision.revision_id,
+              {
+                kind: "execution",
+                outcome: "passed",
+                detail: `API recipe ${recipe.id} returned HTTP ${run.output?.http_status}`
+              }
+            );
+            const execution =
+              await recordSiteSkillExecutionEvidence(
+                input.id,
+                revision.revision_id,
+                {
+                  recipe_id: recipe.id,
+                  started_at: apiStartedAt,
+                  outcome: "passed",
+                  evidence_id: apiEvidenceId,
+                  executed_steps: run.executed_steps,
+                  submitted: false,
+                  parameter_names: Object.keys(apiParameters).sort()
+                }
+              );
+            return {
+              ok: true,
+              data: {
+                candidate_id: existing.id,
+                revision_id: revision.revision_id,
+                run,
+                execution
+              }
+            };
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Site Skill API recipe failed";
+            const code =
+              error instanceof SiteSkillRunError && error.code
+                ? error.code
+                : "SITE_SKILL_RUN_FAILED";
+            await recordSiteSkillEvaluation(
+              input.id,
+              revision.revision_id,
+              {
+                kind: "execution",
+                outcome: "failed",
+                detail: message
+              }
+            ).catch(() => undefined);
+            await recordSiteSkillExecutionEvidence(
+              input.id,
+              revision.revision_id,
+              {
+                recipe_id: recipe.id,
+                started_at: apiStartedAt,
+                outcome: "failed",
+                evidence_id: apiEvidenceId,
+                executed_steps: 0,
+                submitted: false,
+                parameter_names: Object.keys(apiParameters).sort(),
+                error_code: code,
+                error_message: message
+              }
+            ).catch(() => null);
+            return {
+              ok: false,
+              data: {
+                candidate_id: existing.id,
+                revision_id: revision.revision_id,
+                refinement_recommended: true,
+                next_action: "site_skill refine"
+              },
+              error: { code, message }
+            };
+          }
+        }
         const fresh = await collectCurrentSiteSkill({
           tab_id: tabId,
           url: tab.url,
@@ -1651,7 +1783,7 @@ async function runTool(
           message:
             error instanceof Error
               ? error.message
-              : "BrowserCrew could not read this page"
+              : "BrowserHarness could not read this page"
         }
       };
     }
@@ -2070,7 +2202,7 @@ async function runTool(
           }
         } catch {
           // AX evidence is best-effort here; parser/runtime validation
-          // still applies and BrowserCrew can re-observe after dispatch.
+          // still applies and BrowserHarness can re-observe after dispatch.
         }
       }
 
@@ -2235,6 +2367,38 @@ async function runTool(
   }
 
   if (tool === "upload") {
+    if (
+      typeof input.element_id === "string" &&
+      Array.isArray(input.attachment_ids) &&
+      input.attachment_ids.length > 0 &&
+      input.attachment_ids.every((id) => typeof id === "string")
+    ) {
+      try {
+        const records = await getAttachmentsByIds(
+          input.attachment_ids as string[]
+        );
+        return {
+          ok: true,
+          data: await uploadAttachments(
+            tabId,
+            input.element_id,
+            records
+          )
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: "UPLOAD_FAILED",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Attachment upload failed"
+          }
+        };
+      }
+    }
+
     if (
       typeof input.element_id !== "string" ||
       !Array.isArray(input.files) ||
@@ -2449,7 +2613,7 @@ async function handleBridgeCommand(
       ok: false,
       error: {
         code: "UNKNOWN_BRIDGE_ACTION",
-        message: `Unsupported BrowserCrew Bridge action: ${command.action}`
+        message: `Unsupported BrowserHarness Bridge action: ${command.action}`
       }
     };
   }
@@ -2495,7 +2659,7 @@ async function handleBridgeCommand(
           code: "APPROVAL_REQUIRED",
           message:
             element?.approval_reason ||
-            "This browser action requires explicit user approval in BrowserCrew."
+            "This browser action requires explicit user approval in BrowserHarness."
         }
       };
     }

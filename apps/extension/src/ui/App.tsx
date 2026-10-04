@@ -1,5 +1,29 @@
 import { useEffect, useRef, useState } from "react";
+import { Markdown } from "./Markdown";
+import {
+  renderIntentPrompt,
+  workflowToIntentSkill
+} from "../runtime/intent-skill";
+import {
+  deleteAttachment,
+  describeAttachmentsForPrompt,
+  fileToBase64,
+  listAttachments,
+  saveAttachment,
+  toMeta,
+  type AttachmentMeta
+} from "../runtime/attachments";
+import {
+  QUICK_EXPLAIN_STORAGE_KEY,
+  buildExplainPrompt,
+  parsePendingExplain
+} from "../runtime/quick-explain";
 import AddIcon from "@mui/icons-material/Add";
+import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import {
+  buildPolishPrompt,
+  cleanPolishedPrompt
+} from "../runtime/prompt-polish";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import PauseIcon from "@mui/icons-material/Pause";
 import ReplayIcon from "@mui/icons-material/Replay";
@@ -83,6 +107,11 @@ import {
   runReadOnlySubagent
 } from "../runtime/subagent-runner";
 import {
+  buildDagWorkerTask,
+  parseTaskDag,
+  runTaskDag
+} from "../runtime/task-dag";
+import {
   parseReadOnlySubagentTasks,
   runReadOnlySubagentBatch
 } from "../runtime/subagent-supervisor";
@@ -156,6 +185,8 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [prompt, setPrompt] = useState("");
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -192,6 +223,38 @@ export function App() {
   useEffect(() => {
     void refreshContext();
   }, [view]);
+
+  useEffect(() => {
+    const consume = async () => {
+      try {
+        const stored = await chrome.storage.session.get(
+          QUICK_EXPLAIN_STORAGE_KEY
+        );
+        const pending = parsePendingExplain(
+          stored[QUICK_EXPLAIN_STORAGE_KEY]
+        );
+        if (!pending) return;
+        await chrome.storage.session.remove(
+          QUICK_EXPLAIN_STORAGE_KEY
+        );
+        setView("chat");
+        setPrompt(buildExplainPrompt(pending.text, pending.url));
+      } catch {
+        // Session storage unavailable; quick-explain is a convenience only.
+      }
+    };
+    void consume();
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string
+    ) => {
+      if (area === "session" && QUICK_EXPLAIN_STORAGE_KEY in changes) {
+        void consume();
+      }
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
 
   const addAssistantMessage = (text: string) => {
     setMessages((items) => [
@@ -237,7 +300,7 @@ export function App() {
       }
       setRecording(true);
       addAssistantMessage(
-        "Recording across pages and tabs. Show BrowserCrew the workflow you want it to learn; navigation, new tabs, clicks, text entry, Enter and Tab are captured. Password fields are never recorded."
+        "Recording across pages and tabs. Show BrowserHarness the workflow you want it to learn; navigation, new tabs, clicks, text entry, Enter and Tab are captured. Password fields are never recorded."
       );
       return;
     }
@@ -466,9 +529,61 @@ export function App() {
     }
   };
 
+  useEffect(() => {
+    void listAttachments()
+      .then((items) => setAttachments(items.map(toMeta)))
+      .catch(() => undefined);
+  }, []);
+
+  const handleAttach = async (files: FileList | null) => {
+    for (const file of Array.from(files || [])) {
+      try {
+        const record = await saveAttachment({
+          name: file.name,
+          mime: file.type,
+          size: file.size,
+          data_b64: await fileToBase64(file)
+        });
+        setAttachments((items) => [...items, toMeta(record)]);
+      } catch (error) {
+        addAssistantMessage(
+          error instanceof Error
+            ? error.message.replace(/^[A-Z_]+: /, "")
+            : "Could not attach that file."
+        );
+      }
+    }
+    if (fileInput.current) fileInput.current.value = "";
+  };
+
+  const [polishing, setPolishing] = useState(false);
+  const handlePolish = async () => {
+    const draft = prompt.trim();
+    if (!draft || polishing || !primary) return;
+    setPolishing(true);
+    try {
+      const routed = await directChatWithFallback(
+        primary,
+        fallback?.chatHealth.status === "healthy" ? fallback : null,
+        buildPolishPrompt(draft)
+      );
+      setPrompt(cleanPolishedPrompt(routed.result, draft));
+    } catch {
+      addAssistantMessage("Could not polish that request right now.");
+    } finally {
+      setPolishing(false);
+    }
+  };
+
+  const removeAttachment = async (id: string) => {
+    await deleteAttachment(id).catch(() => undefined);
+    setAttachments((items) => items.filter((item) => item.id !== id));
+  };
+
   const runTask = async () => {
     const task = prompt.trim();
     if (!task || running) return;
+    const attachmentNote = describeAttachmentsForPrompt(attachments);
 
     if (
       !primary?.apiKey ||
@@ -554,7 +669,7 @@ export function App() {
         task.length > 48 ? `${task.slice(0, 45)}…` : task;
 
       const result = await runBrowserTask(
-        task,
+        task + attachmentNote,
         {
           session: {
             id: taskSessionId,
@@ -595,19 +710,7 @@ export function App() {
             execution?: BrowserToolExecution
           ): Promise<ToolResult<T>> => {
             if (tool === "agent") {
-              const parsed =
-                parseReadOnlySubagentTasks(input);
-              if (!parsed.ok) {
-                return {
-                  ok: false,
-                  error: parsed.error
-                } as ToolResult<T>;
-              }
-
-              const batch =
-                await runReadOnlySubagentBatch(
-                  parsed.tasks,
-                  async (spec, index) => {
+              const launchWorker = async (spec: { task: string; max_steps: number }, index: number) => {
                     const workerTask = spec.task;
                     const workerSessionId =
                       `${taskSessionId}:worker:${index + 1}:${crypto.randomUUID()}`;
@@ -721,7 +824,52 @@ export function App() {
                       controller.signal,
                       spec.max_steps
                     );
-                  },
+                  };
+
+              if (Array.isArray(input.dag)) {
+                const dag = parseTaskDag(input.dag);
+                if (!dag.ok) {
+                  return {
+                    ok: false,
+                    error: dag.error
+                  } as ToolResult<T>;
+                }
+                const outcome = await runTaskDag(
+                  dag.nodes,
+                  ({ node, prerequisites }, ) =>
+                    launchWorker(
+                      {
+                        task: buildDagWorkerTask(
+                          node,
+                          prerequisites
+                        ),
+                        max_steps: node.step_budget
+                      },
+                      dag.nodes.findIndex(
+                        (item) => item.id === node.id
+                      )
+                    ),
+                  controller.signal
+                );
+                return {
+                  ok: true,
+                  data: outcome as T
+                };
+              }
+
+              const parsed =
+                parseReadOnlySubagentTasks(input);
+              if (!parsed.ok) {
+                return {
+                  ok: false,
+                  error: parsed.error
+                } as ToolResult<T>;
+              }
+
+              const batch =
+                await runReadOnlySubagentBatch(
+                  parsed.tasks,
+                  launchWorker,
                   controller.signal
                 );
 
@@ -860,7 +1008,7 @@ export function App() {
         addAssistantMessage(
           error instanceof Error
             ? error.message
-            : "BrowserCrew hit an unexpected error."
+            : "BrowserHarness hit an unexpected error."
         );
       }
     } finally {
@@ -926,7 +1074,7 @@ export function App() {
         <Toolbar variant="dense" sx={{ minHeight: 56, gap: 1 }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="h6" noWrap>
-              BrowserCrew
+              BrowserHarness
             </Typography>
             <Typography variant="caption" color="text.secondary" noWrap>
               {safeHostname(tab?.url) || "No supported tab"}
@@ -1024,7 +1172,7 @@ export function App() {
           >
             <Typography variant="h5">Give your browser a task.</Typography>
             <Typography color="text.secondary" sx={{ maxWidth: 300 }}>
-              Ask BrowserCrew to read, navigate, compare, fill, or work across tabs.
+              Ask BrowserHarness to read, navigate, compare, fill, or work across tabs.
             </Typography>
             {!primary && (
               <Button variant="contained" onClick={() => setView("settings")}>
@@ -1062,7 +1210,13 @@ export function App() {
                       message.role === "user" ? "action.hover" : "transparent"
                   }}
                 >
-                  <Typography variant="body2">{message.text}</Typography>
+                  {message.role === "assistant" ? (
+                    <Markdown text={message.text} />
+                  ) : (
+                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                      {message.text}
+                    </Typography>
+                  )}
                 </Paper>
               </Box>
             ))}
@@ -1077,6 +1231,23 @@ export function App() {
                 sx={{ alignSelf: "flex-start" }}
               >
                 Replay {lastWorkflow.name}
+              </Button>
+            )}
+            {lastWorkflow && (
+              <Button
+                variant="text"
+                size="small"
+                onClick={() =>
+                  setPrompt(
+                    renderIntentPrompt(
+                      workflowToIntentSkill(lastWorkflow)
+                    )
+                  )
+                }
+                disabled={running || recording}
+                sx={{ alignSelf: "flex-start" }}
+              >
+                Edit as intent skill
               </Button>
             )}
 
@@ -1125,7 +1296,7 @@ export function App() {
                   </Stack>
                 }
               >
-                BrowserCrew wants to: {approval.description}
+                BrowserHarness wants to: {approval.description}
               </Alert>
             )}
 
@@ -1189,11 +1360,31 @@ export function App() {
             </Button>
           </Stack>
         )}
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          data-testid="attach-input"
+          onChange={(event) => void handleAttach(event.target.files)}
+        />
+        {attachments.length > 0 && (
+          <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", mb: 0.5 }}>
+            {attachments.map((item) => (
+              <Chip
+                key={item.id}
+                size="small"
+                label={item.name}
+                onDelete={() => void removeAttachment(item.id)}
+              />
+            ))}
+          </Stack>
+        )}
         <TextField
           multiline
           maxRows={5}
           fullWidth
-          placeholder="Ask BrowserCrew…"
+          placeholder="Ask BrowserHarness…"
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
@@ -1206,10 +1397,27 @@ export function App() {
             input: {
               endAdornment: (
                 <Stack direction="row" alignItems="center">
-                  <Tooltip title="Attach/context — next MVP slice">
+                  <Tooltip title="Attach files for uploads (up to 5 MB each)">
                     <span>
-                      <IconButton size="small" disabled>
+                      <IconButton
+                        size="small"
+                        onClick={() => fileInput.current?.click()}
+                        disabled={running}
+                        aria-label="Attach files"
+                      >
                         <AddIcon />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Polish my request">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => void handlePolish()}
+                        disabled={!prompt.trim() || running || polishing}
+                        aria-label="Polish request"
+                      >
+                        <AutoFixHighIcon fontSize="small" />
                       </IconButton>
                     </span>
                   </Tooltip>

@@ -74,7 +74,7 @@ describe("task sessions", () => {
     session = await borrowTab(session, 10);
 
     await expect(selectSessionTab(session, 99)).rejects.toThrow(
-      "not part of this BrowserCrew task session"
+      "not part of this BrowserHarness task session"
     );
   });
 

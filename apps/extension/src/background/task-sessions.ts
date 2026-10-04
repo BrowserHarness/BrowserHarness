@@ -134,7 +134,7 @@ export async function selectSessionTab(
 
     if (!belongs) {
       throw new Error(
-        "Tab is not part of this BrowserCrew task session"
+        "Tab is not part of this BrowserHarness task session"
       );
     }
 

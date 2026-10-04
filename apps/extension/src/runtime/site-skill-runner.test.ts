@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   trustedKey: vi.fn(),
   trustedType: vi.fn(),
   selectOptions: vi.fn(),
-  uploadFiles: vi.fn()
+  uploadFiles: vi.fn(),
+  evaluatePageExpression: vi.fn()
 }));
 
 vi.mock("../background/cdp-semantic", () => ({
@@ -20,6 +21,9 @@ vi.mock("../background/cdp-input", () => ({
 }));
 vi.mock("../background/cdp-select", () => ({
   selectOptions: mocks.selectOptions
+}));
+vi.mock("../background/page-evaluate", () => ({
+  evaluatePageExpression: mocks.evaluatePageExpression
 }));
 vi.mock("../background/file-tools", () => ({
   uploadFiles: mocks.uploadFiles
@@ -293,5 +297,105 @@ describe("Site Skill recipe runner", () => {
 
     expect(mocks.trustedType).not.toHaveBeenCalled();
     expect(mocks.trustedClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("api_fetch recipes", () => {
+  function apiCandidate(): SiteCandidateSkill {
+    const base = candidate();
+    return {
+      ...base,
+      site: { ...base.site, origin: "https://example.com" },
+      parameters: [
+        {
+          name: "api1_q",
+          label: "q",
+          type: "string",
+          required: false,
+          sensitive: false,
+          source: { form_index: -1, field_name: "q" }
+        }
+      ],
+      recipes: [
+        {
+          id: "recipe-api-1",
+          name: "GET /api/search",
+          entry_url: "https://example.com/",
+          form_index: -1,
+          method: "GET",
+          action: "/api/search",
+          parameters: ["api1_q"],
+          steps: [
+            {
+              kind: "api_fetch",
+              method: "GET",
+              path: "/api/search",
+              query: [{ key: "q", parameter: "api1_q", default: "a" }],
+              response: { format: "json", max_chars: 1000 },
+              approval: "none_read_only"
+            }
+          ],
+          verification: { required: true, checks: [] }
+        }
+      ]
+    };
+  }
+
+  beforeEach(() => {
+    mocks.evaluatePageExpression.mockReset();
+    (globalThis as unknown as { chrome: unknown }).chrome = {
+      tabs: {
+        get: vi.fn(async () => ({ url: "https://example.com/home" }))
+      }
+    };
+  });
+
+  it("fetches the site's own endpoint in-page and returns parsed JSON", async () => {
+    mocks.evaluatePageExpression.mockResolvedValue({
+      type: "object",
+      value: {
+        status: 200,
+        ok: true,
+        content_type: "application/json",
+        truncated: false,
+        body: '{"items":[1,2]}'
+      }
+    });
+    const run = await runSiteSkillRecipe({
+      tab_id: 7,
+      candidate: apiCandidate(),
+      parameters: { api1_q: "shoes" }
+    });
+    expect(run.output?.data).toEqual({ items: [1, 2] });
+    expect(run.submitted).toBe(false);
+    expect(mocks.evaluatePageExpression.mock.calls[0][1]).toContain(
+      "https://example.com/api/search?q=shoes"
+    );
+  });
+
+  it("refuses to run from another origin and surfaces HTTP failures", async () => {
+    (globalThis as unknown as { chrome: { tabs: { get: unknown } } }).chrome.tabs.get =
+      vi.fn(async () => ({ url: "https://evil.com/" }));
+    await expect(
+      runSiteSkillRecipe({
+        tab_id: 7,
+        candidate: apiCandidate(),
+        parameters: {}
+      })
+    ).rejects.toMatchObject({ code: "SITE_SKILL_ORIGIN_MISMATCH" });
+
+    (globalThis as unknown as { chrome: { tabs: { get: unknown } } }).chrome.tabs.get =
+      vi.fn(async () => ({ url: "https://example.com/" }));
+    mocks.evaluatePageExpression.mockResolvedValue({
+      type: "object",
+      value: { status: 403, ok: false, content_type: "", truncated: false, body: "" }
+    });
+    await expect(
+      runSiteSkillRecipe({
+        tab_id: 7,
+        candidate: apiCandidate(),
+        parameters: {}
+      })
+    ).rejects.toMatchObject({ code: "SITE_SKILL_API_HTTP_403" });
   });
 });

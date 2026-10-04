@@ -15,6 +15,6 @@ export function screenshotVisibilityError(
   return {
     code: "SCREENSHOT_REQUIRES_VISIBLE_TAB",
     message:
-      "The target task tab is in the background. BrowserCrew will not capture a different foreground tab. Use switch_tab explicitly if visual evidence is necessary."
+      "The target task tab is in the background. BrowserHarness will not capture a different foreground tab. Use switch_tab explicitly if visual evidence is necessary."
   };
 }

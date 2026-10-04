@@ -22,10 +22,10 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
 export function normalizeBridgeAddress(value: string): string {
   const parsed = new URL(value.trim());
   if (parsed.protocol !== "ws:") {
-    throw new Error("BrowserCrew Bridge must use ws://");
+    throw new Error("BrowserHarness Bridge must use ws://");
   }
   if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) {
-    throw new Error("BrowserCrew Bridge must use a loopback address");
+    throw new Error("BrowserHarness Bridge must use a loopback address");
   }
   if (parsed.pathname !== "/ws") {
     parsed.pathname = "/ws";

@@ -154,5 +154,5 @@ for (const size of [16, 32, 48, 128]) {
 }
 
 console.log(
-  "BrowserCrew MVP automated contract gate passed: runtime, permissions, release docs, tools, icons, and package structure are present."
+  "BrowserHarness MVP automated contract gate passed: runtime, permissions, release docs, tools, icons, and package structure are present."
 );

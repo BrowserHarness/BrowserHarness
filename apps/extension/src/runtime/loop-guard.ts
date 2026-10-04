@@ -36,14 +36,14 @@ export function registerDecision(
   if (repeats >= 3) {
     return {
       ok: false,
-      reason: `BrowserCrew detected a repeated action loop: ${decision.tool}`
+      reason: `BrowserHarness detected a repeated action loop: ${decision.tool}`
     };
   }
 
   if (state.totalActions > 12) {
     return {
       ok: false,
-      reason: "BrowserCrew reached the bounded action limit."
+      reason: "BrowserHarness reached the bounded action limit."
     };
   }
 
