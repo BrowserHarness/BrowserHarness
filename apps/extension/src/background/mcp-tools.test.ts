@@ -106,7 +106,7 @@ describe("external MCP runtime tool", () => {
         server_id: "notes",
         tool: "search",
         arguments: {
-          query: "BrowserCrew"
+          query: "BrowserHarness"
         }
       },
       {},
@@ -126,14 +126,14 @@ describe("external MCP runtime tool", () => {
         server_id: "notes",
         tool: "search",
         arguments: {
-          query: "BrowserCrew"
+          query: "BrowserHarness"
         }
       },
       false
     );
   });
 
-  it("blocks mutating or unannotated tools until BrowserCrew approval", async () => {
+  it("blocks mutating or unannotated tools until BrowserHarness approval", async () => {
     const requester = vi.fn(async () => ({
       ok: true,
       data: {

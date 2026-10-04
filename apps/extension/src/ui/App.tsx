@@ -294,7 +294,7 @@ export function App() {
       }
       setRecording(true);
       addAssistantMessage(
-        "Recording across pages and tabs. Show BrowserCrew the workflow you want it to learn; navigation, new tabs, clicks, text entry, Enter and Tab are captured. Password fields are never recorded."
+        "Recording across pages and tabs. Show BrowserHarness the workflow you want it to learn; navigation, new tabs, clicks, text entry, Enter and Tab are captured. Password fields are never recorded."
       );
       return;
     }
@@ -983,7 +983,7 @@ export function App() {
         addAssistantMessage(
           error instanceof Error
             ? error.message
-            : "BrowserCrew hit an unexpected error."
+            : "BrowserHarness hit an unexpected error."
         );
       }
     } finally {
@@ -1049,7 +1049,7 @@ export function App() {
         <Toolbar variant="dense" sx={{ minHeight: 56, gap: 1 }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="h6" noWrap>
-              BrowserCrew
+              BrowserHarness
             </Typography>
             <Typography variant="caption" color="text.secondary" noWrap>
               {safeHostname(tab?.url) || "No supported tab"}
@@ -1147,7 +1147,7 @@ export function App() {
           >
             <Typography variant="h5">Give your browser a task.</Typography>
             <Typography color="text.secondary" sx={{ maxWidth: 300 }}>
-              Ask BrowserCrew to read, navigate, compare, fill, or work across tabs.
+              Ask BrowserHarness to read, navigate, compare, fill, or work across tabs.
             </Typography>
             {!primary && (
               <Button variant="contained" onClick={() => setView("settings")}>
@@ -1265,7 +1265,7 @@ export function App() {
                   </Stack>
                 }
               >
-                BrowserCrew wants to: {approval.description}
+                BrowserHarness wants to: {approval.description}
               </Alert>
             )}
 
@@ -1353,7 +1353,7 @@ export function App() {
           multiline
           maxRows={5}
           fullWidth
-          placeholder="Ask BrowserCrew…"
+          placeholder="Ask BrowserHarness…"
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {

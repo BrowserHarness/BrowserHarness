@@ -146,7 +146,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     ) {
       setEndpointAccess(false);
       setModelsError(
-        "Grant this custom endpoint permission before BrowserCrew can load its models."
+        "Grant this custom endpoint permission before BrowserHarness can load its models."
       );
       return;
     }
@@ -495,7 +495,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
               type="password"
               autoComplete="off"
               fullWidth
-              helperText="Stored locally. BrowserCrew never writes provider keys to Git or analytics."
+              helperText="Stored locally. BrowserHarness never writes provider keys to Git or analytics."
             />
 
             <Stack direction="row" spacing={1} alignItems="flex-start">
@@ -792,7 +792,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
               </FormControl>
 
               <Typography variant="caption" color="text.secondary">
-                BrowserCrew tries the Primary once. Only recoverable
+                BrowserHarness tries the Primary once. Only recoverable
                 provider failures such as 429, timeout or 5xx can move
                 the task to the single Fallback.
               </Typography>

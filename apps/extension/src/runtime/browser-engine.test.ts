@@ -262,7 +262,7 @@ describe("Browser MVP engine scenarios", () => {
     );
 
     await runBrowserTask(
-      "Find my BrowserCrew note",
+      "Find my BrowserHarness note",
       h.dependencies
     );
 
@@ -349,8 +349,8 @@ describe("Browser MVP engine scenarios", () => {
     const h = harness({
       observations: [
         page(1, "Home", "Search", [searchElement]),
-        page(1, "Home", "BrowserCrew", [searchElement]),
-        page(1, "Results", "BrowserCrew result 1")
+        page(1, "Home", "BrowserHarness", [searchElement]),
+        page(1, "Results", "BrowserHarness result 1")
       ],
       decisions: [
         {
@@ -358,7 +358,7 @@ describe("Browser MVP engine scenarios", () => {
           tool: "type",
           input: {
             element_id: "bc-search",
-            text: "BrowserCrew"
+            text: "BrowserHarness"
           },
           note: "Entering search term"
         },
@@ -379,7 +379,7 @@ describe("Browser MVP engine scenarios", () => {
     });
 
     const result = await runBrowserTask(
-      "Search this site for BrowserCrew",
+      "Search this site for BrowserHarness",
       h.dependencies
     );
 

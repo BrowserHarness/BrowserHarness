@@ -516,7 +516,7 @@ export function compileSessionEvaluations(
       id: "approval-policy-preserved",
       kind: "approval",
       description:
-        "Consequential session actions still obey BrowserCrew approval rules.",
+        "Consequential session actions still obey BrowserHarness approval rules.",
       expect: {
         source_action_ids: approvalActionIds,
         policy: "preserve_browsercrew_approval_rules"

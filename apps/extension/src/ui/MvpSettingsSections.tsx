@@ -50,10 +50,10 @@ export function MvpSettingsSections() {
         <Stack spacing={1.5}>
           <Typography variant="subtitle1">Browser Access</Typography>
           <Alert severity="success">
-            Full browser-agent access is enabled for this BrowserCrew build.
+            Full browser-agent access is enabled for this BrowserHarness build.
           </Alert>
           <Typography variant="body2" color="text.secondary">
-            BrowserCrew can work across websites, tabs and windows; inspect navigation
+            BrowserHarness can work across websites, tabs and windows; inspect navigation
             and network activity; use Chrome DevTools Protocol for trusted input and
             accessibility-tree targeting; upload files supplied to the agent runtime;
             and export pages as PDF.
@@ -90,8 +90,8 @@ export function MvpSettingsSections() {
           />
           <Typography variant="body2" color="text.secondary">
             Provider keys, task history, workflows, and preferences are stored in
-            Chrome extension local storage. BrowserCrew does not send them to a
-            BrowserCrew cloud service in v0.1.
+            Chrome extension local storage. BrowserHarness does not send them to a
+            BrowserHarness cloud service in v0.1.
           </Typography>
           <Button
             variant="outlined"

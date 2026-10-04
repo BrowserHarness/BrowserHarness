@@ -179,7 +179,7 @@ async function requestSession(
   if (!sessionId) return null;
   return ensureTaskSession(
     sessionId,
-    sessionTitle?.trim() || "BrowserCrew task"
+    sessionTitle?.trim() || "BrowserHarness task"
   );
 }
 
@@ -265,7 +265,7 @@ async function sendToTab(
         error: {
           code: "UNSUPPORTED_PAGE",
           message:
-            "BrowserCrew cannot control Chrome internal pages, the Chrome Web Store, or other protected browser pages."
+            "BrowserHarness cannot control Chrome internal pages, the Chrome Web Store, or other protected browser pages."
         }
       };
     }
@@ -288,7 +288,7 @@ async function sendToTab(
           error: {
             code: "PERMISSION_REQUIRED",
             message:
-              "BrowserCrew needs website access for this tab. Grant all-sites access in Settings for cross-site and multi-tab automation.",
+              "BrowserHarness needs website access for this tab. Grant all-sites access in Settings for cross-site and multi-tab automation.",
             details:
               error instanceof Error
                 ? error.message
@@ -302,7 +302,7 @@ async function sendToTab(
         error: {
           code: "CONTENT_SCRIPT_UNAVAILABLE",
           message:
-            "BrowserCrew could not attach to this page even though site access is granted. Reload this tab once and try again.",
+            "BrowserHarness could not attach to this page even though site access is granted. Reload this tab once and try again.",
           details:
             error instanceof Error
               ? error.message
@@ -396,7 +396,7 @@ async function runTool(
         ok: false,
         error: {
           code: "SESSION_REQUIRED",
-          message: "list_tabs requires an active BrowserCrew task session"
+          message: "list_tabs requires an active BrowserHarness task session"
         }
       };
     }
@@ -440,7 +440,7 @@ async function runTool(
         ok: false,
         error: {
           code: "SESSION_REQUIRED",
-          message: "find_tab requires an active BrowserCrew task session"
+          message: "find_tab requires an active BrowserHarness task session"
         }
       };
     }
@@ -504,7 +504,7 @@ async function runTool(
         error: {
           code: "TAB_NOT_FOUND",
           message:
-            "No tab with that exact URL belongs to this BrowserCrew task session"
+            "No tab with that exact URL belongs to this BrowserHarness task session"
         }
       };
     }
@@ -572,7 +572,7 @@ async function runTool(
         error: {
           code: "TAB_NOT_OWNED",
           message:
-            "BrowserCrew will not close a borrowed or unrelated user tab."
+            "BrowserHarness will not close a borrowed or unrelated user tab."
         }
       };
     }
@@ -591,7 +591,7 @@ async function runTool(
         error: {
           code: "SESSION_REQUIRED",
           message:
-            "close_session requires a BrowserCrew task session"
+            "close_session requires a BrowserHarness task session"
         }
       };
     }
@@ -626,7 +626,7 @@ async function runTool(
           error: {
             code: "SESSION_REQUIRED",
             message:
-              "memory active requires a BrowserCrew task session"
+              "memory active requires a BrowserHarness task session"
           }
         };
       }
@@ -1783,7 +1783,7 @@ async function runTool(
           message:
             error instanceof Error
               ? error.message
-              : "BrowserCrew could not read this page"
+              : "BrowserHarness could not read this page"
         }
       };
     }
@@ -2202,7 +2202,7 @@ async function runTool(
           }
         } catch {
           // AX evidence is best-effort here; parser/runtime validation
-          // still applies and BrowserCrew can re-observe after dispatch.
+          // still applies and BrowserHarness can re-observe after dispatch.
         }
       }
 
@@ -2613,7 +2613,7 @@ async function handleBridgeCommand(
       ok: false,
       error: {
         code: "UNKNOWN_BRIDGE_ACTION",
-        message: `Unsupported BrowserCrew Bridge action: ${command.action}`
+        message: `Unsupported BrowserHarness Bridge action: ${command.action}`
       }
     };
   }
@@ -2659,7 +2659,7 @@ async function handleBridgeCommand(
           code: "APPROVAL_REQUIRED",
           message:
             element?.approval_reason ||
-            "This browser action requires explicit user approval in BrowserCrew."
+            "This browser action requires explicit user approval in BrowserHarness."
         }
       };
     }

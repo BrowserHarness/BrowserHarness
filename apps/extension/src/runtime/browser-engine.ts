@@ -506,11 +506,11 @@ export async function runBrowserTask(
         typeof decision.input.reason === "string" &&
         decision.input.reason.trim()
           ? decision.input.reason.trim()
-          : "A manual step is required on this page before BrowserCrew can continue.";
+          : "A manual step is required on this page before BrowserHarness can continue.";
 
       if (!dependencies.requestUserAction) {
         throw new Error(
-          "USER_ACTION_HANDOFF_UNAVAILABLE: the current BrowserCrew surface cannot request a manual step"
+          "USER_ACTION_HANDOFF_UNAVAILABLE: the current BrowserHarness surface cannot request a manual step"
         );
       }
 

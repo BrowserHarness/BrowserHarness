@@ -81,7 +81,7 @@ export function parseReadOnlySubagentTasks(
       error: {
         code: "SUBAGENT_TASK_LIMIT",
         message:
-          `BrowserCrew currently allows at most ${MAX_PARALLEL_READ_ONLY_WORKERS} parallel read-only workers per delegation.`
+          `BrowserHarness currently allows at most ${MAX_PARALLEL_READ_ONLY_WORKERS} parallel read-only workers per delegation.`
       }
     };
   }

@@ -62,7 +62,7 @@ function disconnect() {
       error: {
         code: "BRIDGE_DISCONNECTED",
         message:
-          "BrowserCrew Bridge disconnected before the MCP request completed"
+          "BrowserHarness Bridge disconnected before the MCP request completed"
       }
     });
   }
@@ -244,7 +244,7 @@ async function connectCurrent() {
 
   await saveBridgeStatus({
     state: "connecting",
-    message: "Connecting to local BrowserCrew Bridge"
+    message: "Connecting to local BrowserHarness Bridge"
   });
 
   const next = new WebSocket(url);
@@ -282,7 +282,7 @@ async function connectCurrent() {
     clearTimers();
     void saveBridgeStatus({
       state: "disconnected",
-      message: "Local BrowserCrew Bridge disconnected"
+      message: "Local BrowserHarness Bridge disconnected"
     });
     scheduleReconnect();
   });
@@ -290,7 +290,7 @@ async function connectCurrent() {
   next.addEventListener("error", () => {
     void saveBridgeStatus({
       state: "error",
-      message: "Could not connect to local BrowserCrew Bridge"
+      message: "Could not connect to local BrowserHarness Bridge"
     });
   });
 }
@@ -310,7 +310,7 @@ export async function requestBridgeMcp(
       error: {
         code: "BRIDGE_DISCONNECTED",
         message:
-          "Connect BrowserCrew Bridge before using external MCP tools"
+          "Connect BrowserHarness Bridge before using external MCP tools"
       }
     };
   }

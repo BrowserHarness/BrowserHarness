@@ -298,8 +298,8 @@ describe("CDP semantic and trusted-input runtime", () => {
     mocks.cdpCommand.mockResolvedValue({});
 
     await expect(
-      trustedType(10, "@e1", "BrowserCrew")
-    ).resolves.toEqual({ typed: 11 });
+      trustedType(10, "@e1", "BrowserHarness")
+    ).resolves.toEqual({ typed: 14 });
 
     expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
       1,
@@ -317,7 +317,7 @@ describe("CDP semantic and trusted-input runtime", () => {
       3,
       10,
       "Input.insertText",
-      { text: "BrowserCrew" }
+      { text: "BrowserHarness" }
     );
   });
 

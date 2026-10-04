@@ -166,7 +166,7 @@ export async function runExternalMcpTool(
         error: {
           code: "MCP_SERVER_BLOCKED",
           message:
-            `External MCP server ${id} is blocked by BrowserCrew settings.`
+            `External MCP server ${id} is blocked by BrowserHarness settings.`
         }
       };
     }
@@ -215,8 +215,8 @@ export async function runExternalMcpTool(
           code: "APPROVAL_REQUIRED",
           message:
             trustMode === "ask-all"
-              ? `External MCP server ${id} is configured to ask before every tool call. Approve ${name} in BrowserCrew before execution.`
-              : `External MCP tool ${id}/${name} is not explicitly read-only. Approve this tool call in BrowserCrew before execution.`
+              ? `External MCP server ${id} is configured to ask before every tool call. Approve ${name} in BrowserHarness before execution.`
+              : `External MCP tool ${id}/${name} is not explicitly read-only. Approve this tool call in BrowserHarness before execution.`
         }
       };
     }

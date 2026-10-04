@@ -15,7 +15,7 @@ describe("classifyTaskIntent", () => {
     "summarize this page",
     "click the pricing link",
     "fill this form",
-    'Write "BrowserCrew test" at the current cursor position',
+    'Write "BrowserHarness test" at the current cursor position',
     "search this site for pricing",
     "open the first result in a new tab",
     "go to https://example.com"
