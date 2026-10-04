@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Markdown } from "./Markdown";
 import {
   renderIntentPrompt,
   workflowToIntentSkill
@@ -1185,7 +1186,13 @@ export function App() {
                       message.role === "user" ? "action.hover" : "transparent"
                   }}
                 >
-                  <Typography variant="body2">{message.text}</Typography>
+                  {message.role === "assistant" ? (
+                    <Markdown text={message.text} />
+                  ) : (
+                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                      {message.text}
+                    </Typography>
+                  )}
                 </Paper>
               </Box>
             ))}
