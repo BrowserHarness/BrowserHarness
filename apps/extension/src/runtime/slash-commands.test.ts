@@ -20,3 +20,21 @@ describe("slash commands", () => {
     expect(helpText([skill])).toContain("`/check-prices`");
   });
 });
+
+describe("website commands in the chat box", () => {
+  const site = {
+    name: "shop-search",
+    title: "Shop: search",
+    site: "shop.example.com",
+    parameters: [{ name: "q", required: true }]
+  } as unknown as import("./site-commands").SiteCommand;
+
+  it("runs, suggests and lists them after Skills", () => {
+    expect(parseSlashCommand("/shop-search kettle", [skill], [site])).toEqual({ kind: "site", command: site, args: "kettle" });
+    expect(parseSlashCommand("/check-prices", [skill], [{ ...site, name: "check-prices" }])).toMatchObject({ kind: "skill" });
+    expect(slashSuggestions("/sho", [skill], [site])).toEqual([
+      { name: "shop-search", usage: "/shop-search <q>", description: "Shop: search (shop.example.com)" }
+    ]);
+    expect(helpText([skill], [site])).toContain("- `/shop-search <q>`: Shop: search on shop.example.com");
+  });
+});

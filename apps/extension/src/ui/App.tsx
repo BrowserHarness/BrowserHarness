@@ -32,6 +32,15 @@ import {
   StopIcon
 } from "./icons";
 import { SkillsView } from "./SkillsView";
+import {
+  loadSiteCommands,
+  parseCommandArgs,
+  recipeParameters,
+  SITE_COMMAND_NAMES_KEY,
+  type SiteCommand
+} from "../runtime/site-commands";
+import { SITE_SKILL_LIBRARY_KEY } from "../runtime/site-skill-store";
+import { siteCommandAnswer } from "./site-command-answer";
 import { MemoryView } from "./MemoryView";
 import {
   loadSkills,
@@ -178,6 +187,7 @@ export function App() {
     new URLSearchParams(location.search).get("view") === "scheduled" ? "scheduled" : "past"
   );
   const [skills, setSkills] = useState<UserSkill[]>([]);
+  const [siteCommands, setSiteCommands] = useState<SiteCommand[]>([]);
   const [tab, setTab] = useState<CurrentTab | null>(null);
   const [primary, setPrimary] = useState<ProviderConnection | null>(null);
   const [fallback, setFallback] = useState<ProviderConnection | null>(null);
@@ -266,12 +276,19 @@ export function App() {
 
   useEffect(() => {
     void loadSkills().then(setSkills).catch(() => undefined);
+    void loadSiteCommands().then(setSiteCommands).catch(() => undefined);
     const onChange = (
       changes: Record<string, chrome.storage.StorageChange>,
       area: string
     ) => {
       if (area === "local" && changes[SKILLS_STORAGE_KEY]) {
         void loadSkills().then(setSkills).catch(() => undefined);
+      }
+      if (
+        area === "local" &&
+        (changes[SKILLS_STORAGE_KEY] || changes[SITE_SKILL_LIBRARY_KEY] || changes[SITE_COMMAND_NAMES_KEY])
+      ) {
+        void loadSiteCommands().then(setSiteCommands).catch(() => undefined);
       }
     };
     chrome.storage.onChanged.addListener(onChange);
@@ -311,6 +328,54 @@ export function App() {
     noteOnMessage(message.id, `Updated /${skill.slug} with the steps from this run.`);
   };
 
+  /** A website command runs straight away: no model, just the learned recipe. */
+  const runSiteCommand = async (command: SiteCommand, args: string) => {
+    const values = parseCommandArgs(command, args);
+    const checked = recipeParameters(command, values);
+    if (!checked.ok) {
+      addAssistantMessage(checked.error);
+      return;
+    }
+    const sessionId = `site-command-${crypto.randomUUID()}`;
+    const call = (approvalGranted: boolean) =>
+      extensionMessage<unknown>({
+        type: "BROWSER_TOOL",
+        tool: "site_commands",
+        input: { name: command.name, parameters: values },
+        session_id: sessionId,
+        session_title: command.title,
+        approval_granted: approvalGranted
+      });
+    const activity = addActivity(`Running /${command.name} on ${command.site}`);
+    setRunning(true);
+    try {
+      let result = await call(false);
+      if (!result.ok && result.error?.code === "APPROVAL_REQUIRED") {
+        const approved = await requestApproval(result.error.message, command.site);
+        if (!approved) {
+          finishActivity(activity, "error");
+          addAssistantMessage("I stopped before sending anything.");
+          return;
+        }
+        result = await call(true);
+      }
+      finishActivity(activity, result.ok ? "done" : "error");
+      addAssistantMessage(siteCommandAnswer(command, result));
+      if (command.kind === "read") {
+        // The data is in the answer; the tab it used is no longer needed.
+        await extensionMessage({
+          type: "BROWSER_TOOL",
+          tool: "close_session",
+          input: {},
+          session_id: sessionId,
+          session_title: command.title
+        }).catch(() => undefined);
+      }
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const runCommand = async (command: SlashCommand, typed: string) => {
     setMessages((items) => [
       ...items,
@@ -320,6 +385,10 @@ export function App() {
       addAssistantMessage(
         `There's no command or Skill called /${command.name}. Type / to see them, or /help for the list.`
       );
+      return;
+    }
+    if (command.kind === "site") {
+      await runSiteCommand(command.command, command.args);
       return;
     }
     if (command.kind !== "builtin") return;
@@ -389,7 +458,7 @@ export function App() {
         return;
       }
       default:
-        addAssistantMessage(helpText(await loadSkills()));
+        addAssistantMessage(helpText(await loadSkills(), await loadSiteCommands().catch(() => [])));
     }
   };
 
@@ -798,8 +867,12 @@ export function App() {
     const attachmentNote = describeAttachmentsForPrompt(attachments);
 
     // Slash commands: built-ins answer right away; a Skill runs as a task.
-    const command = parseSlashCommand(typed, await loadSkills().catch(() => []));
-    if (command.kind === "builtin" || command.kind === "unknown") {
+    const command = parseSlashCommand(
+      typed,
+      await loadSkills().catch(() => []),
+      await loadSiteCommands().catch(() => [])
+    );
+    if (command.kind === "builtin" || command.kind === "unknown" || command.kind === "site") {
       setPrompt("");
       await runCommand(command, typed);
       return;
@@ -1034,7 +1107,7 @@ export function App() {
     return <SettingsView onBack={() => setView("chat")} />;
   }
 
-  const commandSuggestions = slashSuggestions(prompt, skills);
+  const commandSuggestions = slashSuggestions(prompt, skills, siteCommands);
 
   if (view === "skills") {
     return (
@@ -1047,6 +1120,10 @@ export function App() {
         onReplay={(workflow) => {
           setView("chat");
           void replayWorkflow(workflow);
+        }}
+        onUseCommand={(name) => {
+          setPrompt(`/${name} `);
+          setView("chat");
         }}
       />
     );

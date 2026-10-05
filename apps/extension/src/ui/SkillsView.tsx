@@ -23,6 +23,7 @@ import {
   type UserSkill
 } from "../runtime/skills";
 import { BUILT_IN_COMMANDS } from "../runtime/slash-commands";
+import { loadSiteCommands, renameSiteCommand, usage, type SiteCommand } from "../runtime/site-commands";
 import { deleteWorkflow, loadWorkflows, type SavedWorkflow } from "../runtime/workflows";
 import {
   deleteSiteSkillCandidate,
@@ -50,15 +51,20 @@ function runSummary(skill: UserSkill): string {
 export function SkillsView({
   onBack,
   onRun,
-  onReplay
+  onReplay,
+  onUseCommand
 }: {
   onBack: () => void;
   onRun: (skill: UserSkill) => void;
   onReplay: (workflow: SavedWorkflow) => void;
+  /** Puts "/name " in the chat box so the person can add the details. */
+  onUseCommand: (name: string) => void;
 }) {
   const [skills, setSkills] = useState<UserSkill[]>([]);
   const [recordings, setRecordings] = useState<SavedWorkflow[]>([]);
   const [siteSkills, setSiteSkills] = useState<SiteSkillCandidateSummary[]>([]);
+  const [siteCommands, setSiteCommands] = useState<SiteCommand[]>([]);
+  const [editingCommand, setEditingCommand] = useState<{ key: string; name: string } | null>(null);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const [notice, setNotice] = useState<{ severity: "success" | "error"; text: string } | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -67,6 +73,14 @@ export function SkillsView({
     setSkills(await loadSkills());
     setRecordings(await loadWorkflows());
     setSiteSkills(await listSiteSkillCandidateSummaries().catch(() => []));
+    setSiteCommands(await loadSiteCommands().catch(() => []));
+  };
+
+  const finishCommandRename = async () => {
+    if (!editingCommand) return;
+    await renameSiteCommand(editingCommand.key, editingCommand.name);
+    setEditingCommand(null);
+    await refresh();
   };
 
   useEffect(() => {
@@ -255,6 +269,10 @@ export function SkillsView({
           <Typography variant="subtitle2" mb={1}>
             Site Skills (built from a website's own requests)
           </Typography>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Each one gives you commands. Type one in the chat, like <code>/name what to search</code>, and it runs
+            straight away. Coding agents and the Bridge can run them too.
+          </Typography>
           <Stack spacing={1.5} mb={2}>
             {siteSkills.map((site) => (
               <Paper variant="outlined" sx={{ p: 1.5 }} key={site.id}>
@@ -264,6 +282,50 @@ export function SkillsView({
                   {site.lifecycle_status === "active" ? "in use" : "being tested"}
                   {site.verification_status === "failed" ? " · last check failed" : ""}
                 </Typography>
+                <Stack spacing={0.5} mt={0.75}>
+                  {siteCommands
+                    .filter((command) => command.skill_id === site.id)
+                    .map((command) => (
+                      <Stack direction="row" spacing={0.5} alignItems="center" key={command.key} data-testid="site-command">
+                        {editingCommand?.key === command.key ? (
+                          <TextField
+                            size="small"
+                            autoFocus
+                            label="Command name"
+                            value={editingCommand.name}
+                            onChange={(event) => setEditingCommand({ key: command.key, name: event.target.value })}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") void finishCommandRename();
+                              if (event.key === "Escape") setEditingCommand(null);
+                            }}
+                            onBlur={() => void finishCommandRename()}
+                          />
+                        ) : (
+                          <Tooltip title={`${command.kind === "read" ? "Gets data" : "Fills a form"}. ${usage(command)}`} describeChild>
+                            <Chip
+                              size="small"
+                              label={`/${command.name}`}
+                              variant="outlined"
+                              onClick={() => onUseCommand(command.name)}
+                            />
+                          </Tooltip>
+                        )}
+                        <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+                          {command.kind === "read" ? "gets data" : "fills a form"}
+                          {command.runs ? ` · worked ${command.worked} of ${command.runs}` : ""}
+                        </Typography>
+                        <Tooltip title="Rename command">
+                          <IconButton
+                            size="small"
+                            aria-label={`Rename command ${command.name}`}
+                            onClick={() => setEditingCommand({ key: command.key, name: command.name })}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    ))}
+                </Stack>
                 <Box>
                   <IconButton
                     size="small"

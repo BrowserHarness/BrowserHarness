@@ -5,6 +5,7 @@ export type ToolName =
   | "read_page"
   | "extract_table"
   | "skills"
+  | "site_commands"
   | "ax_snapshot"
   | "find"
   | "evaluate"

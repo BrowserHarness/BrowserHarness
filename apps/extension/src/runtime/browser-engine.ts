@@ -134,6 +134,15 @@ function sessionInputForTool(
     );
   }
 
+  if (tool === "site_commands") {
+    if (input.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters)) {
+      copied.parameters = Object.fromEntries(
+        Object.keys(input.parameters as Record<string, unknown>).map((name) => [name, "<redacted>"])
+      );
+    }
+    if (typeof input.args === "string") copied.args = "<redacted>";
+  }
+
   if (
     tool === "mcp" &&
     input.action === "call_tool" &&

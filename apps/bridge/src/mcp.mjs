@@ -26,6 +26,11 @@ const TOOL_SPECS = [
     name: optional(z.string(), "Skill name from the list, e.g. \"check-prices\"; omit to list them"),
     details: optional(z.string(), "Extra details for this run, e.g. \"size 9\"")
   }, true],
+  ["site_commands", "List the commands BrowserHarness learned from websites (each has a name, site, kind and parameters), or run one: pass name and parameters. It opens the site in its own tab. read commands return the site's own data; form commands fill and send a form and may need the person's approval in Chrome (APPROVAL_REQUIRED means they must run it from the side panel).", {
+    name: optional(z.string(), "Command name from the list, e.g. \"amazon-search\"; omit to list them"),
+    parameters: optional(z.record(z.string(), z.unknown()), "Values by parameter name, e.g. {\"q\": \"kettle\"}"),
+    args: optional(z.string(), "Or the values as text: \"kettle\" or \"q=kettle page=2\"")
+  }],
   ["extract_table", "Read every data table on the page (also inside frames) as headers and rows. Use it for lists, prices and comparisons instead of copying page text.", {}, true],
   ["ax_snapshot", "Fresh accessibility-tree snapshot with @eN refs; works better on dynamic sites. Use its refs for trusted_* tools.", {
     max_elements: optional(z.number().int().positive(), "Maximum elements to return")
@@ -396,6 +401,43 @@ const observeField = {
     .describe("Return the page as it looks after this action (default true)")
 };
 
+export function siteToolName(name) {
+  return `browserharness_site_${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
+}
+
+export function siteToolDescription(command) {
+  const what =
+    command.kind === "read"
+      ? "Returns the site's own data in one call (read-only)."
+      : "Fills and sends a form on the site; may need the person's approval in Chrome.";
+  const trust = command.status === "proven" ? "" : " BrowserHarness is still testing this command; check the result.";
+  return `${command.title} on ${command.site}. ${what}${trust} Opens the site in its own tab.`;
+}
+
+export function siteToolInput(command) {
+  const shape = {};
+  for (const parameter of command.parameters || []) {
+    if (typeof parameter?.name !== "string" || !/^[a-z_][a-z0-9_]*$/i.test(parameter.name)) continue;
+    const label = [
+      parameter.label || parameter.name,
+      Array.isArray(parameter.options) && parameter.options.length
+        ? `One of: ${parameter.options.slice(0, 20).join(", ")}`
+        : "",
+      parameter.default !== undefined ? `Default ${parameter.default}` : ""
+    ]
+      .filter(Boolean)
+      .join(". ");
+    const base =
+      parameter.type === "boolean"
+        ? z.boolean()
+        : parameter.type === "string[]"
+          ? z.array(z.string())
+          : z.string();
+    shape[parameter.name] = (parameter.required ? base : base.optional()).describe(label);
+  }
+  return shape;
+}
+
 export function toolInputSchema(spec) {
   return z
     .object({ ...sessionFields, ...spec.input, ...(spec.readOnly ? {} : observeField) })
@@ -430,7 +472,89 @@ export function createBrowserHarnessMcpServer(
     async () => bridgeResultToMcp(await client.status())
   );
 
+  // Website commands also appear as their own typed tools, e.g.
+  // browserharness_site_amazon_search {q}, refreshed whenever the list is read.
+  const siteTools = new Map();
+  const syncSiteTools = async () => {
+    const listed = await client.command({
+      session: defaultSession,
+      title: "Site commands",
+      action: "site_commands",
+      args: {}
+    });
+    if (!listed?.ok || !Array.isArray(listed.data?.commands)) return listed;
+    const wanted = new Map(
+      listed.data.commands
+        .filter((command) => typeof command?.name === "string")
+        .map((command) => [siteToolName(command.name), command])
+    );
+    for (const [toolName, entry] of siteTools) {
+      if (!wanted.has(toolName) || JSON.stringify(wanted.get(toolName)) !== entry.signature) {
+        entry.tool.remove();
+        siteTools.delete(toolName);
+      }
+    }
+    for (const [toolName, command] of wanted) {
+      if (siteTools.has(toolName) || toolName.length > 64) continue;
+      const tool = server.registerTool(
+        toolName,
+        {
+          description: siteToolDescription(command),
+          inputSchema: z.object({ ...sessionFields, ...siteToolInput(command) }).loose(),
+          annotations: command.kind === "read"
+            ? { readOnlyHint: true, openWorldHint: true }
+            : { openWorldHint: true }
+        },
+        async (input) => {
+          // A site parameter may itself be called "title" or "session".
+          const names = new Set((command.parameters || []).map((parameter) => parameter.name));
+          const parameters = Object.fromEntries(
+            Object.entries(input).filter(([key]) => names.has(key))
+          );
+          return bridgeResultToMcp(
+            await client.command({
+              session: (!names.has("session") && input.session) || defaultSession,
+              title: (!names.has("title") && input.title) || command.title || "Site command",
+              action: "site_commands",
+              args: { name: command.name, parameters }
+            })
+          );
+        }
+      );
+      siteTools.set(toolName, { tool, signature: JSON.stringify(command) });
+    }
+    return listed;
+  };
+  server.siteToolsReady = syncSiteTools().catch(() => undefined);
+
   for (const spec of BROWSERHARNESS_MCP_TOOLS) {
+    if (spec.action === "site_commands") {
+      server.registerTool(
+        "browserharness_site_commands",
+        {
+          description: spec.description,
+          inputSchema: toolInputSchema(spec),
+          annotations: { openWorldHint: true }
+        },
+        async ({ session, title, args, ...input }) => {
+          if (!input.name) {
+            return bridgeResultToMcp(await syncSiteTools().catch((error) => ({
+              ok: false,
+              error: { code: "BRIDGE_UNAVAILABLE", message: error instanceof Error ? error.message : String(error) }
+            })));
+          }
+          return bridgeResultToMcp(
+            await client.command({
+              session: session || defaultSession,
+              title: title || "Site command",
+              action: "site_commands",
+              args: { ...input, ...(typeof args === "string" ? { args } : {}) }
+            })
+          );
+        }
+      );
+      continue;
+    }
     server.registerTool(
       `browserharness_${spec.action}`,
       {

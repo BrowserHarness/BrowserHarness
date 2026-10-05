@@ -30,6 +30,7 @@ const requiredTools = [
   "save_pdf",
   "extract_table",
   "skills",
+  "site_commands",
   "cdp"
 ]
 
