@@ -712,7 +712,9 @@ export function createBridgeServer({
             ok: Boolean(message.ok),
             ...(message.ok
               ? { data: message.data }
-              : { error: message.error })
+              : { error: message.error }),
+            // The page as it looks after the action, when the extension sent it.
+            ...(message.ok && message.page ? { page: message.page } : {})
           });
         }
       } catch {

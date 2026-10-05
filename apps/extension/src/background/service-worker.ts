@@ -1,4 +1,9 @@
 import type { RecordedWorkflowStep } from "../runtime/workflows";
+import {
+  changesPage,
+  observationInputAfter,
+  settleMsAfter
+} from "../runtime/post-action";
 import type {
   ExtensionRequest,
   PageObservation,
@@ -2748,7 +2753,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
 
 async function handleBridgeCommand(
   command: BridgeCommand
-): Promise<ToolResult> {
+): Promise<ToolResult & { page?: PageObservation }> {
   if (!BRIDGE_TOOL_NAMES.has(command.action as ToolName)) {
     return {
       ok: false,
@@ -2806,12 +2811,22 @@ async function handleBridgeCommand(
     }
   }
 
-  return runTool(
-    tool,
-    command.args,
+  // Agents get the page as it looks after the action, so they do not need
+  // a separate observe_page call per step. observe:false turns this off.
+  const { observe: returnPage, ...args } = command.args;
+  const result = await runTool(tool, args, command.session, command.title);
+  if (!result.ok || returnPage === false || !changesPage(tool, args)) {
+    return result;
+  }
+  const settleMs = settleMsAfter(tool);
+  if (settleMs) await new Promise((resolve) => setTimeout(resolve, settleMs));
+  const page = await runTool(
+    "observe_page",
+    observationInputAfter(args, result),
     command.session,
     command.title
   );
+  return page.ok && page.data ? { ...result, page: page.data as PageObservation } : result;
 }
 
 async function armWatchTab(tabId: number): Promise<ToolResult> {

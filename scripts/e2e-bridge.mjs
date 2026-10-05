@@ -126,23 +126,34 @@ try {
   const tools = (await mcp.listTools()).tools;
   const click = tools.find((tool) => tool.name === "browserharness_click");
   check("MCP lists typed tools", tools.length === 35 && click?.inputSchema?.required?.includes("element_id"), `${tools.length} tools`);
+  let browserCalls = 0;
+  // Returns the tool's outcome (JSON) and the page text it carried, if any.
   const call = async (name, args = {}) => {
+    if (name !== "browserharness_status") browserCalls += 1;
     const result = await mcp.callTool({ name, arguments: { session: "e2e-greet", title: "Greet test", ...args } });
-    return JSON.parse(result.content[0].text);
+    const texts = result.content.map((part) => part.text);
+    const page = texts.find((text) => text.startsWith("Page after this action:") || text.startsWith("tab_id:")) || "";
+    let outcome;
+    try {
+      outcome = JSON.parse(texts[0]);
+    } catch {
+      outcome = { ok: !result.isError };
+    }
+    return { ...outcome, page };
   };
+  const ref = (page, pattern) => page.split("\n").find((line) => pattern.test(line))?.split(" ")[0];
   const st = await call("browserharness_status");
   check("agent sees the extension connected", st.ok && st.data.extension_connected === true);
   const opened = await call("browserharness_open_tab", { url: pageUrl });
-  check("agent opens a tab", opened.ok, JSON.stringify(opened.error || ""));
-  let observed = await call("browserharness_observe_page");
-  const elements = observed.data?.elements || [];
-  const input = elements.find((element) => element.accessible_name === "name");
-  const button = elements.find((element) => /Greet/.test(element.accessible_name || ""));
-  check("agent observes @e refs", observed.ok && input && button, elements.map((e) => `${e.element_id}:${e.accessible_name}`).join(" "));
-  const typed = await call("browserharness_type", { element_id: input?.element_id, text: "Ada" });
-  const clicked = await call("browserharness_click", { element_id: button?.element_id });
-  observed = await call("browserharness_observe_page");
-  check("agent completes the task", typed.ok && clicked.ok && observed.data?.visible_text?.includes("Hello, Ada!"), JSON.stringify(clicked.error || typed.error || ""));
+  const input = ref(opened.page, /textbox "name"/);
+  const button = ref(opened.page, /button "Greet"/);
+  check("opening a tab returns the page with @e refs", opened.ok && /^@e\d+$/.test(input || "") && /^@e\d+$/.test(button || ""), opened.page.slice(0, 300));
+  const typed = await call("browserharness_type", { element_id: input, text: "Ada" });
+  const clicked = await call("browserharness_click", { element_id: button });
+  check("agent completes the task from the pages actions return", typed.ok && clicked.ok && clicked.page.includes("Hello, Ada!"), JSON.stringify(clicked.error || typed.error || ""));
+  check("three browser calls instead of five (no separate observe)", browserCalls === 3, `${browserCalls} calls`);
+  const observed = await call("browserharness_observe_page");
+  check("observe_page answers as compact text", /^tab_id: \d+\nurl: http/.test(observed.page) && observed.page.includes('button "Greet"'));
   const closed = await call("browserharness_close_session");
   check("agent closes its tabs", closed.ok);
   await mcp.close();

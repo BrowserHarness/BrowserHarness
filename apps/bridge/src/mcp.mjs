@@ -17,7 +17,7 @@ const action = (values, description) => z.enum(values).describe(description);
 // One entry per browser tool: what it does, its typed inputs, and whether it
 // only reads. Extra keys are still passed through for advanced options.
 const TOOL_SPECS = [
-  ["observe_page", "Look at the task tab: URL, title, visible text and the interactive elements with their @eN refs. Call it first and after every page change.", {}, true],
+  ["observe_page", "Look at the task tab: URL, title, visible text and the interactive elements with their @eN refs. Call it at the start of a task; actions already return the page after them.", {}, true],
   ["read_page", "Read the page's full text (scrolls and continues across long pages). Use when the visible text is not enough.", {
     start: optional(z.number().int().min(0), "Continue from next_start of the previous read"),
     max_chars: optional(z.number().int().positive(), "Character limit for this read")
@@ -277,6 +277,56 @@ export function createBridgeHttpClient(
   };
 }
 
+const MAX_PAGE_ELEMENTS = 250;
+const MAX_PAGE_TEXT = 6000;
+const MAX_RESULT_TEXT = 20_000;
+
+function clip(text, max) {
+  const value = String(text ?? "");
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function isObservation(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    Array.isArray(value.elements) &&
+    typeof value.url === "string"
+  );
+}
+
+/**
+ * A page as compact text: one line per interactive element, which costs an
+ * agent far fewer tokens than the observation JSON.
+ */
+export function renderPage(observation) {
+  const elements = observation.elements || [];
+  const shown = elements.slice(0, MAX_PAGE_ELEMENTS);
+  const line = (element) => {
+    const name = element.accessible_name
+      ? ` "${clip(String(element.accessible_name).replace(/\s+/g, " ").trim(), 80)}"`
+      : "";
+    const flags = [
+      element.type ? `type=${element.type}` : "",
+      element.disabled ? "disabled" : "",
+      element.in_viewport === false ? "offscreen" : "",
+      element.requires_approval ? "approval-required" : ""
+    ]
+      .filter(Boolean)
+      .join(",");
+    return `${element.element_id} ${element.role}${name} <${element.tag}>${flags ? ` [${flags}]` : ""}`;
+  };
+  return [
+    `tab_id: ${observation.tab_id}`,
+    `url: ${observation.url}`,
+    `title: ${observation.title}`,
+    `elements (${elements.length}${elements.length > shown.length ? `, first ${shown.length} shown` : ""}):`,
+    ...(shown.length ? shown.map(line) : ["(none)"]),
+    "visible text:",
+    clip(String(observation.visible_text || "").replace(/\s+/g, " ").trim(), MAX_PAGE_TEXT) || "(none)"
+  ].join("\n");
+}
+
 export function bridgeResultToMcp(result) {
   const safe =
     result && typeof result === "object"
@@ -288,15 +338,18 @@ export function bridgeResultToMcp(result) {
             message: "BrowserHarness Bridge returned an invalid result"
           }
         };
+  const { page, ...outcome } = safe;
+  const content =
+    outcome.ok === true && isObservation(outcome.data)
+      ? [{ type: "text", text: renderPage(outcome.data) }]
+      : [{ type: "text", text: clip(JSON.stringify(outcome, null, 2), MAX_RESULT_TEXT) }];
+  if (isObservation(page)) {
+    content.push({ type: "text", text: `Page after this action:\n${renderPage(page)}` });
+  }
 
   return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(safe, null, 2)
-      }
-    ],
-    ...(safe.ok === true ? {} : { isError: true })
+    content,
+    ...(outcome.ok === true ? {} : { isError: true })
   };
 }
 
@@ -314,8 +367,17 @@ const sessionFields = {
     .describe("Short task title shown to the person in Chrome")
 };
 
+const observeField = {
+  observe: z
+    .boolean()
+    .optional()
+    .describe("Return the page as it looks after this action (default true)")
+};
+
 export function toolInputSchema(spec) {
-  return z.object({ ...sessionFields, ...spec.input }).loose();
+  return z
+    .object({ ...sessionFields, ...spec.input, ...(spec.readOnly ? {} : observeField) })
+    .loose();
 }
 
 export function createBrowserHarnessMcpServer(

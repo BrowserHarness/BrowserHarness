@@ -1,3 +1,4 @@
+import { changesPage, observationInputAfter } from "./post-action";
 import type {
   PageObservation,
   ToolName,
@@ -112,28 +113,6 @@ export interface BrowserEngineResult {
   session_evidence: BrowserTaskSessionEvidence;
 }
 
-const MUTATING_OR_CONTEXT_CHANGING_TOOLS: ToolName[] = [
-  "navigate",
-  "back",
-  "reload",
-  "click",
-  "type",
-  "press_key",
-  "trusted_click",
-  "trusted_type",
-  "trusted_key",
-  "send_keys",
-  "select_option",
-  "hover",
-  "drag",
-  "dialog",
-  "evaluate",
-  "cdp",
-  "scroll",
-  "open_tab",
-  "find_tab",
-  "switch_tab"
-];
 
 function sessionInputForTool(
   tool: ToolName,
@@ -176,8 +155,7 @@ function requiresPostActionVerification(
   tool: ToolName,
   input: Record<string, unknown>
 ): boolean {
-  if (tool === "site_skill") return input.action === "run";
-  return MUTATING_OR_CONTEXT_CHANGING_TOOLS.includes(tool);
+  return changesPage(tool, input);
 }
 
 function tabIdFromResult(result: ToolResult): number | undefined {
@@ -334,15 +312,7 @@ function observationInputFor(
   decision: Extract<AgentDecision, { kind: "tool" }>,
   result: ToolResult
 ): Record<string, unknown> {
-  const resultTabId = tabIdFromResult(result);
-  if (resultTabId) return { tab_id: resultTabId };
-
-  const requestedTabId = decision.input.tab_id;
-  if (typeof requestedTabId === "number") {
-    return { tab_id: requestedTabId };
-  }
-
-  return {};
+  return observationInputAfter(decision.input, result);
 }
 
 export async function runBrowserTask(
