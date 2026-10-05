@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Local real-Chromium test of the Connect AI screen: local model (LM Studio style server, no key) and the
-// subscription option's readiness message. Fake local server, no real model, no network.
+// Local real-Chromium test of the Connect AI screen and the chat model menu: every model a local
+// (LM Studio style, no key) server has loaded is offered, the user picks one, switches models from the
+// chat header, and the reply comes from the picked model. Fake local server, no real model, no network.
 // Requires: npm run build, playwright-core. Never runs on GitHub Actions.
 import http from "node:http";
 import os from "node:os";
@@ -19,11 +20,12 @@ if (!fs.existsSync(path.join(dist, "manifest.json"))) {
 }
 
 const seenAuth = [];
+const seenModels = [];
 const handler = (req, res) => {
     seenAuth.push(req.headers.authorization || "");
     res.setHeader("content-type", "application/json");
     if (req.url.startsWith("/v1/models")) {
-      return res.end(JSON.stringify({ data: [{ id: "qwen2.5-7b-instruct" }, { id: "text-embedding-nomic" }] }));
+      return res.end(JSON.stringify({ data: [{ id: "deepseek-v4-flash-0731" }, { id: "qwen2.5-7b-instruct" }, { id: "text-embedding-nomic" }] }));
     }
     if (req.url.startsWith("/v1/chat/completions")) {
       let raw = "";
@@ -33,7 +35,10 @@ const handler = (req, res) => {
         const user = String(body.messages.at(-1).content?.[0]?.text ?? body.messages.at(-1).content ?? "");
         const content = user.includes("USER GOAL")
           ? JSON.stringify({ kind: "tool", tool: "click", input: { element_id: "bc-health-1" }, note: "Clicking Continue" })
-          : "OK";
+          : user.includes("OK only")
+            ? "OK"
+            : `<think>planning the reply</think>Reply from ${body.model}`;
+        seenModels.push(body.model);
         res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
       });
       return;
@@ -73,17 +78,49 @@ try {
   await side.getByText("Connect your AI").waitFor({ timeout: 10000 });
 
   const body0 = await side.locator("body").innerText();
-  check("simple screen offers OpenRouter and shows ChatGPT as coming soon", body0.includes("Connect with OpenRouter") && body0.includes("Coming soon"));
+  check("simple screen offers OpenRouter and shows ChatGPT as coming soon", body0.includes("OpenRouter (recommended)") && body0.includes("Coming soon"));
+  check("no model is preselected anywhere", !/openrouter\/auto/.test(body0));
 
   if (lmStudioUp) {
-    const lmButton = side.getByRole("button", { name: /Connect LM Studio/ });
-    await lmButton.waitFor({ timeout: 15000 }).catch(() => {});
-    check("a running local LM Studio is detected automatically", await lmButton.isVisible().catch(() => false));
-    await lmButton.click().catch(() => {});
+    await side.getByText(/LM Studio found at http:\/\/127\.0\.0\.1:1234/).waitFor({ timeout: 15000 }).catch(() => {});
+    const found = await side.locator("body").innerText();
+    check("LM Studio is found at 127.0.0.1:1234 with every chat model it has loaded", /LM Studio found at http:\/\/127\.0\.0\.1:1234 \(2 models\)/.test(found), found.match(/LM Studio found[^\n]*/)?.[0] || "");
+    const chooser = side.getByRole("combobox", { name: "LM Studio model" });
+    await chooser.click();
+    const offered = (await side.getByRole("option").allInnerTexts()).map((t) => t.trim());
+    check("both loaded models are offered, embeddings are not", offered.includes("deepseek-v4-flash-0731") && offered.includes("qwen2.5-7b-instruct") && !offered.includes("text-embedding-nomic"), offered.join(" | "));
+    await side.getByRole("option", { name: "deepseek-v4-flash-0731" }).click();
+    await side.getByRole("button", { name: "Use this model" }).first().click();
     await side.getByText(/^Saved\./).first().waitFor({ timeout: 30000 }).catch(() => {});
-    check("one click connects and tests the local model", /Saved\. Chat ✓/.test(await side.locator("body").innerText()));
+    if (process.env.SHOT_DIR) await side.screenshot({ path: path.join(process.env.SHOT_DIR, "connect-local.png") });
+    check("the picked local model is tested and saved", /Saved\. Chat ✓/.test(await side.locator("body").innerText()));
+
+    await side.getByRole("button", { name: "Back to chat" }).click();
+    const menuButton = side.getByRole("button", { name: "Choose model" });
+    await menuButton.waitFor({ timeout: 10000 });
+    check("chat header shows the picked model", (await menuButton.innerText()).includes("deepseek-v4-flash-0731"));
+    await menuButton.click();
+    await side.getByRole("button", { name: "qwen2.5-7b-instruct" }).waitFor({ timeout: 10000 }).catch(() => {});
+    const menuText = await side.locator(".MuiPopover-paper").innerText().catch(() => "");
+    if (process.env.SHOT_DIR) { await side.waitForTimeout(500); await side.screenshot({ path: path.join(process.env.SHOT_DIR, "model-menu.png") }); }
+    check("chat model menu lists every model from the connected service", menuText.includes("LM Studio") && menuText.includes("deepseek-v4-flash-0731") && menuText.includes("qwen2.5-7b-instruct") && !menuText.includes("text-embedding-nomic"), menuText.replace(/\n+/g, " | "));
+    await side.getByLabel("Search models").fill("qwen");
+    check("menu search narrows the list", !(await side.locator(".MuiPopover-paper").innerText()).includes("deepseek-v4-flash-0731"));
+    await side.getByRole("button", { name: "qwen2.5-7b-instruct" }).click();
+    await side.locator(".MuiPopover-paper").waitFor({ state: "detached", timeout: 10000 }).catch(() => {});
+    check("one click switches the chat to another model", (await menuButton.innerText()).includes("qwen2.5-7b-instruct"));
+
+    const composer = side.getByRole("textbox").last();
+    await composer.fill("write a short poem about the sea");
+    await composer.press("Enter");
+    await side.getByText("Reply from qwen2.5-7b-instruct").waitFor({ timeout: 30000 }).catch(() => {});
+    const chat = await side.locator("body").innerText();
+    check("the reply comes from the model picked in the menu, thinking hidden", chat.includes("Reply from qwen2.5-7b-instruct") && !chat.includes("planning the reply"), `models called: ${[...new Set(seenModels)].join(", ")}`);
+
+    await side.getByRole("button", { name: "Settings" }).first().click();
+    await side.getByText("Connect your AI").waitFor({ timeout: 10000 });
   } else {
-    console.log("SKIP local auto-detect (port 1234 busy)");
+    console.log("SKIP local auto-detect and model menu (port 1234 busy)");
   }
 
   await side.getByRole("button", { name: /Advanced/ }).click();
@@ -108,7 +145,7 @@ try {
   check("local provider needs no API key field", (await side.getByLabel("API key").count()) === 0);
   await side.getByLabel("Base URL").fill(`http://localhost:${port}/v1`);
   await side.getByText(/models loaded/).waitFor({ timeout: 15000 }).catch(() => {});
-  check("models load from the local server", (await side.locator("body").innerText()).includes("2 models loaded"));
+  check("models load from the local server", (await side.locator("body").innerText()).includes("3 models loaded"));
 
   await side.getByRole("combobox", { name: "Model", exact: true }).fill("qwen2.5-7b-instruct");
   await side.getByRole("button", { name: /Test Chat \+ Agent/ }).click();

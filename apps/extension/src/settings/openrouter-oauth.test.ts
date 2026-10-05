@@ -7,7 +7,7 @@ import {
   exchangeCodeForKey,
   extractAuthorizationCode
 } from "./openrouter-oauth";
-import { detectLocalModels } from "../ui/SimpleConnect";
+import { detectLocalModels, normalizeLocalAddress } from "../ui/SimpleConnect";
 import { hasCredentials } from "./provider-store";
 
 describe("OpenRouter OAuth PKCE", () => {
@@ -97,17 +97,41 @@ describe("simple connect helpers", () => {
     expect(hasCredentials({ provider: "openrouter", apiKey: "" })).toBe(false);
   });
 
-  it("detects whichever local servers are running", async () => {
-    const discover = vi.fn(async (config: { provider: string }) => {
+  it("lists every loaded local model, not just the first", async () => {
+    const discover = vi.fn(async (config: { provider: string; baseUrl?: string }) => {
       if (config.provider === "ollama") throw new Error("connection refused");
       return [
-        { id: "text-embedding-nomic", capabilities: { chat: false, agent: false } },
-        { id: "qwen2.5-7b-instruct", capabilities: { chat: true, agent: true } }
+        { id: "text-embedding-nomic", capabilities: { embedding: true }, primaryCapability: "embedding" },
+        { id: "deepseek-v4-flash-0731", capabilities: { chat: true }, primaryCapability: "chat" },
+        { id: "qwen/qwen3-8b", capabilities: { chat: true }, primaryCapability: "chat" }
       ];
     });
     const found = await detectLocalModels(discover as never);
     expect(found).toEqual([
-      { provider: "lm-studio", baseUrl: "http://localhost:1234/v1", model: "qwen2.5-7b-instruct" }
+      {
+        provider: "lm-studio",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        models: [
+          { id: "deepseek-v4-flash-0731", kind: "chat" },
+          { id: "qwen/qwen3-8b", kind: "chat" }
+        ]
+      }
     ]);
+  });
+
+  it("falls back to localhost and accepts the address LM Studio shows", async () => {
+    const discover = vi.fn(async (config: { provider: string; baseUrl?: string }) => {
+      if (config.baseUrl === "http://localhost:11434/v1" || config.baseUrl === "http://127.0.0.1:5678/v1") {
+        return [{ id: "llama3.2", capabilities: { chat: true }, primaryCapability: "chat" }];
+      }
+      throw new Error("connection refused");
+    });
+    const found = await detectLocalModels(discover as never, "127.0.0.1:5678");
+    expect(found.map((server) => server.baseUrl)).toEqual([
+      "http://localhost:11434/v1",
+      "http://127.0.0.1:5678/v1"
+    ]);
+    expect(normalizeLocalAddress("http://127.0.0.1:1234")).toBe("http://127.0.0.1:1234/v1");
+    expect(normalizeLocalAddress("http://127.0.0.1:1234/v1/")).toBe("http://127.0.0.1:1234/v1");
   });
 });

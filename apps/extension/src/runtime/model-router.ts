@@ -24,6 +24,7 @@ export function isRecoverableProviderError(error: unknown): boolean {
     /\b5\d\d\b/.test(message) ||
     /timed out/i.test(message) ||
     /empty response/i.test(message) ||
+    /gave no reply/i.test(message) ||
     /failed the BrowserHarness structured agent capability/i.test(message) ||
     /Model did not return a BrowserHarness action/i.test(message) ||
     /vision-capable model/i.test(message)
