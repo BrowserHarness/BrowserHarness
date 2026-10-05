@@ -24,8 +24,17 @@ export interface ScheduledRunOutcome {
 
 const RUN_LIMIT_MS = 10 * 60_000;
 
-export async function runScheduledTask(
+export function runScheduledTask(
   item: ScheduledTask,
+  log: (line: string) => void = () => undefined
+): Promise<ScheduledRunOutcome> {
+  return runUnattendedTask(item.task, "Scheduled", log);
+}
+
+/** A task nobody is watching: from a schedule or from the person's phone. */
+export async function runUnattendedTask(
+  taskText: string,
+  label: string,
   log: (line: string) => void = () => undefined
 ): Promise<ScheduledRunOutcome> {
   const primary = await loadActiveConnection();
@@ -34,18 +43,18 @@ export async function runScheduledTask(
   }
   const fallback = await loadFallbackConnection();
 
-  const command = parseSlashCommand(item.task, await loadSkills());
+  const command = parseSlashCommand(taskText, await loadSkills());
   if (command.kind === "builtin" || command.kind === "unknown") {
     return {
       status: "failed",
       message:
         command.kind === "unknown"
           ? `There's no Skill called /${command.name} any more.`
-          : `/${command.name} can't run on a schedule.`
+          : `/${command.name} only works in the side panel.`
     };
   }
   const skill = command.kind === "skill" ? command.skill : null;
-  const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : item.task;
+  const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
   const aboutMe = aboutMePrompt(await loadAboutMe().catch(() => []));
   const preferences = await loadPreferences();
 
@@ -77,7 +86,7 @@ export async function runScheduledTask(
 
     const session = {
       id: crypto.randomUUID(),
-      title: `Scheduled: ${item.task.length > 36 ? `${item.task.slice(0, 35)}…` : item.task}`
+      title: `${label}: ${taskText.length > 36 ? `${taskText.slice(0, 35)}…` : taskText}`
     };
     // Its own background tab, so it never takes over the tab the person is using.
     const opened = await extensionMessage<{ tab_id: number }>({

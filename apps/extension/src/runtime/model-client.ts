@@ -165,7 +165,126 @@ export function promptBudgetFor(config: ProviderConfig): PromptBudget {
 }
 
 export function agentSystemFor(config: ProviderConfig): string {
-  return usesLocalBudget(config) ? AGENT_SYSTEM_COMPACT : AGENT_SYSTEM;
+  if (usesLocalBudget(config)) return AGENT_SYSTEM_COMPACT;
+  return usesNativeTools(config) ? `${AGENT_SYSTEM}\n\n${NATIVE_TOOLS_NOTE}` : AGENT_SYSTEM;
+}
+
+// Native tool calling: hosted models call a browser_action or finish
+// function instead of writing JSON text, so the reply is always well formed.
+// Models or servers that reject tools fall back to JSON text for the rest of
+// the session.
+const NATIVE_TOOLS_NOTE =
+  "NATIVE TOOL CALLING: instead of writing the JSON object as text, call the browser_action function with tool, input and note, or the finish function with message when the task is complete. Call exactly one function per turn.";
+const nativeToolsRejected = new Set<string>();
+
+function nativeToolsKey(config: ProviderConfig): string {
+  return `${config.provider}::${config.baseUrl || ""}::${config.model}`;
+}
+
+/** Whether agent calls to this model use native tool calling. */
+export function usesNativeTools(config: ProviderConfig): boolean {
+  return (
+    !isSubscriptionProvider(config.provider) &&
+    !usesLocalBudget(config) &&
+    !nativeToolsRejected.has(nativeToolsKey(config))
+  );
+}
+
+const BROWSER_ACTION_PARAMETERS = {
+  type: "object",
+  properties: {
+    tool: {
+      type: "string",
+      enum: [] as string[],
+      description: "The browser tool to run"
+    },
+    input: {
+      type: "object",
+      description: "The tool's input as described in the instructions, e.g. {\"element_id\":\"@e3\"}",
+      additionalProperties: true
+    },
+    note: { type: "string", description: "Short activity shown to the user" }
+  },
+  required: ["tool", "input", "note"]
+};
+
+const FINISH_PARAMETERS = {
+  type: "object",
+  properties: {
+    message: { type: "string", description: "Concise result for the user" }
+  },
+  required: ["message"]
+};
+
+const BROWSER_ACTION_DESCRIPTION =
+  "Run one BrowserHarness browser tool on the task tab, e.g. click, type, navigate, read_page.";
+const FINISH_DESCRIPTION = "Finish the task and give the user the result.";
+
+function browserActionParameters() {
+  return {
+    ...BROWSER_ACTION_PARAMETERS,
+    properties: {
+      ...BROWSER_ACTION_PARAMETERS.properties,
+      tool: { ...BROWSER_ACTION_PARAMETERS.properties.tool, enum: [...TOOL_NAMES] }
+    }
+  };
+}
+
+function openAITools() {
+  return [
+    {
+      type: "function",
+      function: {
+        name: "browser_action",
+        description: BROWSER_ACTION_DESCRIPTION,
+        parameters: browserActionParameters()
+      }
+    },
+    {
+      type: "function",
+      function: { name: "finish", description: FINISH_DESCRIPTION, parameters: FINISH_PARAMETERS }
+    }
+  ];
+}
+
+function anthropicTools() {
+  return [
+    { name: "browser_action", description: BROWSER_ACTION_DESCRIPTION, input_schema: browserActionParameters() },
+    { name: "finish", description: FINISH_DESCRIPTION, input_schema: FINISH_PARAMETERS }
+  ];
+}
+
+/** A function call, written as the JSON decision the parser already knows. */
+export function decisionTextFromCall(name: string, args: unknown): string {
+  let value = args;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value || "{}");
+    } catch {
+      value = {};
+    }
+  }
+  const fields = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  if (name === "finish") {
+    return JSON.stringify({ kind: "final", message: String(fields.message ?? "") });
+  }
+  return JSON.stringify({
+    kind: "tool",
+    tool: fields.tool,
+    input: fields.input && typeof fields.input === "object" ? fields.input : {},
+    note: typeof fields.note === "string" ? fields.note : ""
+  });
+}
+
+function toolCallText(json: unknown): string {
+  const call = (
+    json as {
+      choices?: Array<{
+        message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: unknown } }> };
+      }>;
+    }
+  )?.choices?.[0]?.message?.tool_calls?.[0]?.function;
+  return call?.name ? decisionTextFromCall(call.name, call.arguments) : "";
 }
 
 // A JSON schema local servers (LM Studio, Ollama) can enforce while the model
@@ -640,6 +759,18 @@ async function openAICompatibleRequest(
   body = tuneRequestBody(config, body);
   let response = await request(body);
 
+  if (body.tools && (response.status === 400 || response.status === 404 || response.status === 422)) {
+    // This model or server does not take tools: use JSON text from now on.
+    nativeToolsRejected.add(nativeToolsKey(config));
+    const { tools: _tools, tool_choice: _choice, ...plain } = body;
+    const messages = Array.isArray(plain.messages) ? [...(plain.messages as Array<{ role: string; content: unknown }>)] : [];
+    if (messages[0]?.role === "system" && typeof messages[0].content === "string") {
+      messages[0] = { ...messages[0], content: messages[0].content.replace(`\n\n${NATIVE_TOOLS_NOTE}`, "") };
+    }
+    body = { ...plain, messages };
+    response = await request(body);
+  }
+
   if (
     response.status === 400 &&
     body.response_format &&
@@ -682,7 +813,7 @@ async function openAICompatibleRequest(
   if (providerError && !answerText(json)) {
     throw new Error(`Model request failed: ${providerError.slice(0, 240)}`);
   }
-  let content = answerText(json);
+  let content = toolCallText(json) || answerText(json);
   if (!content && spentBudgetThinking(json)) {
     // Thinking models (OpenRouter auto routing, Qwen, DeepSeek R1...) can use
     // the whole token budget on reasoning and return no answer. Retry once
@@ -806,9 +937,11 @@ async function anthropicRequest(
   maxTokens: number,
   timeoutMs: number,
   signal?: AbortSignal,
-  screenshotDataUrl?: string
+  screenshotDataUrl?: string,
+  nativeTools = false
 ): Promise<string> {
-  const response = await fetchWithTimeout(
+  const native = nativeTools && usesNativeTools(config);
+  const send = (withTools: boolean) => fetchWithTimeout(
     "https://api.anthropic.com/v1/messages",
     {
       method: "POST",
@@ -822,7 +955,7 @@ async function anthropicRequest(
         model: config.model,
         max_tokens: maxTokens,
         temperature: 0,
-        system,
+        system: withTools ? system : system.replace(`\n\n${NATIVE_TOOLS_NOTE}`, ""),
         messages: [
           {
             role: "user",
@@ -833,12 +966,19 @@ async function anthropicRequest(
                 ]
               : prompt
           }
-        ]
+        ],
+        ...(withTools ? { tools: anthropicTools(), tool_choice: { type: "any" } } : {})
       })
     },
     timeoutMs,
     signal
   );
+
+  let response = await send(native);
+  if (native && response.status === 400) {
+    nativeToolsRejected.add(nativeToolsKey(config));
+    response = await send(false);
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -848,10 +988,13 @@ async function anthropicRequest(
   }
 
   const json = await response.json();
-  const content = String(
-    json?.content?.find((part: { type?: string }) => part.type === "text")?.text ||
-      ""
-  ).trim();
+  const call = json?.content?.find((part: { type?: string }) => part.type === "tool_use");
+  const content = call?.name
+    ? decisionTextFromCall(call.name, call.input)
+    : String(
+        json?.content?.find((part: { type?: string }) => part.type === "text")?.text ||
+          ""
+      ).trim();
 
   if (!content) {
     throw new Error(`Model ${config.model} returned an empty response.`);
@@ -929,6 +1072,13 @@ function agentBody(
     isNvidia(config)
   ) {
     body.response_format = { type: "json_object" };
+  }
+
+  if (usesNativeTools(config)) {
+    // A function call replaces JSON mode.
+    delete body.response_format;
+    body.tools = openAITools();
+    body.tool_choice = "required";
   }
 
   if (isGroq(config)) {
@@ -1010,7 +1160,9 @@ export async function nextReadOnlyWorkerDecision(
             messages: [
               {
                 role: "system",
-                content: READ_ONLY_WORKER_SYSTEM
+                content: usesNativeTools(config)
+                  ? `${READ_ONLY_WORKER_SYSTEM}\n\n${NATIVE_TOOLS_NOTE}`
+                  : READ_ONLY_WORKER_SYSTEM
               },
               {
                 role: "user",
@@ -1160,7 +1312,8 @@ export async function nextAgentDecision(
           700,
           AGENT_TIMEOUT_MS,
           signal,
-          screenshotDataUrl
+          screenshotDataUrl,
+          true
         )
       : await openAICompatibleRequest(
           config,
@@ -1195,7 +1348,8 @@ No markdown or commentary.`;
             400,
             AGENT_TIMEOUT_MS,
             signal,
-            screenshotDataUrl
+            screenshotDataUrl,
+            true
           )
         : await openAICompatibleRequest(
             config,

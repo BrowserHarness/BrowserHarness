@@ -42,6 +42,7 @@ agent reads its steps with `browserharness_skills`.
 - `browserharness-bridge pair`: pair Chrome again
 - `browserharness-bridge skills`: list your saved Skills
 - `browserharness-bridge skill <name> [details]`: print one Skill's steps, ready for any agent or script
+- `browserharness-bridge telegram setup --token <token>`: use BrowserHarness from your phone (see [TELEGRAM.md](TELEGRAM.md))
 - `browserharness-bridge uninstall`: remove everything the installer added (`--purge` also deletes the token)
 
 If `browserharness-bridge` is not found, use

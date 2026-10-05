@@ -17,6 +17,7 @@ import {
   REMOTE_MIN_TOKEN_LENGTH
 } from "./core.mjs";
 import { serveBrowserHarnessMcp } from "./mcp.mjs";
+import { createTelegramRelay, telegramApi } from "./telegram.mjs";
 import {
   detectAgents,
   findOnPath,
@@ -124,15 +125,35 @@ async function waitForState(config, expectedRunning, timeoutMs = 5000) {
 async function serve(config) {
   await mkdir(LOG_DIR, { recursive: true });
   const mcpManager = createMcpClientManager();
+  let telegram = null;
   const bridge = createBridgeServer({
     host: config.host,
     port: config.port,
     token: config.token,
     allowRemote: config.allow_remote === true,
     llmManager: createLlmAdapterManager(),
-    mcpManager
+    mcpManager,
+    onExtensionEvent: async (message) => {
+      await telegram?.deliver(message.id, message).catch(() => undefined);
+    }
   });
   const address = await bridge.listen();
+
+  if (config.telegram?.token) {
+    telegram = createTelegramRelay({
+      token: config.telegram.token,
+      allowedUserIds: config.telegram.allowed_user_ids || [],
+      apiBase: config.telegram.api_base,
+      log: (line) => process.stderr.write(`${line}\n`),
+      runTask: async (text, meta) => {
+        const result = await bridge
+          .sendCommand({ session: "telegram", title: "Telegram", action: "remote_task", args: { text, from: meta.from } })
+          .catch((error) => ({ ok: false, error: { message: error.message } }));
+        return result.ok ? { ok: true, id: result.data.id } : result;
+      }
+    });
+    telegram.start();
+  }
 
   await writeFile(PID_FILE, `${process.pid}\n`);
   await writeFile(
@@ -148,6 +169,7 @@ async function serve(config) {
   });
 
   const shutdown = async () => {
+    telegram?.stop();
     await bridge.close().catch(() => undefined);
     await Promise.all([
       rm(PID_FILE, { force: true }),
@@ -370,6 +392,57 @@ async function skillsCommand(config, name, details) {
   }
 }
 
+async function saveConfig(next) {
+  await writeFile(CONFIG_FILE, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
+}
+
+async function restartIfRunning(config) {
+  if ((await readStatus(config)).running) {
+    await stop(config, { quiet: true }).catch(() => undefined);
+    await start(config, false, THIS_FILE, { quiet: true });
+    return true;
+  }
+  return false;
+}
+
+/** `telegram setup --token …`, `telegram allow <id>`, `telegram off`, `telegram status`. */
+async function telegramCommand(config, args) {
+  const [mode, value] = args;
+  const current = config.telegram || {};
+  if (mode === "setup") {
+    const token = option("token") || value;
+    if (!token) throw new Error("Usage: browserharness-bridge telegram setup --token <token from @BotFather>");
+    const me = await telegramApi(token, current.api_base).getMe();
+    const next = { ...config, telegram: { ...current, token, bot: me.username, allowed_user_ids: current.allowed_user_ids || [] } };
+    await saveConfig(next);
+    const restarted = await restartIfRunning(next);
+    print({
+      telegram: true,
+      bot: `@${me.username}`,
+      restarted,
+      next: `Send any message to @${me.username}. It will reply with the command that allows your Telegram account.`
+    });
+  } else if (mode === "allow") {
+    if (!current.token) throw new Error("Set up the bot first: browserharness-bridge telegram setup --token <token>");
+    if (!/^\d+$/.test(value || "")) throw new Error("Usage: browserharness-bridge telegram allow <your Telegram user id>");
+    const ids = [...new Set([...(current.allowed_user_ids || []).map(String), value])];
+    const next = { ...config, telegram: { ...current, allowed_user_ids: ids } };
+    await saveConfig(next);
+    const restarted = await restartIfRunning(next);
+    print({ telegram: true, allowed_user_ids: ids, restarted, note: restarted ? "Message the bot to try it." : "Start the Bridge to use it: browserharness-bridge start" });
+  } else if (mode === "off") {
+    const { telegram: _removed, ...next } = config;
+    await saveConfig(next);
+    print({ telegram: false, restarted: await restartIfRunning(next) });
+  } else {
+    print({
+      telegram: Boolean(current.token),
+      bot: current.bot ? `@${current.bot}` : undefined,
+      allowed_user_ids: current.allowed_user_ids || []
+    });
+  }
+}
+
 async function waitForExtension(config, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -557,6 +630,8 @@ try {
     await uninstall(config);
   } else if (command === "agents") {
     print({ agents: detectAgents(context(THIS_FILE)) });
+  } else if (command === "telegram") {
+    await telegramCommand(config, process.argv.slice(3).filter((arg, index, all) => !arg.startsWith("--") && all[index - 1] !== "--token"));
   } else if (command === "skills") {
     await skillsCommand(config);
   } else if (command === "skill") {
@@ -579,7 +654,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|telegram|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {

@@ -89,7 +89,8 @@ export function createBridgeServer({
   commandTimeoutMs = 30_000,
   mcpManager = null,
   llmManager = null,
-  allowRemote = false
+  allowRemote = false,
+  onExtensionEvent = null
 } = {}) {
   if (!token) throw new Error("Bridge pairing token is required");
   if (!isLoopbackHost(host)) {
@@ -399,26 +400,7 @@ export function createBridgeServer({
         }
 
         const command = normalizeCommand(await readJson(req));
-        const id = crypto.randomUUID();
-
-        const result = await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => {
-            pending.delete(id);
-            reject(new Error("Bridge command timed out"));
-          }, commandTimeoutMs);
-
-          pending.set(id, { resolve, reject, timer });
-          extension.send(
-            JSON.stringify({
-              type: "command",
-              id,
-              protocol_version: BRIDGE_PROTOCOL_VERSION,
-              ...command
-            })
-          );
-        });
-
-        json(res, 200, result);
+        json(res, 200, await sendCommand(command));
         return;
       }
 
@@ -439,6 +421,34 @@ export function createBridgeServer({
       });
     }
   });
+
+  /** Sends one command to the extension and waits for its result. */
+  function sendCommand(command) {
+    if (!extension || extension.readyState !== WebSocket.OPEN) {
+      return Promise.resolve({
+        ok: false,
+        error: { code: "EXTENSION_NOT_CONNECTED", message: "BrowserHarness extension is not connected" }
+      });
+    }
+    const id = crypto.randomUUID();
+    const target = extension;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error("Bridge command timed out"));
+      }, commandTimeoutMs);
+
+      pending.set(id, { resolve, reject, timer });
+      target.send(
+        JSON.stringify({
+          type: "command",
+          id,
+          protocol_version: BRIDGE_PROTOCOL_VERSION,
+          ...command
+        })
+      );
+    });
+  }
 
   const wss = new WebSocketServer({ noServer: true });
 
@@ -703,6 +713,11 @@ export function createBridgeServer({
           return;
         }
 
+        if (message.type === "remote_task_result" && typeof message.id === "string") {
+          if (ws === extension) await onExtensionEvent?.(message);
+          return;
+        }
+
         if (message.type === "result" && typeof message.id === "string") {
           const entry = pending.get(message.id);
           if (!entry) return;
@@ -756,6 +771,7 @@ export function createBridgeServer({
         server.close((error) => (error ? reject(error) : resolve()))
       );
     },
+    sendCommand,
     server
   };
 }

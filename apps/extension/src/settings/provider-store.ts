@@ -275,6 +275,29 @@ export async function saveConnection(connection: ProviderConnection): Promise<vo
   await chrome.storage.local.set({ [CONNECTIONS_KEY]: next });
 }
 
+/**
+ * A model that just finished a real browser task is browser-ready: keep that
+ * as its browser-control check, in place.
+ */
+export async function markBrowserReady(id: string, now = new Date()): Promise<void> {
+  const current = await loadConnections();
+  if (!current.some((item) => item.id === id)) return;
+  await chrome.storage.local.set({
+    [CONNECTIONS_KEY]: current.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            agentHealth: {
+              status: "healthy",
+              checkedAt: now.toISOString(),
+              message: "Finished a browser task"
+            }
+          }
+        : item
+    )
+  });
+}
+
 export async function removeConnection(id: string): Promise<void> {
   const current = await loadConnections();
   const next = current.filter((item) => item.id !== id);

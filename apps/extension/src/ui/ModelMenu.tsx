@@ -13,7 +13,12 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import type { ProviderConnection } from "../settings/provider-store";
+import {
+  connectionIdFor,
+  loadConnections,
+  type CapabilityHealth,
+  type ProviderConnection
+} from "../settings/provider-store";
 import {
   accountIdFor,
   accountLabel,
@@ -47,6 +52,13 @@ export function filterModels(models: AccountModel[], query: string): AccountMode
   );
 }
 
+/** What is known about a model driving the browser, from real checks or tasks. */
+export function browserLabel(health: CapabilityHealth | undefined): string | undefined {
+  if (health?.status === "healthy") return "✓ Browser-ready";
+  if (health?.status === "failed") return "Chat only: failed the browser check";
+  return undefined;
+}
+
 /**
  * The model menu at the top of the chat: every model from every connected
  * service, searchable, one click to switch (like claude.ai or chatgpt.com).
@@ -64,9 +76,12 @@ export function ModelMenu({
   const [rows, setRows] = useState<AccountRow[] | null>(null);
   const [query, setQuery] = useState("");
   const [switching, setSwitching] = useState("");
+  const [health, setHealth] = useState<Record<string, CapabilityHealth>>({});
 
   const load = async () => {
     setRows(null);
+    const known = await loadConnections().catch(() => []);
+    setHealth(Object.fromEntries(known.map((item) => [item.id, item.agentHealth])));
     const accounts = await loadAccounts();
     setRows(
       await Promise.all(
@@ -122,6 +137,11 @@ export function ModelMenu({
         onClick={(event) => open(event.currentTarget)}
         endIcon={<ChevronDownIcon fontSize="small" />}
         aria-label="Choose model"
+        title={
+          current?.agentHealth.status === "healthy"
+            ? `${current.model}: browser-ready`
+            : current?.model
+        }
         sx={{ maxWidth: 180, textTransform: "none" }}
       >
         <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -196,6 +216,15 @@ export function ModelMenu({
                           <ListItemText
                             primary={model.id}
                             primaryTypographyProps={{ noWrap: true, title: model.id }}
+                            secondary={browserLabel(
+                              health[
+                                connectionIdFor({
+                                  provider: row.account.provider,
+                                  baseUrl: row.account.baseUrl,
+                                  model: model.id
+                                })
+                              ]
+                            )}
                           />
                         </ListItemButton>
                       );

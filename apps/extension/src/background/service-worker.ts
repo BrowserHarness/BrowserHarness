@@ -26,6 +26,7 @@ import {
 } from "../runtime/quick-explain";
 import {
   requestBridgeLlm,
+  sendBridgeEvent,
   startBridgeClient,
   type BridgeCommand
 } from "./bridge-client";
@@ -2873,9 +2874,35 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "screenshot"
 ]);
 
+const REMOTE_TASKS_KEY = "browserharness.remoteTasks";
+
+/** A task sent from the person's phone (Telegram, via the Bridge). */
+async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResult> {
+  const text = typeof args.text === "string" ? args.text.trim().slice(0, 4000) : "";
+  if (!text) {
+    return { ok: false, error: { code: "EMPTY_TASK", message: "The message had no task in it." } };
+  }
+  const id = crypto.randomUUID();
+  const stored = (await chrome.storage.session.get(REMOTE_TASKS_KEY))[REMOTE_TASKS_KEY] || {};
+  await chrome.storage.session.set({
+    [REMOTE_TASKS_KEY]: {
+      ...stored,
+      [id]: { text, from: typeof args.from === "string" ? args.from : "phone", created_at: new Date().toISOString() }
+    }
+  });
+  await chrome.tabs.create({
+    url: chrome.runtime.getURL(`runner.html?remote=${encodeURIComponent(id)}`),
+    active: false
+  });
+  return { ok: true, data: { id } };
+}
+
 async function handleBridgeCommand(
   command: BridgeCommand
 ): Promise<ToolResult & { page?: PageObservation }> {
+  if (command.action === "remote_task") {
+    return startRemoteTask(command.args);
+  }
   if (!BRIDGE_TOOL_NAMES.has(command.action as ToolName)) {
     return {
       ok: false,
@@ -3000,6 +3027,22 @@ chrome.runtime.onMessage.addListener(
   ) => {
     void (async () => {
       try {
+        if (request.type === "REMOTE_TASK_RESULT") {
+          if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL("runner.html"))) {
+            sendResponse({ ok: false });
+            return;
+          }
+          sendResponse({
+            ok: sendBridgeEvent({
+              type: "remote_task_result",
+              id: request.id,
+              status: request.status,
+              message: request.message,
+              url: request.url
+            })
+          });
+          return;
+        }
         if (request.type === "BRIDGE_LLM") {
           // Content scripts share our id but report the page URL: only extension pages may spend the subscription.
           if (
