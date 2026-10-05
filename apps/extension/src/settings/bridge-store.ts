@@ -19,13 +19,26 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   token: ""
 };
 
+const LOOPBACK_HOSTNAMES = ["127.0.0.1", "localhost", "[::1]"];
+export const REMOTE_BRIDGE_MIN_TOKEN_LENGTH = 32;
+
+/**
+ * Plain ws:// is only allowed for a loopback Bridge. A remote Bridge (our
+ * own servers, once they exist) must be reached over wss:// so the pairing
+ * token never crosses the network in clear text.
+ */
 export function normalizeBridgeAddress(value: string): string {
   const parsed = new URL(value.trim());
-  if (parsed.protocol !== "ws:") {
-    throw new Error("BrowserHarness Bridge must use ws://");
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new Error("BrowserHarness Bridge must use ws:// (loopback) or wss:// (remote)");
   }
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) {
-    throw new Error("BrowserHarness Bridge must use a loopback address");
+  if (
+    parsed.protocol === "ws:" &&
+    !LOOPBACK_HOSTNAMES.includes(parsed.hostname)
+  ) {
+    throw new Error(
+      "BrowserHarness Bridge must use a loopback address, or wss:// for a remote Bridge"
+    );
   }
   if (parsed.pathname !== "/ws") {
     parsed.pathname = "/ws";
@@ -35,9 +48,15 @@ export function normalizeBridgeAddress(value: string): string {
   return parsed.toString();
 }
 
+export function isRemoteBridgeAddress(address: string): boolean {
+  return !LOOPBACK_HOSTNAMES.includes(
+    new URL(normalizeBridgeAddress(address)).hostname
+  );
+}
+
 export function bridgePermissionUrl(address: string): string {
   const parsed = new URL(normalizeBridgeAddress(address));
-  parsed.protocol = "http:";
+  parsed.protocol = parsed.protocol === "wss:" ? "https:" : "http:";
   parsed.pathname = "/";
   parsed.search = "";
   parsed.hash = "";
@@ -60,6 +79,14 @@ export async function saveBridgeSettings(
     address: normalizeBridgeAddress(settings.address),
     token: settings.token.trim()
   };
+  if (
+    isRemoteBridgeAddress(normalized.address) &&
+    normalized.token.length < REMOTE_BRIDGE_MIN_TOKEN_LENGTH
+  ) {
+    throw new Error(
+      `A remote Bridge needs a pairing token of at least ${REMOTE_BRIDGE_MIN_TOKEN_LENGTH} characters`
+    );
+  }
   await chrome.storage.local.set({ [SETTINGS_KEY]: normalized });
 }
 

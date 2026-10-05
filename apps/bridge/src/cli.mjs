@@ -10,7 +10,11 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createBridgeServer } from "./core.mjs";
+import {
+  createBridgeServer,
+  isLoopbackHost,
+  REMOTE_MIN_TOKEN_LENGTH
+} from "./core.mjs";
 import { serveBrowserHarnessMcp } from "./mcp.mjs";
 import {
   createMcpClientManager,
@@ -42,6 +46,7 @@ async function ensureConfig() {
     const config = {
       host: "127.0.0.1",
       port: 10087,
+      allow_remote: false,
       token: crypto.randomBytes(24).toString("hex")
     };
     await writeFile(
@@ -53,12 +58,22 @@ async function ensureConfig() {
   }
 }
 
+// Address used to reach the daemon from this machine. A wildcard bind
+// (0.0.0.0 / ::) is not dialable, so map it to loopback.
+function localHost(config) {
+  if (config.host === "0.0.0.0") return "127.0.0.1";
+  if (config.host === "::") return "::1";
+  return config.host;
+}
+
 function httpBase(config) {
-  return `http://${config.host}:${config.port}`;
+  const host = localHost(config);
+  return `http://${host.includes(":") ? `[${host}]` : host}:${config.port}`;
 }
 
 function wsBase(config) {
-  return `ws://${config.host}:${config.port}/ws`;
+  const host = localHost(config);
+  return `ws://${host.includes(":") ? `[${host}]` : host}:${config.port}/ws`;
 }
 
 async function readStatus(config, timeoutMs = 900) {
@@ -93,7 +108,10 @@ async function serve(config) {
   await mkdir(LOG_DIR, { recursive: true });
   const mcpManager = createMcpClientManager();
   const bridge = createBridgeServer({
-    ...config,
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    allowRemote: config.allow_remote === true,
     mcpManager
   });
   const address = await bridge.listen();
@@ -225,6 +243,48 @@ async function listMcpServers() {
   }
 }
 
+async function setRemote(config, args) {
+  const mode = args[0];
+  if (mode === "on") {
+    const host = args[1] || "0.0.0.0";
+    if (isLoopbackHost(host)) {
+      throw new Error("remote on needs a non-loopback bind host, e.g. 0.0.0.0");
+    }
+    const next = {
+      ...config,
+      host,
+      allow_remote: true,
+      token:
+        config.token.length >= REMOTE_MIN_TOKEN_LENGTH
+          ? config.token
+          : crypto.randomBytes(24).toString("hex")
+    };
+    await writeFile(CONFIG_FILE, JSON.stringify(next, null, 2) + "\n", {
+      mode: 0o600
+    });
+    print({
+      remote: true,
+      host,
+      port: next.port,
+      token_rotated: next.token !== config.token,
+      note:
+        "Restart the Bridge to apply. The Bridge speaks plain ws:// on its port: put it behind a TLS reverse proxy and give the extension the wss:// address. Anyone holding the pairing token can drive the paired browser."
+    });
+  } else if (mode === "off") {
+    const next = { ...config, host: "127.0.0.1", allow_remote: false };
+    await writeFile(CONFIG_FILE, JSON.stringify(next, null, 2) + "\n", {
+      mode: 0o600
+    });
+    print({ remote: false, host: "127.0.0.1", note: "Restart the Bridge to apply." });
+  } else {
+    print({
+      remote: config.allow_remote === true && !isLoopbackHost(config.host),
+      host: config.host,
+      port: config.port
+    });
+  }
+}
+
 async function logs() {
   const nIndex = process.argv.indexOf("-n");
   const requested =
@@ -249,7 +309,7 @@ try {
   if (command === "serve") {
     await serve(config);
   } else if (command === "mcp") {
-    await serveBrowserHarnessMcp(config);
+    await serveBrowserHarnessMcp({ ...config, host: localHost(config) });
   } else if (command === "start") {
     await start(config, created);
   } else if (command === "status") {
@@ -263,6 +323,8 @@ try {
     await logs();
   } else if (command === "mcp-servers") {
     await listMcpServers();
+  } else if (command === "remote") {
+    await setRemote(config, process.argv.slice(3));
   } else if (command === "pair") {
     print({
       ws: wsBase(config),
@@ -271,7 +333,7 @@ try {
     });
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [start|status|stop|restart|logs|pair|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [start|status|stop|restart|logs|pair|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {
