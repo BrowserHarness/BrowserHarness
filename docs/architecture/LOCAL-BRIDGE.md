@@ -154,4 +154,4 @@ Extension side:
 - `ws://` stays loopback-only. A non-loopback Bridge must be `wss://host/ws`, and saving it requires a pairing token of at least 32 characters.
 - Chrome host access for the Bridge origin is requested at save time as for the local Bridge.
 
-Approvals, task-session ownership and autonomy ceilings apply identically over a remote Bridge. Anyone holding the pairing token can drive the paired browser, so treat it like a credential: rotate it by deleting `token` from `~/.browserharness-bridge/config.json` while remote mode is off and restarting.
+Approvals, task-session ownership and autonomy ceilings apply identically over a remote Bridge. Anyone holding the pairing token can drive the paired browser, so treat it like a credential: rotate it by replacing `token` in `~/.browserharness-bridge/config.json` with a new random value of 32+ characters, restarting the daemon, and re-pasting it into the extension.
