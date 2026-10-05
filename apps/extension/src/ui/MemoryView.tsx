@@ -1,0 +1,181 @@
+import { useEffect, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  FormControlLabel,
+  IconButton,
+  Paper,
+  Stack,
+  Switch,
+  TextField,
+  Tooltip,
+  Typography
+} from "@mui/material";
+import { BackIcon, DeleteIcon, EditIcon } from "./icons";
+import {
+  addFacts,
+  clearAboutMe,
+  isStorableFact,
+  loadAboutMe,
+  removeFact,
+  updateFact,
+  type AboutMeFact
+} from "../runtime/about-me";
+import { loadPreferences, updatePreferences } from "../settings/preferences";
+
+export function MemoryView({ onBack }: { onBack: () => void }) {
+  const [facts, setFacts] = useState<AboutMeFact[]>([]);
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [learn, setLearn] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = async () => setFacts(await loadAboutMe());
+
+  useEffect(() => {
+    void refresh();
+    void loadPreferences().then((preferences) => setLearn(preferences.learnAboutMe));
+  }, []);
+
+  const add = async () => {
+    if (!draft.trim()) return;
+    if (!isStorableFact(draft)) {
+      setError("That looks like a password, card or ID number, so it isn't saved.");
+      return;
+    }
+    setError("");
+    await addFacts([draft], "you");
+    setDraft("");
+    await refresh();
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    if (!(await updateFact(editing.id, editing.text))) {
+      setError("That looks like a password, card or ID number, so it isn't saved.");
+      return;
+    }
+    setError("");
+    setEditing(null);
+    await refresh();
+  };
+
+  return (
+    <Box sx={{ minHeight: "100vh", p: 2 }}>
+      <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+        <IconButton onClick={onBack} aria-label="Back to chat">
+          <BackIcon />
+        </IconButton>
+        <Typography variant="h6" sx={{ flex: 1 }}>
+          About me
+        </Typography>
+      </Stack>
+      <Typography variant="body2" color="text.secondary" mb={2}>
+        BrowserHarness keeps these facts in mind for every task, so you don't have to repeat yourself. They stay on
+        this device. Type <code>/remember</code> in the chat to add one.
+      </Typography>
+
+      <Stack direction="row" spacing={1} mb={1}>
+        <TextField
+          size="small"
+          fullWidth
+          label="Add a fact about you"
+          placeholder="I prefer aisle seats"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void add();
+          }}
+        />
+        <Button variant="contained" onClick={() => void add()} disabled={!draft.trim()}>
+          Add
+        </Button>
+      </Stack>
+      {error && (
+        <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setError("")}>
+          {error}
+        </Alert>
+      )}
+      <FormControlLabel
+        sx={{ mb: 2 }}
+        control={
+          <Switch
+            checked={learn}
+            onChange={async (event) => {
+              setLearn(event.target.checked);
+              await updatePreferences({ learnAboutMe: event.target.checked });
+            }}
+          />
+        }
+        label="Learn from my requests (like “my name is…” or “I prefer…”)"
+      />
+
+      {facts.length === 0 ? (
+        <Alert severity="info">Nothing saved yet.</Alert>
+      ) : (
+        <Stack spacing={1}>
+          {facts.map((fact) => (
+            <Paper variant="outlined" sx={{ p: 1 }} key={fact.id} data-testid="about-me-fact">
+              <Stack direction="row" spacing={1} alignItems="center">
+                {editing?.id === fact.id ? (
+                  <TextField
+                    size="small"
+                    fullWidth
+                    autoFocus
+                    value={editing.text}
+                    onChange={(event) => setEditing({ id: fact.id, text: event.target.value })}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void saveEdit();
+                      if (event.key === "Escape") setEditing(null);
+                    }}
+                    onBlur={() => void saveEdit()}
+                  />
+                ) : (
+                  <Typography variant="body2" sx={{ flex: 1 }}>
+                    {fact.text}
+                  </Typography>
+                )}
+                {fact.source === "learned" && <Chip size="small" label="learned" variant="outlined" />}
+                <Tooltip title="Edit">
+                  <IconButton size="small" aria-label={`Edit ${fact.text}`} onClick={() => setEditing({ id: fact.id, text: fact.text })}>
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Delete">
+                  <IconButton
+                    size="small"
+                    aria-label={`Delete ${fact.text}`}
+                    onClick={async () => {
+                      await removeFact(fact.id);
+                      await refresh();
+                    }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            </Paper>
+          ))}
+          <Box>
+            <Button
+              color="error"
+              size="small"
+              onClick={async () => {
+                await clearAboutMe();
+                await refresh();
+              }}
+            >
+              Forget everything
+            </Button>
+          </Box>
+        </Stack>
+      )}
+
+      <Button sx={{ mt: 2 }} onClick={onBack}>
+        Back to chat
+      </Button>
+    </Box>
+  );
+}

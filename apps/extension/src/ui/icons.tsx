@@ -6,6 +6,11 @@ import {
   Circle,
   History,
   Mic,
+  Brain,
+  BookMarked,
+  Upload,
+  Pencil,
+  Play,
   Volume2,
   Download,
   Pause,
@@ -62,3 +67,8 @@ export const StopIcon = makeIcon(Square, { fill: "currentColor" });
 export const MicIcon = makeIcon(Mic);
 export const SpeakIcon = makeIcon(Volume2);
 export const DownloadIcon = makeIcon(Download);
+export const MemoryIcon = makeIcon(Brain);
+export const SkillsIcon = makeIcon(BookMarked);
+export const UploadIcon = makeIcon(Upload);
+export const EditIcon = makeIcon(Pencil);
+export const RunIcon = makeIcon(Play);

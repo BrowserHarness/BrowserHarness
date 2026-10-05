@@ -12,6 +12,8 @@ export interface UserPreferences {
   appearance: AppearanceMode;
   retainTaskHistory: boolean;
   approvalMode: ApprovalMode;
+  /** Pick up facts like "I live in Pune" from requests into About me. */
+  learnAboutMe: boolean;
 }
 
 const KEY = "browserharness.preferences";
@@ -19,7 +21,8 @@ const KEY = "browserharness.preferences";
 export const DEFAULT_PREFERENCES: UserPreferences = {
   appearance: "system",
   retainTaskHistory: true,
-  approvalMode: "risky"
+  approvalMode: "risky",
+  learnAboutMe: true
 };
 
 export async function loadPreferences(): Promise<UserPreferences> {

@@ -19,9 +19,40 @@ import {
   RecordIcon,
   ReplayIcon,
   SendIcon,
+  MemoryIcon,
   SettingsIcon,
+  SkillsIcon,
   StopIcon
 } from "./icons";
+import { SkillsView } from "./SkillsView";
+import { MemoryView } from "./MemoryView";
+import {
+  loadSkills,
+  recordSkillRun,
+  refreshSkillSteps,
+  saveSkill,
+  skillFromSession,
+  skillTask,
+  SKILLS_STORAGE_KEY,
+  worthSaving,
+  type UserSkill
+} from "../runtime/skills";
+import {
+  BUILT_IN_COMMANDS,
+  helpText,
+  parseSlashCommand,
+  slashSuggestions,
+  type SlashCommand
+} from "../runtime/slash-commands";
+import {
+  aboutMePrompt,
+  addFacts,
+  factsInMessage,
+  forgetMatching,
+  isStorableFact,
+  loadAboutMe
+} from "../runtime/about-me";
+import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
   addGrant,
   isGrantableHost,
@@ -139,7 +170,17 @@ import {
   runReadOnlySubagentBatch
 } from "../runtime/subagent-supervisor";
 
-type Message = { id: string; role: "user" | "assistant"; text: string };
+type Message = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  /** What the agent did, so the task can be saved as (or improve) a Skill. */
+  learned?: { evidence: BrowserTaskSessionEvidence; task: string; skillId?: string };
+  /** Set once the person saved or updated a Skill from this answer. */
+  skillNote?: string;
+};
+
+const RESERVED_COMMANDS = BUILT_IN_COMMANDS.map((command) => command.name);
 type Activity = { id: string; text: string; state: "working" | "done" | "error" };
 type CurrentTab = { tab_id: number; title?: string; url?: string };
 type Approval = {
@@ -202,7 +243,10 @@ function approvalDescription(
 }
 
 export function App() {
-  const [view, setView] = useState<"chat" | "settings" | "history">("chat");
+  const [view, setView] = useState<
+    "chat" | "settings" | "history" | "skills" | "memory"
+  >("chat");
+  const [skills, setSkills] = useState<UserSkill[]>([]);
   const [tab, setTab] = useState<CurrentTab | null>(null);
   const [primary, setPrimary] = useState<ProviderConnection | null>(null);
   const [fallback, setFallback] = useState<ProviderConnection | null>(null);
@@ -279,11 +323,115 @@ export function App() {
     return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
-  const addAssistantMessage = (text: string) => {
+  const addAssistantMessage = (
+    text: string,
+    learned?: Message["learned"]
+  ) => {
     setMessages((items) => [
       ...items,
-      { id: crypto.randomUUID(), role: "assistant", text }
+      { id: crypto.randomUUID(), role: "assistant", text, learned }
     ]);
+  };
+
+  useEffect(() => {
+    void loadSkills().then(setSkills).catch(() => undefined);
+    const onChange = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string
+    ) => {
+      if (area === "local" && changes[SKILLS_STORAGE_KEY]) {
+        void loadSkills().then(setSkills).catch(() => undefined);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, []);
+
+  const noteOnMessage = (id: string, skillNote: string) => {
+    setMessages((items) =>
+      items.map((item) => (item.id === id ? { ...item, skillNote } : item))
+    );
+  };
+
+  const saveAsSkill = async (message: Message) => {
+    if (!message.learned) return;
+    const saved = await saveSkill(
+      skillFromSession({
+        ...message.learned.evidence,
+        task: message.learned.task
+      }),
+      RESERVED_COMMANDS
+    );
+    noteOnMessage(
+      message.id,
+      `Saved as a Skill. Run it any time with /${saved.slug}, or from the Skills screen.`
+    );
+  };
+
+  const updateSkillFromRun = async (message: Message) => {
+    const learned = message.learned;
+    if (!learned?.skillId) return;
+    const skill = (await loadSkills()).find((item) => item.id === learned.skillId);
+    if (!skill) {
+      noteOnMessage(message.id, "That Skill was deleted.");
+      return;
+    }
+    await saveSkill(refreshSkillSteps(skill, learned.evidence), RESERVED_COMMANDS);
+    noteOnMessage(message.id, `Updated /${skill.slug} with the steps from this run.`);
+  };
+
+  const runCommand = async (command: SlashCommand, typed: string) => {
+    setMessages((items) => [
+      ...items,
+      { id: crypto.randomUUID(), role: "user", text: typed }
+    ]);
+    if (command.kind === "unknown") {
+      addAssistantMessage(
+        `There's no command or Skill called /${command.name}. Type / to see them, or /help for the list.`
+      );
+      return;
+    }
+    if (command.kind !== "builtin") return;
+    switch (command.name) {
+      case "remember": {
+        if (!command.args) {
+          addAssistantMessage("Tell me what to remember, like `/remember I prefer aisle seats`.");
+          return;
+        }
+        if (!isStorableFact(command.args)) {
+          addAssistantMessage("That looks like a password, card or ID number, so I won't save it.");
+          return;
+        }
+        const added = await addFacts([command.args], "you");
+        addAssistantMessage(
+          added.length
+            ? `Got it. I'll remember: ${added[0].text}`
+            : "I already know that."
+        );
+        return;
+      }
+      case "forget": {
+        if (!command.args) {
+          addAssistantMessage("Tell me what to forget, like `/forget aisle seats`, or open /memory.");
+          return;
+        }
+        const removed = await forgetMatching(command.args);
+        addAssistantMessage(
+          removed
+            ? `Forgot ${removed} fact${removed === 1 ? "" : "s"} about “${command.args}”.`
+            : `I had nothing saved about “${command.args}”.`
+        );
+        return;
+      }
+      case "memory":
+        setView("memory");
+        return;
+      case "skills":
+        setView("skills");
+        return;
+      default:
+        addAssistantMessage(helpText(await loadSkills()));
+    }
   };
 
   const addActivity = (text: string, state: Activity["state"] = "working") => {
@@ -685,10 +833,20 @@ export function App() {
     setAttachments((items) => items.filter((item) => item.id !== id));
   };
 
-  const runTask = async () => {
-    const task = prompt.trim();
-    if (!task || running) return;
+  const runTask = async (textOverride?: string) => {
+    const typed = (textOverride ?? prompt).trim();
+    if (!typed || running) return;
     const attachmentNote = describeAttachmentsForPrompt(attachments);
+
+    // Slash commands: built-ins answer right away; a Skill runs as a task.
+    const command = parseSlashCommand(typed, await loadSkills().catch(() => []));
+    if (command.kind === "builtin" || command.kind === "unknown") {
+      setPrompt("");
+      await runCommand(command, typed);
+      return;
+    }
+    const skillRun = command.kind === "skill" ? command.skill : null;
+    const task = skillRun ? skillTask(skillRun, command.kind === "skill" ? command.args : "") : typed;
 
     // A model the user picked from the model menu may not have been checked
     // yet: try it. Only send them to settings when nothing usable is chosen.
@@ -700,7 +858,7 @@ export function App() {
     setPrompt("");
     setMessages((items) => [
       ...items,
-      { id: crypto.randomUUID(), role: "user", text: task }
+      { id: crypto.randomUUID(), role: "user", text: typed }
     ]);
     setActivities([]);
     setRunning(true);
@@ -708,7 +866,25 @@ export function App() {
     pausedRef.current = false;
     cancelled.current = false;
 
-    const intent = classifyTaskIntent(task);
+    // About me: pick up plain facts from the request, then share what is known.
+    let aboutMe = "";
+    try {
+      const preferences = await loadPreferences();
+      if (preferences.learnAboutMe && !skillRun) {
+        const learned = await addFacts(factsInMessage(typed), "learned");
+        if (learned.length) {
+          addActivity(
+            `Remembered about you: ${learned.map((fact) => fact.text).join("; ")}`,
+            "done"
+          );
+        }
+      }
+      aboutMe = aboutMePrompt(await loadAboutMe());
+    } catch {
+      aboutMe = "";
+    }
+
+    const intent = skillRun ? "browser" : classifyTaskIntent(task);
 
     try {
       if (intent === "chat") {
@@ -722,7 +898,7 @@ export function App() {
             fallback?.chatHealth.status === "healthy"
               ? fallback
               : null,
-            task,
+            task + aboutMe,
             controller.signal
           );
 
@@ -736,7 +912,7 @@ export function App() {
           }
 
           addAssistantMessage(routed.result);
-          await saveHistory(task, routed.result);
+          await saveHistory(typed, routed.result);
           return;
         } catch (error) {
           finishActivity(activity, cancelled.current ? "done" : "error");
@@ -769,10 +945,10 @@ export function App() {
       requestAbort.current = controller;
       const taskSessionId = crypto.randomUUID();
       const taskSessionTitle =
-        task.length > 48 ? `${task.slice(0, 45)}…` : task;
+        typed.length > 48 ? `${typed.slice(0, 45)}…` : typed;
 
       const result = await runBrowserTask(
-        task + attachmentNote,
+        task + attachmentNote + aboutMe,
         {
           session: {
             id: taskSessionId,
@@ -1100,12 +1276,38 @@ export function App() {
           await clearBrowserWorkingMemory(taskSessionId);
         })
         .catch(() => undefined);
-      addAssistantMessage(result.message);
+      const evidence = result.session_evidence;
+      if (skillRun) {
+        if (result.status === "completed") {
+          await recordSkillRun(skillRun.id, "worked").catch(() => null);
+          addAssistantMessage(result.message, {
+            evidence,
+            task: typed,
+            skillId: skillRun.id
+          });
+        } else {
+          if (!cancelled.current && result.status === "stopped") {
+            await recordSkillRun(skillRun.id, "failed", result.message).catch(() => null);
+          }
+          addAssistantMessage(result.message);
+        }
+      } else {
+        addAssistantMessage(
+          result.message,
+          result.status === "completed" && worthSaving(evidence)
+            ? { evidence, task: typed }
+            : undefined
+        );
+      }
       if (result.status === "completed") {
-        await saveHistory(task, result.message);
+        await saveHistory(typed, result.message);
       }
       return;
     } catch (error) {
+      if (skillRun && !cancelled.current) {
+        // Counted, but a model or network error teaches nothing about the task.
+        await recordSkillRun(skillRun.id, "failed").catch(() => null);
+      }
       if (cancelled.current) {
         addAssistantMessage("Stopped.");
       } else if (
@@ -1167,6 +1369,28 @@ export function App() {
     return <SettingsView onBack={() => setView("chat")} />;
   }
 
+  const commandSuggestions = slashSuggestions(prompt, skills);
+
+  if (view === "skills") {
+    return (
+      <SkillsView
+        onBack={() => setView("chat")}
+        onRun={(skill) => {
+          setView("chat");
+          void runTask(`/${skill.slug}`);
+        }}
+        onReplay={(workflow) => {
+          setView("chat");
+          void replayWorkflow(workflow);
+        }}
+      />
+    );
+  }
+
+  if (view === "memory") {
+    return <MemoryView onBack={() => setView("chat")} />;
+  }
+
   if (view === "history") {
     return (
       <HistoryView
@@ -1225,6 +1449,24 @@ export function App() {
             onChanged={refreshContext}
             onManage={() => setView("settings")}
           />
+          <Tooltip title="Skills">
+            <IconButton
+              size="small"
+              onClick={() => setView("skills")}
+              aria-label="Skills"
+            >
+              <SkillsIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="About me">
+            <IconButton
+              size="small"
+              onClick={() => setView("memory")}
+              aria-label="About me"
+            >
+              <MemoryIcon />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Task history">
             <IconButton
               size="small"
@@ -1339,6 +1581,33 @@ export function App() {
                           <SpeakIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
+                      {message.learned && !message.skillNote && (
+                        message.learned.skillId ? (
+                          <Button
+                            size="small"
+                            onClick={() => void updateSkillFromRun(message)}
+                            sx={{ mt: 0.5 }}
+                          >
+                            Update the Skill with this run
+                          </Button>
+                        ) : (
+                          <Tooltip describeChild title="Teach BrowserHarness this task so it can repeat it with one command">
+                            <Button
+                              size="small"
+                              startIcon={<SkillsIcon fontSize="small" />}
+                              onClick={() => void saveAsSkill(message)}
+                              sx={{ mt: 0.5 }}
+                            >
+                              Save as Skill
+                            </Button>
+                          </Tooltip>
+                        )
+                      )}
+                      {message.skillNote && (
+                        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+                          {message.skillNote}
+                        </Typography>
+                      )}
                     </>
                   ) : (
                     <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
@@ -1519,14 +1788,42 @@ export function App() {
             ))}
           </Stack>
         )}
+        {commandSuggestions.length > 0 && (
+          <Paper variant="outlined" sx={{ mb: 0.5, maxHeight: 220, overflowY: "auto" }} role="listbox" aria-label="Commands">
+            {commandSuggestions.map((command) => (
+              <Box
+                key={command.name}
+                role="option"
+                aria-selected={false}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setPrompt(`/${command.name} `);
+                }}
+                sx={{ px: 1.5, py: 0.75, cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
+              >
+                <Typography variant="body2" component="span" sx={{ fontWeight: 600 }}>
+                  /{command.name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" component="span" sx={{ ml: 1 }}>
+                  {command.description}
+                </Typography>
+              </Box>
+            ))}
+          </Paper>
+        )}
         <TextField
           multiline
           maxRows={5}
           fullWidth
-          placeholder="Ask BrowserHarness…"
+          placeholder="Ask BrowserHarness… (type / for commands)"
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
+            if (event.key === "Tab" && commandSuggestions.length > 0) {
+              event.preventDefault();
+              setPrompt(`/${commandSuggestions[0].name} `);
+              return;
+            }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               void runTask();
