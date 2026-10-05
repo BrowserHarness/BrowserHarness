@@ -141,6 +141,16 @@ if (
   fail("model routing contract is not the v0.1.1 multi-connection contract");
 }
 
+// The content script is injected with chrome.scripting.executeScript, which
+// cannot load ES module chunks: it must be one self-contained file.
+const contentScript = await readFile(
+  resolve(ROOT, "apps/extension/dist/assets/content.js"),
+  "utf8"
+);
+if (/^\s*import\b|\bimport\s*\{[^}]*\}\s*from\s*["']/m.test(contentScript.slice(0, 2000))) {
+  fail("content.js imports a shared chunk; keep content-script modules out of background/UI imports");
+}
+
 for (const size of [16, 32, 48, 128]) {
   const path = resolve(
     ROOT,

@@ -13,12 +13,31 @@ export function googleDocsEditorTarget(doc: Document = document): HTMLElement | 
   const frameDocument = iframe?.contentDocument;
   if (!frameDocument) return null;
 
+  // The editor lives in another frame, so its nodes come from a different
+  // realm and fail `instanceof HTMLElement` here: check the node type instead.
   const active = frameDocument.activeElement;
-  if (active instanceof HTMLElement) return active;
+  if (isElementNode(active) && active !== frameDocument.documentElement) {
+    return active;
+  }
+  return isElementNode(frameDocument.body) ? frameDocument.body : null;
+}
 
-  return frameDocument.body instanceof HTMLElement
-    ? frameDocument.body
-    : null;
+function isElementNode(node: unknown): node is HTMLElement {
+  return Boolean(
+    node &&
+      typeof node === "object" &&
+      (node as Node).nodeType === 1 &&
+      typeof (node as HTMLElement).focus === "function"
+  );
+}
+
+/** Put keyboard focus in the Google Docs editor so real input reaches it. */
+export function focusGoogleDocsEditor(doc: Document = document): HTMLElement | null {
+  const editor = googleDocsEditorTarget(doc);
+  if (!editor) return null;
+  editor.ownerDocument.defaultView?.focus();
+  editor.focus();
+  return editor;
 }
 
 export function dispatchGoogleDocsText(

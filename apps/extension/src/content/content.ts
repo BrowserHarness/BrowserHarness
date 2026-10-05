@@ -7,6 +7,7 @@ import {
 import {
   GOOGLE_DOCS_EDITOR_ID,
   dispatchGoogleDocsText,
+  focusGoogleDocsEditor,
   googleDocsEditorTarget,
   isGoogleDocsLocation
 } from "./adapters/google-docs";
@@ -15,7 +16,7 @@ type ContentRequest =
   | { type: "OBSERVE_PAGE"; tab_id: number }
   | {
       type: "EXECUTE_CONTENT_ACTION";
-      action: "click" | "type" | "press_key" | "scroll";
+      action: "click" | "type" | "press_key" | "scroll" | "focus_editor";
       input: Record<string, unknown>;
     }
   | { type: "WATCH_ARM" }
@@ -796,7 +797,24 @@ function writeText(
 function execute(action: Extract<ContentRequest, { type: "EXECUTE_CONTENT_ACTION" }>) {
   const { input } = action;
   switch (action.action) {
+    case "focus_editor": {
+      if (!focusGoogleDocsEditor()) {
+        throw new Error("Google Docs editor target not found");
+      }
+      return { focused: GOOGLE_DOCS_EDITOR_ID };
+    }
     case "click": {
+      if (input.element_id === GOOGLE_DOCS_EDITOR_ID) {
+        // Clicking the hidden editor frame does nothing useful: focus it and
+        // tell the planner what to do next so it does not keep clicking.
+        if (!focusGoogleDocsEditor()) {
+          throw new Error("Google Docs editor target not found");
+        }
+        return {
+          focused: GOOGLE_DOCS_EDITOR_ID,
+          next: `The document is ready for text. Write it with type and element_id ${GOOGLE_DOCS_EDITOR_ID}.`
+        };
+      }
       const element = getElement(input.element_id);
       element.scrollIntoView({ block: "center", inline: "nearest" });
       element.click();
