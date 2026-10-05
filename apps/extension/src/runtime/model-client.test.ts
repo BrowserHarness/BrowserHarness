@@ -247,7 +247,7 @@ describe("testModelConnection", () => {
 });
 
 describe("nextAgentDecision", () => {
-  it("uses structured output for NVIDIA browser planning", async () => {
+  it("uses native tool calling for hosted browser planning", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -283,7 +283,88 @@ describe("nextAgentDecision", () => {
 
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
-    expect(body.response_format).toEqual({ type: "json_object" });
+    expect(body.response_format).toBeUndefined();
+    expect(body.tool_choice).toBe("required");
+    expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(["browser_action", "finish"]);
+    expect(body.tools[0].function.parameters.properties.tool.enum).toContain("click");
+    expect(body.messages[0].content).toContain("NATIVE TOOL CALLING");
+  });
+});
+
+describe("native tool calling", () => {
+  const reply = (message: Record<string, unknown>) =>
+    new Response(JSON.stringify({ choices: [{ message }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+
+  it("reads browser_action and finish function calls", async () => {
+    const config = { ...nvidia, model: "meta/tools-a" };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        reply({
+          content: null,
+          tool_calls: [
+            {
+              type: "function",
+              function: {
+                name: "browser_action",
+                arguments: JSON.stringify({ tool: "click", input: { element_id: "bc-1" }, note: "Opening pricing" })
+              }
+            }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        reply({ tool_calls: [{ type: "function", function: { name: "finish", arguments: '{"message":"Done"}' } }] })
+      );
+    expect(await nextAgentDecision(config, "open pricing", observation, [])).toEqual({
+      kind: "tool",
+      tool: "click",
+      input: { element_id: "bc-1" },
+      note: "Opening pricing"
+    });
+    expect(await nextAgentDecision(config, "open pricing", observation, [])).toEqual({ kind: "final", message: "Done" });
+  });
+
+  it("falls back to JSON text when a model rejects tools, and remembers it", async () => {
+    const config = { ...nvidia, provider: "openrouter" as const, baseUrl: undefined, model: "some/old-model" };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("tools are not supported", { status: 400 }))
+      .mockImplementation(async () => reply({ content: '{"kind":"final","message":"Plain JSON"}' }));
+    expect(await nextAgentDecision(config, "read it", observation, [])).toEqual({ kind: "final", message: "Plain JSON" });
+    const retry = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(retry.tools).toBeUndefined();
+    expect(retry.messages[0].content).not.toContain("NATIVE TOOL CALLING");
+    await nextAgentDecision(config, "read it", observation, []);
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).tools).toBeUndefined();
+  });
+
+  it("reads Anthropic tool_use blocks", async () => {
+    const config: ProviderConfig = { provider: "anthropic", apiKey: "sk-ant-test", model: "claude-test" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          content: [
+            { type: "text", text: "I'll click it." },
+            { type: "tool_use", name: "browser_action", input: { tool: "click", input: { element_id: "bc-1" }, note: "Click" } }
+          ]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    expect(await nextAgentDecision(config, "open pricing", observation, [])).toMatchObject({ kind: "tool", tool: "click" });
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.tool_choice).toEqual({ type: "any" });
+    expect(body.tools[0].input_schema.properties.tool.enum).toContain("navigate");
+  });
+
+  it("keeps JSON text for local models", async () => {
+    const config: ProviderConfig = { provider: "ollama", apiKey: "", model: "qwen3:4b", baseUrl: "http://localhost:11434/v1" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(reply({ content: '{"kind":"final","message":"ok"}' }));
+    await nextAgentDecision(config, "read it", observation, []);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).tools).toBeUndefined();
   });
 });
 

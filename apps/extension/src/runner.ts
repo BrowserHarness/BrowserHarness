@@ -1,7 +1,7 @@
 // The page a scheduled task runs in. The service worker opens it in a
 // background tab when the task's alarm fires; it closes itself when done.
 import { saveTaskHistoryEntry } from "./runtime/history";
-import { runScheduledTask } from "./runtime/scheduled-run";
+import { runScheduledTask, runUnattendedTask } from "./runtime/scheduled-run";
 import { describeSchedule, loadSchedules, recordScheduledRun } from "./runtime/schedules";
 
 const title = document.getElementById("title") as HTMLElement;
@@ -20,8 +20,36 @@ const HEADINGS = {
   "needs you": "Needs you"
 } as const;
 
+/** A task sent from the person's phone; the result goes back the same way. */
+async function runRemote(id: string, keep: boolean) {
+  const key = "browserharness.remoteTasks";
+  const stored = ((await chrome.storage.session.get(key))[key] || {}) as Record<string, { text: string; from: string }>;
+  const request = stored[id];
+  if (!request) {
+    title.textContent = "This task is no longer waiting.";
+    return;
+  }
+  const { [id]: _done, ...rest } = stored;
+  await chrome.storage.session.set({ [key]: rest });
+  const source = request.from === "telegram" ? "Telegram" : "your phone";
+  document.title = `Running: ${request.text}`;
+  title.textContent = `Running a task from ${source}: ${request.text}`;
+  const outcome = await runUnattendedTask(request.text, `From ${source}`, log);
+  await saveTaskHistoryEntry({ task: `From ${source}: ${request.text}`, result: outcome.message, url: outcome.url }).catch(() => undefined);
+  await chrome.runtime.sendMessage({ type: "REMOTE_TASK_RESULT", id, ...outcome }).catch(() => undefined);
+  title.textContent = `${HEADINGS[outcome.status]}: ${request.text}`;
+  outcomeBox.textContent = outcome.message;
+  document.title = `${HEADINGS[outcome.status]}: ${request.text}`;
+  if (!keep) setTimeout(() => window.close(), 5000);
+}
+
 async function main() {
   const params = new URLSearchParams(location.search);
+  const remote = params.get("remote");
+  if (remote) {
+    await runRemote(remote, params.has("keep"));
+    return;
+  }
   const id = params.get("schedule") || "";
   const item = (await loadSchedules()).find((candidate) => candidate.id === id);
   if (!item) {

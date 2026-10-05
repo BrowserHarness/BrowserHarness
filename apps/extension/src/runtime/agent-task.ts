@@ -10,7 +10,7 @@ import {
   type BrowserEngineDependencies
 } from "./browser-engine";
 import type { ApprovalMode } from "../settings/preferences";
-import type { ProviderConnection } from "../settings/provider-store";
+import { markBrowserReady, type ProviderConnection } from "../settings/provider-store";
 import {
   agentDecisionWithFallback,
   readOnlyWorkerDecisionWithFallback
@@ -108,6 +108,7 @@ export async function runAgentTask(
   task: string,
   { agentPrimary, agentFallback, session, signal, hooks }: AgentTaskOptions
 ): Promise<BrowserEngineResult> {
+  let usedFallback = false;
   const result = await runBrowserTask(
     task,
     {
@@ -388,6 +389,7 @@ export async function runAgentTask(
         }
       },
       onFallback: () => {
+        usedFallback = true;
         hooks.addActivity(
           "Primary unavailable — used fallback model",
           "done"
@@ -407,5 +409,14 @@ export async function runAgentTask(
       await clearBrowserWorkingMemory(session.id);
     })
     .catch(() => undefined);
+  // Real evidence for the model menu's "Browser-ready" label.
+  if (
+    result.status === "completed" &&
+    !usedFallback &&
+    result.session_evidence.actions.length > 0 &&
+    agentPrimary.agentHealth.status !== "healthy"
+  ) {
+    await markBrowserReady(agentPrimary.id).catch(() => undefined);
+  }
   return result;
 }

@@ -465,6 +465,13 @@ export async function requestBridgeLlm(
   });
 }
 
+/** Sends an event to the Bridge; false when it is not connected. */
+export function sendBridgeEvent(message: Record<string, unknown>): boolean {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  socket.send(JSON.stringify(message));
+  return true;
+}
+
 export function startBridgeClient(
   commandHandler: BridgeCommandHandler
 ): void {

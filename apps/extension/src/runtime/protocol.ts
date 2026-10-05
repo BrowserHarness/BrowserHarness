@@ -102,8 +102,17 @@ export type BridgeLlmRequest = {
   timeout_ms?: number;
 };
 
+export type RemoteTaskResult = {
+  type: "REMOTE_TASK_RESULT";
+  id: string;
+  status: "worked" | "failed" | "needs you";
+  message: string;
+  url?: string;
+};
+
 export type ExtensionRequest =
   | { type: "GET_CURRENT_TAB" }
+  | RemoteTaskResult
   | BridgeLlmRequest
   | BrowserToolRequest
   | WatchRequest;

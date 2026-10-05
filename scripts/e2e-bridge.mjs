@@ -8,7 +8,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
@@ -59,7 +59,61 @@ const bridge = (file, ...args) => {
   }
 };
 
+// Stand-ins for Telegram's Bot API and for a model, so the phone path runs end to end.
+const telegram = { queue: [], sent: [], nextId: 1 };
+const mockModel = (body, res) => {
+  const user = String(body.messages.at(-1).content ?? "");
+  const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "";
+  const done = user.split("RECENT EXECUTION EVIDENCE:").pop() || "";
+  const decision = !/\bnavigate[: ]/.test(done) && goal.includes("TG_TASK")
+    ? { kind: "tool", tool: "navigate", input: { url: pageUrl }, note: "Opening the page" }
+    : { kind: "final", message: `TG_DONE ${/button "(\w+)"/.exec(user)?.[1] || "no button"}` };
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: JSON.stringify(decision) } }] }));
+};
+// Like bridge(), without blocking this process (its stand-in servers must keep answering).
+const bridgeAsync = (file, ...args) =>
+  new Promise((resolve) => {
+    const child = spawn(process.execPath, [file, ...args], { env });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("close", (code) => {
+      try {
+        resolve({ code, json: JSON.parse(stdout.trim().split("\n").at(-1) || ""), stderr });
+      } catch {
+        resolve({ code, json: null, stdout, stderr });
+      }
+    });
+  });
+
 const page = http.createServer((req, res) => {
+  if (req.method === "POST") {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      const body = JSON.parse(raw || "{}");
+      if (req.url.startsWith("/v1/chat/completions")) return mockModel(body, res);
+      const method = req.url.split("/").pop();
+      const answer = (result) => {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ ok: true, result }));
+      };
+      if (method === "getMe") return answer({ id: 1, is_bot: true, username: "my_harness_bot" });
+      if (method === "sendMessage") {
+        telegram.sent.push(body);
+        return answer({ message_id: telegram.sent.length });
+      }
+      if (method === "getUpdates") {
+        const deliver = () => answer(telegram.queue.splice(0).filter((update) => update.update_id >= (body.offset || 0)));
+        return telegram.queue.length ? deliver() : setTimeout(deliver, 300);
+      }
+      res.statusCode = 404;
+      res.end("{}");
+    });
+    return;
+  }
   res.setHeader("content-type", "text/html");
   res.end(`<!doctype html><title>Agent task</title>
 <label>Name <input id="name" aria-label="name"></label>
@@ -196,6 +250,66 @@ try {
   );
   await mcp.close();
   mcp = undefined;
+
+  // Reach it from a phone: a Telegram message becomes a task and the result comes back.
+  const tgBase = `http://127.0.0.1:${page.address().port}/tg`;
+  const configFile = path.join(home, ".browserharness-bridge", "config.json");
+  const withApi = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  fs.writeFileSync(configFile, JSON.stringify({ ...withApi, telegram: { api_base: tgBase } }));
+  const healthy = { status: "healthy", latencyMs: 1, checkedAt: new Date().toISOString() };
+  const modelUrl = `http://127.0.0.1:${page.address().port}/v1`;
+  const connection = {
+    provider: "openai-compatible",
+    apiKey: "mock",
+    model: "mock-agent",
+    baseUrl: modelUrl,
+    id: `openai-compatible::${modelUrl}::mock-agent`,
+    label: "Mock",
+    capabilities: { chat: true, agent: true, vision: false, embeddings: false, unknown: false },
+    chatHealth: healthy,
+    agentHealth: healthy,
+    embeddingHealth: { status: "unknown" }
+  };
+  await side.evaluate(
+    (connection) =>
+      chrome.storage.local.set({
+        "browserharness.providerConnections": [connection],
+        "browserharness.runtimeRouting": { primaryConnectionId: connection.id }
+      }),
+    connection
+  );
+  const setup = await bridgeAsync(installed, "telegram", "setup", "--token", "123:abc");
+  check("telegram setup checks the bot and restarts the Bridge", setup.json?.bot === "@my_harness_bot" && setup.json?.restarted === true, setup.stderr?.trim());
+  const reconnected = async () => {
+    for (let i = 0; i < 40; i += 1) {
+      if ((await bridgeAsync(installed, "status")).json?.extension_connected) return true;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return false;
+  };
+  check("Chrome reconnects after the restart", await reconnected());
+  const tgMessage = (userId, text) =>
+    telegram.queue.push({ update_id: telegram.nextId++, message: { chat: { id: 9000 + userId }, from: { id: userId, first_name: "Ada" }, text } });
+  const sentTo = async (chatId, pattern, timeout = 30_000) => {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+      const found = telegram.sent.find((item) => item.chat_id === chatId && pattern.test(item.text));
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return null;
+  };
+  tgMessage(7, "TG_TASK do something");
+  check("a stranger gets no task, only how to allow them", Boolean(await sentTo(9007, /telegram allow 7/, 10_000)));
+  const allow = await bridgeAsync(installed, "telegram", "allow", "42");
+  check("telegram allow adds the account", allow.json?.allowed_user_ids?.includes("42"), allow.stderr?.trim());
+  await reconnected();
+  tgMessage(42, `TG_TASK open ${pageUrl} and tell me the button`);
+  const onIt = await sentTo(9042, /^On it: TG_TASK/, 15_000);
+  const finished = await sentTo(9042, /^Done\n\nTG_DONE Greet/, 60_000);
+  check("an allowed message runs in Chrome and the result comes back", Boolean(onIt && finished), JSON.stringify(telegram.sent.slice(-3)));
+  const history = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.taskHistory"))["browserharness.taskHistory"] || []);
+  check("phone tasks are in history", history.some((entry) => entry.task.startsWith("From Telegram: TG_TASK")));
 
   // 4. Uninstall removes what install added.
   const removed = bridge(installed, "uninstall");
