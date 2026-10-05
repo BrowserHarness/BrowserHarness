@@ -7,6 +7,7 @@ export type ProviderId =
   | "openai"
   | "anthropic"
   | "nvidia"
+  | "openrouter"
   | "openai-compatible"
   | "lm-studio"
   | "ollama"
@@ -78,6 +79,12 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
     id: "nvidia",
     label: "NVIDIA",
     defaultBaseUrl: "https://integrate.api.nvidia.com/v1",
+    modelDiscovery: "openai-models"
+  },
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
     modelDiscovery: "openai-models"
   },
   "openai-compatible": {

@@ -1,6 +1,14 @@
 # Connecting an AI to BrowserHarness
 
-Open the side panel → Settings (gear) → Models & connections → Add connection. Pick one of three kinds.
+Open the side panel → Settings (gear) → Models & connections. The top of the screen has big buttons:
+
+- **Connect with OpenRouter (recommended):** press Connect, sign in on OpenRouter's page, approve. You get Claude, GPT, Gemini and more, pay-as-you-go, with no key to copy. This is a real OAuth sign-in, not a ChatGPT or Claude subscription.
+- **ChatGPT:** shows "Coming soon" until OpenAI approves BrowserHarness for Sign in with ChatGPT (client ID request: https://developers.openai.com/siwc/request-client-id).
+- **A model on this computer:** if LM Studio or Ollama is running, a one-click Connect button appears automatically.
+
+Everything below is under "Advanced" and is for people comfortable with keys and terminals. Claude subscriptions cannot be offered as a Connect button because Anthropic does not allow subscription logins in third-party apps.
+
+### Advanced: Add connection. Pick one of three kinds.
 
 ## 1. Models on this computer (LM Studio, Ollama) — no API key
 - **LM Studio:** load a model, open the Developer tab, start the local server. Provider "LM Studio (local)", base URL `http://localhost:1234/v1` (default).

@@ -25,6 +25,9 @@ Powers Chrome DevTools Protocol capabilities used by BrowserHarness for:
 - print-to-PDF;
 - raw CDP escape-hatch operations.
 
+### identity
+Runs the standard OAuth sign-in window ("Connect with OpenRouter") so users can connect an AI service without copying API keys. Used only when the user presses Connect; no Chrome account information is read.
+
 ### webNavigation
 Provides reliable navigation lifecycle information for cross-page automation and Watch Me recording.
 

@@ -19,8 +19,7 @@ if (!fs.existsSync(path.join(dist, "manifest.json"))) {
 }
 
 const seenAuth = [];
-const server = http
-  .createServer((req, res) => {
+const handler = (req, res) => {
     seenAuth.push(req.headers.authorization || "");
     res.setHeader("content-type", "application/json");
     if (req.url.startsWith("/v1/models")) {
@@ -41,9 +40,15 @@ const server = http
     }
     res.statusCode = 404;
     res.end("{}");
-  })
-  .listen(0);
+};
+const server = http.createServer(handler).listen(0);
 const port = server.address().port;
+// The simple screen looks for LM Studio on its usual port.
+const lmStudio = http.createServer(handler);
+const lmStudioUp = await new Promise((resolve) => {
+  lmStudio.once("error", () => resolve(false));
+  lmStudio.listen(1234, "127.0.0.1", () => resolve(true));
+});
 
 const results = [];
 const check = (name, ok, detail = "") => {
@@ -65,6 +70,23 @@ try {
   await side.setViewportSize({ width: 430, height: 1200 });
   await side.goto(`chrome-extension://${extId}/sidepanel.html`);
   await side.getByRole("button", { name: "Settings" }).first().click();
+  await side.getByText("Connect your AI").waitFor({ timeout: 10000 });
+
+  const body0 = await side.locator("body").innerText();
+  check("simple screen offers OpenRouter and shows ChatGPT as coming soon", body0.includes("Connect with OpenRouter") && body0.includes("Coming soon"));
+
+  if (lmStudioUp) {
+    const lmButton = side.getByRole("button", { name: /Connect LM Studio/ });
+    await lmButton.waitFor({ timeout: 15000 }).catch(() => {});
+    check("a running local LM Studio is detected automatically", await lmButton.isVisible().catch(() => false));
+    await lmButton.click().catch(() => {});
+    await side.getByText(/^Saved\./).first().waitFor({ timeout: 30000 }).catch(() => {});
+    check("one click connects and tests the local model", /Saved\. Chat ✓/.test(await side.locator("body").innerText()));
+  } else {
+    console.log("SKIP local auto-detect (port 1234 busy)");
+  }
+
+  await side.getByRole("button", { name: /Advanced/ }).click();
   await side.getByText("Add connection").waitFor({ timeout: 10000 });
 
   const providerBox = side.getByRole("combobox", { name: "Provider" });
@@ -97,6 +119,7 @@ try {
 } finally {
   await ctx.close();
   server.close();
+  lmStudio.close();
   fs.rmSync(profile, { recursive: true, force: true });
 }
 
