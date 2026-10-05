@@ -188,7 +188,7 @@ export function BridgeSettingsSection() {
         );
         if (!granted) {
           setMessage(
-            "Chrome did not grant access to the local bridge address."
+            "Chrome did not grant access to the bridge address."
           );
           return;
         }
@@ -224,7 +224,7 @@ export function BridgeSettingsSection() {
         </Typography>
         <Typography variant="body2" color="text.secondary">
           Let local tools such as Hermes, Codex, Claude Code or another
-          agent control BrowserHarness through the loopback-only bridge.
+          agent control BrowserHarness through the bridge. It is loopback-only by default; a remote Bridge on your own server is also possible over wss:// with a long pairing token.
           BrowserHarness task sessions, semantic refs and approval policy still apply.
         </Typography>
 
@@ -252,7 +252,7 @@ export function BridgeSettingsSection() {
               address: event.target.value
             }))
           }
-          placeholder="ws://127.0.0.1:10087/ws"
+          placeholder="ws://127.0.0.1:10087/ws or wss://bridge.example.com/ws"
           fullWidth
         />
 

@@ -3,7 +3,7 @@
 ## Purpose
 BrowserHarness Local Bridge lets a user-authorized local agent drive the BrowserHarness extension through the same browser runtime, task-session ownership, semantic element refs, and safety policy used by the built-in agent.
 
-The bridge is **not** a remote web API. The daemon binds only to loopback.
+By default the bridge is **not** a remote web API: the daemon binds only to loopback. A remote mode exists for later, when BrowserHarness has its own infrastructure (see "Remote mode" below). It is off unless explicitly enabled.
 
 ## Components
 
@@ -139,3 +139,19 @@ Every browser-action tool requires a stable `session` value. Reuse the same valu
 MCP does not bypass BrowserHarness approvals. A Bridge result such as `APPROVAL_REQUIRED` is returned as an MCP tool error result. Borrowed user tabs remain protected by the extension's existing ownership policy.
 
 The MCP process only accepts loopback BrowserHarness Bridge configuration. Stdout is reserved for MCP JSON-RPC; diagnostics are written to stderr.
+
+## Remote mode (opt-in, off by default)
+
+Reserved for connecting the extension to BrowserHarness-operated servers (for example to improve the product over time). Nothing dials out unless the user turns it on.
+
+Bridge side:
+- `browserharness-bridge remote on [bind-host]` sets `allow_remote: true` and a non-loopback bind host (default `0.0.0.0`). `remote off` returns to `127.0.0.1`. `remote` prints the current mode. Restart the daemon to apply.
+- The daemon refuses a non-loopback host unless `allow_remote` is exactly `true`, and refuses a pairing token shorter than 32 characters in remote mode. Tokens are compared in constant time.
+- `/status` reports `remote_mode`. Local CLI and MCP always reach the daemon through loopback (a wildcard bind maps to 127.0.0.1).
+- The daemon speaks plain `ws://`. Run it behind a TLS-terminating reverse proxy and publish only the `wss://` address.
+
+Extension side:
+- `ws://` stays loopback-only. A non-loopback Bridge must be `wss://host/ws`, and saving it requires a pairing token of at least 32 characters.
+- Chrome host access for the Bridge origin is requested at save time as for the local Bridge.
+
+Approvals, task-session ownership and autonomy ceilings apply identically over a remote Bridge. Anyone holding the pairing token can drive the paired browser, so treat it like a credential: rotate it by replacing `token` in `~/.browserharness-bridge/config.json` with a new random value of 32+ characters, restarting the daemon, and re-pasting it into the extension.

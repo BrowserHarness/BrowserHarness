@@ -454,3 +454,85 @@ test("paired extension reverse MCP RPC preserves approval boundary", async () =>
     await env.bridge.close();
   }
 });
+
+test("non-loopback bind is refused unless remote mode is explicit", () => {
+  const long = "x".repeat(40);
+  assert.throws(
+    () => createBridgeServer({ host: "0.0.0.0", port: 0, token: long }),
+    /loopback/
+  );
+  assert.throws(
+    () =>
+      createBridgeServer({
+        host: "0.0.0.0",
+        port: 0,
+        token: long,
+        allowRemote: "yes"
+      }),
+    /loopback/
+  );
+});
+
+test("remote mode requires a long pairing token", () => {
+  assert.throws(
+    () =>
+      createBridgeServer({
+        host: "0.0.0.0",
+        port: 0,
+        token: "short-token",
+        allowRemote: true
+      }),
+    /at least 32/
+  );
+});
+
+test("remote mode serves a paired extension and reports remote_mode", async () => {
+  const token = "r".repeat(48);
+  const bridge = createBridgeServer({
+    host: "0.0.0.0",
+    port: 0,
+    token,
+    allowRemote: true,
+    commandTimeoutMs: 1000
+  });
+  const address = await bridge.listen();
+  const base = `http://127.0.0.1:${address.port}`;
+  try {
+    const status = await (await fetch(`${base}/status`)).json();
+    assert.equal(status.remote_mode, true);
+
+    const denied = await fetch(`${base}/command`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session: "s", action: "observe_page" })
+    });
+    assert.equal(denied.status, 401);
+
+    const bad = new WebSocket(`ws://127.0.0.1:${address.port}/ws?token=${"z".repeat(48)}`);
+    await new Promise((resolve) => {
+      bad.on("error", resolve);
+      bad.on("close", resolve);
+    });
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws?token=${token}`);
+    await new Promise((resolve, reject) => {
+      ws.on("open", resolve);
+      ws.on("error", reject);
+    });
+    ws.send(JSON.stringify({ type: "hello", protocol_version: BRIDGE_PROTOCOL_VERSION, extension_id: "x", extension_version: "1" }));
+    await waitForWsMessage(ws, (m) => m.type === "hello_ack");
+    ws.close();
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("loopback bridge reports remote_mode false", async () => {
+  const env = await start();
+  try {
+    const body = await (await fetch(`${env.base}/status`)).json();
+    assert.equal(body.remote_mode, false);
+  } finally {
+    await env.bridge.close();
+  }
+});

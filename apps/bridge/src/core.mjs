@@ -26,8 +26,21 @@ async function readJson(req, limit = 1024 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+export const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"];
+export const REMOTE_MIN_TOKEN_LENGTH = 32;
+
+export function isLoopbackHost(host) {
+  return LOOPBACK_HOSTS.includes(host);
+}
+
+function safeEqual(a, b) {
+  const left = Buffer.from(String(a));
+  const right = Buffer.from(String(b));
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
 function authorized(req, token) {
-  return req.headers.authorization === `Bearer ${token}`;
+  return safeEqual(req.headers.authorization || "", `Bearer ${token}`);
 }
 
 function normalizeCommand(body) {
@@ -63,11 +76,21 @@ export function createBridgeServer({
   port = 10087,
   token,
   commandTimeoutMs = 30_000,
-  mcpManager = null
+  mcpManager = null,
+  allowRemote = false
 } = {}) {
   if (!token) throw new Error("Bridge pairing token is required");
-  if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
-    throw new Error("BrowserHarness Bridge must bind to loopback");
+  if (!isLoopbackHost(host)) {
+    if (allowRemote !== true) {
+      throw new Error(
+        "BrowserHarness Bridge must bind to loopback unless remote mode is explicitly enabled"
+      );
+    }
+    if (String(token).length < REMOTE_MIN_TOKEN_LENGTH) {
+      throw new Error(
+        `Remote mode requires a pairing token of at least ${REMOTE_MIN_TOKEN_LENGTH} characters`
+      );
+    }
   }
 
   const startedAt = Date.now();
@@ -77,7 +100,7 @@ export function createBridgeServer({
 
   const server = http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url || "/", `http://${host}`);
+      const url = new URL(req.url || "/", "http://bridge.local");
 
       if (req.method === "GET" && url.pathname === "/status") {
         const configuredMcpServers = mcpManager
@@ -94,6 +117,7 @@ export function createBridgeServer({
             extension?.readyState === WebSocket.OPEN,
           extension_id: extensionMeta?.extension_id || "",
           extension_version: extensionMeta?.extension_version || "",
+          remote_mode: !isLoopbackHost(host),
           mcp_client_enabled: Boolean(mcpManager),
           mcp_servers_configured: configuredMcpServers
         });
@@ -327,10 +351,10 @@ export function createBridgeServer({
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (req, socket, head) => {
-    const url = new URL(req.url || "/", `http://${host}`);
+    const url = new URL(req.url || "/", "http://bridge.local");
     if (
       url.pathname !== "/ws" ||
-      url.searchParams.get("token") !== token
+      !safeEqual(url.searchParams.get("token") || "", token)
     ) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();

@@ -69,7 +69,7 @@ Supports tab/site visual context.
 - Provider API requests are sent directly to providers configured by the user.
 - Page/network/browser evidence is processed only for user-requested agent work.
 - Provider credentials remain in Chrome extension-local storage.
-- Local Bridge binds to loopback and uses a pairing token.
+- Local Bridge binds to loopback by default and uses a pairing token; an opt-in remote mode (wss:// + long token) is off unless the user enables it.
 
 ## Release gate
 Public release still requires automated CI/evaluation gates plus the final real-Chrome acceptance pass.
