@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { BackIcon, DeleteIcon, RefreshIcon } from "./icons";
+import { BackIcon, ChevronDownIcon, DeleteIcon, RefreshIcon } from "./icons";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
@@ -54,6 +57,7 @@ import {
   testEmbeddingCapability
 } from "../runtime/model-client";
 import { MvpSettingsSections } from "./MvpSettingsSections";
+import { SimpleConnect } from "./SimpleConnect";
 import {
   ensureEndpointAccess,
   hasEndpointAccess
@@ -266,7 +270,10 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
       }
     }
 
-    const config = candidateConfig();
+    await testAndSave(candidateConfig());
+  };
+
+  const testAndSave = async (config: ProviderConfig) => {
     const declaredCapabilities =
       classifyModelCapabilities(config.model);
     const embeddingOnly =
@@ -413,6 +420,20 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const connectFromSimple = async (config: ProviderConfig) => {
+    if (hasEditableBaseUrl(config.provider) && config.baseUrl) {
+      const granted = await ensureEndpointAccess(config.baseUrl);
+      if (!granted) {
+        setConnectionState("error");
+        setConnectionMessage(
+          "Chrome did not allow BrowserHarness to reach this model."
+        );
+        return;
+      }
+    }
+    await testAndSave(config);
+  };
+
   const updateRouting = async (
     patch: Partial<RuntimeRoutingConfig>
   ) => {
@@ -450,6 +471,19 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
       </Stack>
 
       <Stack spacing={2.5}>
+        <SimpleConnect
+          onConnect={connectFromSimple}
+          state={connectionState}
+          message={connectionMessage}
+        />
+
+        <Accordion variant="outlined" disableGutters>
+          <AccordionSummary expandIcon={<ChevronDownIcon />}>
+            <Typography variant="subtitle1">
+              Advanced: API keys, other services, technical options
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Stack spacing={2}>
             <Typography variant="subtitle1">Add connection</Typography>
@@ -477,6 +511,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                 <ListSubheader>API key</ListSubheader>
                 <MenuItem value="openai">OpenAI</MenuItem>
                 <MenuItem value="anthropic">Anthropic</MenuItem>
+                <MenuItem value="openrouter">OpenRouter (paste a key)</MenuItem>
                 <MenuItem value="nvidia">NVIDIA</MenuItem>
                 <MenuItem value="openai-compatible">
                   OpenAI-compatible (Groq, OpenRouter, others)
@@ -691,6 +726,8 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
             </Button>
           </Stack>
         </Paper>
+          </AccordionDetails>
+        </Accordion>
 
         <Stack spacing={1.5}>
           <Typography variant="subtitle1">
