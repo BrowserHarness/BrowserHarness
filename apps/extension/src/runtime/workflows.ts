@@ -196,3 +196,24 @@ export async function saveWorkflow(
     ].slice(0, 50)
   });
 }
+
+export async function deleteWorkflow(id: string): Promise<void> {
+  const current = await loadWorkflows();
+  await chrome.storage.local.set({
+    [KEY]: current.filter((item) => item.id !== id)
+  });
+}
+
+export async function renameWorkflow(
+  id: string,
+  name: string
+): Promise<void> {
+  const clean = name.replace(/\s+/g, " ").trim().slice(0, 80);
+  if (!clean) return;
+  const current = await loadWorkflows();
+  await chrome.storage.local.set({
+    [KEY]: current.map((item) =>
+      item.id === id ? { ...item, name: clean } : item
+    )
+  });
+}
