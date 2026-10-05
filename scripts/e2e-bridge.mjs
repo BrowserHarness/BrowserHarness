@@ -125,7 +125,7 @@ try {
   await mcp.connect(new StdioClientTransport({ command: process.execPath, args: [installed, "mcp"], env, stderr: "ignore" }));
   const tools = (await mcp.listTools()).tools;
   const click = tools.find((tool) => tool.name === "browserharness_click");
-  check("MCP lists typed tools", tools.length === 36 && click?.inputSchema?.required?.includes("element_id"), `${tools.length} tools`);
+  check("MCP lists typed tools", tools.length === 37 && click?.inputSchema?.required?.includes("element_id"), `${tools.length} tools`);
   let browserCalls = 0;
   // Returns the tool's outcome (JSON) and the page text it carried, if any.
   const call = async (name, args = {}) => {
@@ -156,6 +156,44 @@ try {
   check("observe_page answers as compact text", /^tab_id: \d+\nurl: http/.test(observed.page) && observed.page.includes('button "Greet"'));
   const closed = await call("browserharness_close_session");
   check("agent closes its tabs", closed.ok);
+
+  // Saved Skills reach coding agents (MCP) and the command line.
+  await side.evaluate(() =>
+    chrome.storage.local.set({
+      "browserharness.skills": [
+        {
+          id: "s1",
+          name: "Find red shoes",
+          slug: "find-red-shoes",
+          description: "Search the shop for red shoes",
+          instructions: "Goal: search the shop\n1. Type “red shoes” into “Search”\n2. Press Enter",
+          source: "chat",
+          created_at: "",
+          updated_at: "",
+          runs: 0,
+          successes: 0,
+          failures: 0,
+          lessons: []
+        }
+      ]
+    })
+  );
+  const listed = await mcp.callTool({ name: "browserharness_skills", arguments: {} });
+  const steps = await mcp.callTool({ name: "browserharness_skills", arguments: { name: "find-red-shoes", details: "size 9" } });
+  check(
+    "coding agents list Skills and get one Skill's steps",
+    listed.content[0].text.includes('"name": "find-red-shoes"') &&
+      steps.content[0].text.includes("1. Type “red shoes” into “Search”") &&
+      steps.content[0].text.includes("This time: size 9"),
+    steps.content[0].text.slice(0, 200)
+  );
+  const cli = spawnSync(process.execPath, [installed, "skill", "find-red-shoes", "size", "9"], { env, encoding: "utf8", timeout: 30_000 });
+  const cliList = spawnSync(process.execPath, [installed, "skills"], { env, encoding: "utf8", timeout: 30_000 });
+  check(
+    "the command line lists and prints Skills",
+    cli.status === 0 && cli.stdout.includes("Use my saved Skill “Find red shoes”") && cliList.stdout.includes("find-red-shoes"),
+    (cli.stderr || cliList.stderr || "").trim()
+  );
   await mcp.close();
   mcp = undefined;
 

@@ -11,6 +11,14 @@ import type {
   ToolResult
 } from "../runtime/protocol";
 import { getAttachmentsByIds } from "../runtime/attachments";
+import { loadSkills, skillTask } from "../runtime/skills";
+import {
+  ALARM_PREFIX,
+  SCHEDULES_STORAGE_KEY,
+  loadSchedules,
+  markScheduleStarted,
+  plannedAlarms
+} from "../runtime/schedules";
 import {
   QUICK_EXPLAIN_MENU_ID,
   QUICK_EXPLAIN_STORAGE_KEY,
@@ -148,6 +156,110 @@ chrome.runtime.onInstalled.addListener(() => {
     });
   });
 });
+
+// Scheduled tasks: one alarm per enabled schedule, kept in step with storage.
+async function syncScheduleAlarms(): Promise<void> {
+  const planned = plannedAlarms(await loadSchedules());
+  const existing = await chrome.alarms.getAll();
+  for (const alarm of existing) {
+    if (
+      alarm.name.startsWith(ALARM_PREFIX) &&
+      !planned.some((item) => `${ALARM_PREFIX}${item.id}` === alarm.name)
+    ) {
+      await chrome.alarms.clear(alarm.name);
+    }
+  }
+  for (const item of planned) {
+    const name = `${ALARM_PREFIX}${item.id}`;
+    const current = existing.find((alarm) => alarm.name === name);
+    if (!current || Math.abs(current.scheduledTime - item.when) > 1000) {
+      await chrome.alarms.create(name, { when: item.when });
+    }
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void syncScheduleAlarms().catch(() => undefined);
+});
+chrome.runtime.onStartup.addListener(() => {
+  void syncScheduleAlarms().catch(() => undefined);
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes[SCHEDULES_STORAGE_KEY]) {
+    void syncScheduleAlarms().catch(() => undefined);
+  }
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (!alarm.name.startsWith(ALARM_PREFIX)) return;
+  const id = alarm.name.slice(ALARM_PREFIX.length);
+  void (async () => {
+    const item = await markScheduleStarted(id);
+    if (!item) return;
+    await chrome.tabs.create({
+      url: chrome.runtime.getURL(`runner.html?schedule=${encodeURIComponent(id)}`),
+      active: false
+    });
+  })().catch(() => undefined);
+});
+
+chrome.notifications.onClicked.addListener((notificationId) => {
+  if (!notificationId.startsWith("browserharness-run:")) return;
+  chrome.notifications.clear(notificationId);
+  void chrome.tabs
+    .create({ url: chrome.runtime.getURL("sidepanel.html?view=scheduled") })
+    .catch(() => undefined);
+});
+
+async function skillsTool(input: Record<string, unknown>): Promise<ToolResult> {
+  const skills = await loadSkills();
+  const name =
+    typeof input.name === "string"
+      ? input.name.trim().replace(/^\//, "").toLowerCase()
+      : "";
+  if (!name) {
+    return {
+      ok: true,
+      data: {
+        skills: skills.map((skill) => ({
+          name: skill.slug,
+          title: skill.name,
+          description: skill.description,
+          start_url: skill.start_url,
+          runs: skill.runs,
+          worked: skill.successes
+        })),
+        hint: skills.length
+          ? "Call skills again with name to get one Skill's steps, then follow them with the browser tools."
+          : "No Skills saved yet. The person saves them from the BrowserHarness side panel."
+      }
+    };
+  }
+  const skill =
+    skills.find((item) => item.slug === name) ||
+    skills.find((item) => item.name.toLowerCase() === name);
+  if (!skill) {
+    return {
+      ok: false,
+      error: {
+        code: "SKILL_NOT_FOUND",
+        message: `No Skill called ${name}. Call skills without a name to list them.`
+      }
+    };
+  }
+  return {
+    ok: true,
+    data: {
+      name: skill.slug,
+      title: skill.name,
+      start_url: skill.start_url,
+      instructions: skillTask(
+        skill,
+        typeof input.details === "string" ? input.details : ""
+      )
+    }
+  };
+}
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (
@@ -443,6 +555,10 @@ async function runTool(
 
   if (tool === "mcp") {
     return runExternalMcpTool(input, options);
+  }
+
+  if (tool === "skills") {
+    return skillsTool(input);
   }
 
   if (
@@ -2738,6 +2854,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "upload",
   "save_pdf",
   "extract_table",
+  "skills",
   "cdp",
   "navigate",
   "back",

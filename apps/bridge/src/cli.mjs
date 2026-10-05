@@ -345,6 +345,31 @@ async function bridgeRequest(config, pathname, body) {
   return response.json();
 }
 
+/** `skills` lists the person's Skills; `skill <name> [details]` prints one, ready to follow. */
+async function skillsCommand(config, name, details) {
+  const result = await bridgeRequest(config, "/command", {
+    session: "cli",
+    title: "Skills",
+    action: "skills",
+    args: name ? { name, details } : {}
+  }).catch(() => ({
+    ok: false,
+    error: { message: "The bridge is not running. Start it with: browserharness-bridge start" }
+  }));
+  if (!result?.ok) throw new Error(result?.error?.message || "Couldn't read Skills from Chrome");
+  if (name) {
+    process.stdout.write(`${result.data.instructions}\n`);
+  } else if (flag("json")) {
+    print(result.data);
+  } else if (!result.data.skills.length) {
+    process.stdout.write("No Skills yet. Save one from the BrowserHarness side panel (Save as Skill).\n");
+  } else {
+    for (const skill of result.data.skills) {
+      process.stdout.write(`${skill.name.padEnd(28)} ${skill.title}\n`);
+    }
+  }
+}
+
 async function waitForExtension(config, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -532,6 +557,12 @@ try {
     await uninstall(config);
   } else if (command === "agents") {
     print({ agents: detectAgents(context(THIS_FILE)) });
+  } else if (command === "skills") {
+    await skillsCommand(config);
+  } else if (command === "skill") {
+    const name = process.argv[3];
+    if (!name) throw new Error("Usage: browserharness-bridge skill <name> [details]");
+    await skillsCommand(config, name, process.argv.slice(4).join(" "));
   } else if (command === "pair") {
     if (flag("show-token")) {
       print({
@@ -548,7 +579,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [install|uninstall|pair|agents|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {

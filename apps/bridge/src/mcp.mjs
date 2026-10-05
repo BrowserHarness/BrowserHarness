@@ -22,6 +22,10 @@ const TOOL_SPECS = [
     start: optional(z.number().int().min(0), "Continue from next_start of the previous read"),
     max_chars: optional(z.number().int().positive(), "Character limit for this read")
   }, true],
+  ["skills", "List the Skills the person saved in BrowserHarness (tasks it learned), or pass name to get one Skill's step-by-step instructions. Then do the steps yourself with the browser tools.", {
+    name: optional(z.string(), "Skill name from the list, e.g. \"check-prices\"; omit to list them"),
+    details: optional(z.string(), "Extra details for this run, e.g. \"size 9\"")
+  }, true],
   ["extract_table", "Read every data table on the page (also inside frames) as headers and rows. Use it for lists, prices and comparisons instead of copying page text.", {}, true],
   ["ax_snapshot", "Fresh accessibility-tree snapshot with @eN refs; works better on dynamic sites. Use its refs for trusted_* tools.", {
     max_elements: optional(z.number().int().positive(), "Maximum elements to return")
@@ -357,7 +361,9 @@ export function bridgeResultToMcp(result) {
   const content =
     outcome.ok === true && isObservation(outcome.data)
       ? [{ type: "text", text: renderPage(outcome.data) }]
-      : [{ type: "text", text: clip(JSON.stringify(outcome, null, 2), MAX_RESULT_TEXT) }];
+      : outcome.ok === true && typeof outcome.data?.instructions === "string"
+        ? [{ type: "text", text: clip(outcome.data.instructions, MAX_RESULT_TEXT) }]
+        : [{ type: "text", text: clip(JSON.stringify(outcome, null, 2), MAX_RESULT_TEXT) }];
   if (image) content.push(image.content);
   if (isObservation(page)) {
     content.push({ type: "text", text: `Page after this action:\n${renderPage(page)}` });

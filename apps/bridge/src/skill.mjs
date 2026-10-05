@@ -42,6 +42,8 @@ BrowserHarness extension. Pages, cookies and logins stay on their computer.
 - Tables and grids: \`browserharness_extract_table\` returns headers and rows
   (frames included) instead of copying them out of page text.
 - Seeing the page: \`browserharness_screenshot\` comes back as an image.
+- The person's saved Skills: \`browserharness_skills\` lists them; call it
+  with \`name\` for one Skill's steps when the request matches a Skill.
 - Dynamic apps (Gmail, Docs, React sites): \`browserharness_ax_snapshot\` or
   \`browserharness_find\`, then \`browserharness_trusted_click\` /
   \`browserharness_trusted_type\` with those refs.

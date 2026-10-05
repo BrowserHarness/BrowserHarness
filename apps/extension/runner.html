@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>BrowserHarness scheduled task</title>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 16px; }
+      #outcome { white-space: pre-wrap; padding: 12px; border: 1px solid #8884; border-radius: 8px; }
+      #outcome:empty { display: none; }
+      li { color: #666; }
+    </style>
+  </head>
+  <body>
+    <h1 id="title">Starting a scheduled task…</h1>
+    <ul id="log"></ul>
+    <div id="outcome"></div>
+    <script type="module" src="/src/runner.ts"></script>
+  </body>
+</html>
