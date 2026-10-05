@@ -41,14 +41,15 @@ export async function discoverModels(
   if (!baseUrl) {
     throw new Error("Base URL is required before loading models.");
   }
-  if (!config.apiKey.trim()) {
+  const apiKey = config.apiKey.trim();
+  if (!apiKey && !definition.local) {
     throw new Error("API key is required before loading models.");
   }
 
   const response = await fetch(`${baseUrl}/models`, {
     method: "GET",
     headers: {
-      Authorization: `Bearer ${config.apiKey.trim()}`,
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       Accept: "application/json"
     },
     signal

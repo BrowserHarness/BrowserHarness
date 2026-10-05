@@ -8,6 +8,8 @@ export type ProviderId =
   | "anthropic"
   | "nvidia"
   | "openai-compatible"
+  | "lm-studio"
+  | "ollama"
   | "claude-subscription"
   | "chatgpt-subscription";
 
@@ -53,6 +55,11 @@ export interface ProviderDefinition {
    * no API key and no base URL.
    */
   subscriptionAdapter?: "claude_cli" | "codex_cli";
+  /**
+   * Models served from this computer (LM Studio, Ollama): OpenAI-compatible,
+   * no API key, a base URL the user may change, and slower answers allowed.
+   */
+  local?: boolean;
 }
 
 export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
@@ -78,6 +85,20 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
     label: "OpenAI-compatible",
     modelDiscovery: "openai-models"
   },
+  "lm-studio": {
+    id: "lm-studio",
+    label: "LM Studio (local)",
+    defaultBaseUrl: "http://localhost:1234/v1",
+    modelDiscovery: "openai-models",
+    local: true
+  },
+  ollama: {
+    id: "ollama",
+    label: "Ollama (local)",
+    defaultBaseUrl: "http://localhost:11434/v1",
+    modelDiscovery: "openai-models",
+    local: true
+  },
   "claude-subscription": {
     id: "claude-subscription",
     label: "Claude subscription",
@@ -102,11 +123,24 @@ export function subscriptionAdapterFor(
   return PROVIDERS[provider]?.subscriptionAdapter;
 }
 
+export function isLocalProvider(provider: ProviderId): boolean {
+  return Boolean(PROVIDERS[provider]?.local);
+}
+
+/** Providers whose base URL the user can edit (so Chrome may need access to it). */
+export function hasEditableBaseUrl(provider: ProviderId): boolean {
+  return provider === "openai-compatible" || isLocalProvider(provider);
+}
+
 /** True when the connection has what it needs to make a request. */
 export function hasCredentials(
   config: Pick<ProviderConfig, "provider" | "apiKey">
 ): boolean {
-  return isSubscriptionProvider(config.provider) || Boolean(config.apiKey);
+  return (
+    isSubscriptionProvider(config.provider) ||
+    isLocalProvider(config.provider) ||
+    Boolean(config.apiKey)
+  );
 }
 
 const LEGACY_KEY = "browserharness.providerConfig";
