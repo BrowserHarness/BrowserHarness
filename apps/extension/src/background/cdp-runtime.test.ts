@@ -336,21 +336,25 @@ describe("CDP semantic and trusted-input runtime", () => {
       2,
       11,
       "Input.dispatchKeyEvent",
-      {
+      expect.objectContaining({
         type: "keyDown",
         key: "Enter",
-        code: "Enter"
-      }
+        code: "Enter",
+        // Without these a real Enter does not submit or insert a line.
+        windowsVirtualKeyCode: 13,
+        text: "\r"
+      })
     );
     expect(mocks.cdpCommand).toHaveBeenNthCalledWith(
       3,
       11,
       "Input.dispatchKeyEvent",
-      {
+      expect.objectContaining({
         type: "keyUp",
         key: "Enter",
-        code: "Enter"
-      }
+        code: "Enter",
+        windowsVirtualKeyCode: 13
+      })
     );
   });
 });

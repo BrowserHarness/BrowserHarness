@@ -1,5 +1,6 @@
 import {
   PROVIDERS,
+  isLoopbackOrPrivateBaseUrl,
   providerBaseUrl,
   type ProviderConfig
 } from "../settings/provider-store";
@@ -42,7 +43,7 @@ export async function discoverModels(
     throw new Error("Base URL is required before loading models.");
   }
   const apiKey = config.apiKey.trim();
-  if (!apiKey && !definition.local) {
+  if (!apiKey && !definition.local && !isLoopbackOrPrivateBaseUrl(baseUrl)) {
     throw new Error("API key is required before loading models.");
   }
 

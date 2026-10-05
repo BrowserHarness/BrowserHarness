@@ -139,14 +139,39 @@ export function hasEditableBaseUrl(provider: ProviderId): boolean {
   return provider === "openai-compatible" || isLocalProvider(provider);
 }
 
+/**
+ * True for a server on this computer or the local network (llama.cpp, vLLM,
+ * a LAN box): such servers usually need no key and can be slow.
+ */
+export function isLoopbackOrPrivateBaseUrl(baseUrl?: string): boolean {
+  if (!baseUrl) return false;
+  let host: string;
+  try {
+    host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    return false;
+  }
+  return (
+    host === "localhost" ||
+    host === "::1" ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    host.endsWith(".local")
+  );
+}
+
 /** True when the connection has what it needs to make a request. */
 export function hasCredentials(
-  config: Pick<ProviderConfig, "provider" | "apiKey">
+  config: Pick<ProviderConfig, "provider" | "apiKey"> & { baseUrl?: string }
 ): boolean {
   return (
     isSubscriptionProvider(config.provider) ||
     isLocalProvider(config.provider) ||
-    Boolean(config.apiKey)
+    Boolean(config.apiKey) ||
+    (config.provider === "openai-compatible" &&
+      isLoopbackOrPrivateBaseUrl(config.baseUrl))
   );
 }
 

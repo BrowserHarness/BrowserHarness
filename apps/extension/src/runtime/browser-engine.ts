@@ -7,7 +7,13 @@ import type { AgentDecision } from "./model-client";
 import type { TaskEpisodeMemory } from "./task-memory";
 import type { ProceduralSearchHit } from "./procedural-memory";
 import type { BrowserHarnessMcpCatalog } from "./mcp-catalog";
-import { createLoopGuard, registerDecision } from "./loop-guard";
+import {
+  MAX_TASK_ACTIONS,
+  createLoopGuard,
+  pageKeyFor,
+  registerDecision
+} from "./loop-guard";
+import { clip, unreadablePageObservation } from "./prompt-budget";
 import {
   TabEvidenceStore,
   type TabEvidence
@@ -343,7 +349,7 @@ export async function runBrowserTask(
   task: string,
   dependencies: BrowserEngineDependencies,
   signal?: AbortSignal,
-  maxSteps = 12
+  maxSteps = MAX_TASK_ACTIONS
 ): Promise<BrowserEngineResult> {
   const trail: string[] = [];
   const evidenceStore = new TabEvidenceStore();
@@ -355,13 +361,23 @@ export async function runBrowserTask(
       dependencies.tool<PageObservation>("observe_page", {})
   );
 
-  if (!initial.ok || !initial.data) {
+  if (
+    (!initial.ok || !initial.data) &&
+    initial.error?.code !== "UNSUPPORTED_PAGE"
+  ) {
     throw new Error(
       initial.error?.message || "Could not observe this page"
     );
   }
 
-  let observation = initial.data;
+  // Starting on the New Tab page or another protected page is fine: the
+  // model can still navigate or open a tab from there.
+  let observation =
+    initial.ok && initial.data
+      ? initial.data
+      : unreadablePageObservation(
+          initial.error?.message || "This page cannot be read."
+        );
   let screenshotDataUrl: string | undefined;
   evidenceStore.record(observation);
 
@@ -460,6 +476,7 @@ export async function runBrowserTask(
 
   await persistWorkingMemory();
 
+  let consecutiveFailures = 0;
   for (let step = 0; step < maxSteps; step += 1) {
     if (dependencies.isCancelled()) {
       return buildResult("stopped", "Stopped.", step);
@@ -494,9 +511,17 @@ export async function runBrowserTask(
       return buildResult("completed", decision.message, step);
     }
 
-    const loopCheck = registerDecision(loopGuard, decision);
+    const loopCheck = registerDecision(
+      loopGuard,
+      decision,
+      pageKeyFor(observation)
+    );
     if (!loopCheck.ok) {
-      throw new Error(loopCheck.reason);
+      return buildResult(
+        "stopped",
+        `${loopCheck.reason} ${progressSummary(observation, sessionActions.length)}`,
+        step
+      );
     }
 
     const beforeObservation = observation;
@@ -675,16 +700,29 @@ export async function runBrowserTask(
     }
 
     trail.push(
-      `${decision.tool}: ${JSON.stringify(result)}`
+      clip(`${decision.tool}: ${JSON.stringify(result)}`, TRAIL_ENTRY_MAX)
     );
 
-    const stale =
-      !result.ok && result.error?.code === "ELEMENT_NOT_FOUND";
-
-    if (!result.ok && !stale) {
+    // A failed action is evidence for the next decision, not the end of the
+    // task: small models often send one bad argument and then recover.
+    const failed = !result.ok;
+    const stale = failed && result.error?.code === "ELEMENT_NOT_FOUND";
+    consecutiveFailures = failed ? consecutiveFailures + 1 : 0;
+    if (failed && FATAL_TOOL_ERRORS.has(String(result.error?.code))) {
       throw new Error(
-        result.error?.message ||
-          `Browser tool ${decision.tool} failed`
+        result.error?.message || `Browser tool ${decision.tool} failed`
+      );
+    }
+    if (failed && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      return buildResult(
+        "stopped",
+        `I stopped after ${MAX_CONSECUTIVE_FAILURES} failed actions in a row. Last error: ${result.error?.message || `${decision.tool} failed`}`,
+        step + 1
+      );
+    }
+    if (failed && !stale) {
+      trail.push(
+        `${decision.tool} failed: ${result.error?.message || "unknown error"}. Choose a different action.`
       );
     }
 
@@ -693,13 +731,13 @@ export async function runBrowserTask(
       | undefined;
 
     if (
-      stale ||
+      failed ||
       requiresPostActionVerification(
         decision.tool,
         decision.input
       )
     ) {
-      if (!stale) {
+      if (!failed) {
         await dependencies.tool("wait", { milliseconds: 450 });
       }
 
@@ -708,14 +746,22 @@ export async function runBrowserTask(
         observationInputFor(decision, result)
       );
 
-      if (!verified.ok || !verified.data) {
+      if (
+        (!verified.ok || !verified.data) &&
+        verified.error?.code !== "UNSUPPORTED_PAGE"
+      ) {
         throw new Error(
           verified.error?.message ||
             "Could not verify the page after the action"
         );
       }
 
-      observation = verified.data;
+      observation =
+        verified.ok && verified.data
+          ? verified.data
+          : unreadablePageObservation(
+              verified.error?.message || "This page cannot be read."
+            );
       verifiedContext = pageContext(observation);
       evidenceStore.record(observation);
       trail.push(
@@ -771,7 +817,24 @@ export async function runBrowserTask(
     return buildResult("stopped", "Stopped.", maxSteps);
   }
 
-  throw new Error(
-    "Task reached the bounded action limit before completion."
+  return buildResult(
+    "stopped",
+    `I reached the limit of ${maxSteps} steps before finishing. ${progressSummary(observation, sessionActions.length)}`,
+    maxSteps
   );
+}
+
+const TRAIL_ENTRY_MAX = 8000;
+const MAX_CONSECUTIVE_FAILURES = 3;
+// Policy refusals end the task at once instead of being retried.
+const FATAL_TOOL_ERRORS = new Set([
+  "SUBAGENT_SCOPE_DENIED",
+  "PERMISSION_REQUIRED"
+]);
+
+function progressSummary(
+  observation: PageObservation,
+  actions: number
+): string {
+  return `${actions} action${actions === 1 ? "" : "s"} done; last page: ${observation.title || observation.url}.`;
 }

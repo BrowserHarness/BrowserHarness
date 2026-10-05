@@ -45,9 +45,30 @@ const server = http
           }
           return reply(res, { kind: "final", message: "Claim: the page is titled Mock Page." });
         }
+        if (user.includes("GOAL_SEARCH")) {
+          // A small-model style run: a bad element id first, a bare URL, then type + Enter.
+          const done = user.split("RECENT EXECUTION EVIDENCE:").pop() || "";
+          if (!/\bclick[: ]/.test(done)) {
+            return reply(res, { kind: "tool", tool: "click", input: { element_id: "@e999" }, note: "Clicking a stale element" });
+          }
+          if (!/\bnavigate[: ]/.test(done)) {
+            return reply(res, { kind: "tool", tool: "navigate", url: `localhost:${port}/form`, note: "Opening the search page" });
+          }
+          const box = /(@e\d+) textbox "Search"/.exec(user)?.[1];
+          if (!/\btype[: ]/.test(done) && box) {
+            return reply(res, { kind: "tool", tool: "type", input: { element_id: box, text: "red shoes" }, note: "Typing the search" });
+          }
+          if (!/\bpress_key[: ]/.test(done) && box) {
+            return reply(res, { kind: "tool", tool: "press_key", input: { element_id: box, key: "Enter" }, note: "Pressing Enter" });
+          }
+          return reply(res, {
+            kind: "final",
+            message: user.includes("Results for red shoes") ? "SEARCH_OK results page reached." : "SEARCH_FAILED no results page."
+          });
+        }
         if (user.includes("GOAL_APPROVE")) {
           if (!user.includes("click:")) {
-            const id = /"element_id":"(@e\d+)"[^}]*"accessible_name":"Delete account"/.exec(user)?.[1] || /"element_id":"(@e\d+)"/.exec(user)?.[1];
+            const id = /(@e\d+) button "Delete account"/.exec(user)?.[1] || /(@e\d+) /.exec(user)?.[1];
             return reply(res, { kind: "tool", tool: "click", input: { element_id: id }, note: "Clicking delete" });
           }
           return reply(res, { kind: "final", message: "Clicked it." });
@@ -76,6 +97,13 @@ const server = http
       return;
     }
     res.setHeader("content-type", "text/html");
+    if (req.url.startsWith("/form")) {
+      return res.end('<html><head><title>Search</title></head><body><form action="/results"><input name="q" aria-label="Search"></form></body></html>');
+    }
+    if (req.url.startsWith("/results")) {
+      const q = new URL(req.url, "http://x").searchParams.get("q") || "";
+      return res.end(`<html><head><title>Results</title></head><body><h1>Results for ${q.replace(/[<>&]/g, "")}</h1></body></html>`);
+    }
     res.end("<html><head><title>Mock Page</title></head><body><h1>hello mock</h1><button>Delete account</button></body></html>");
   })
   .listen(0);
@@ -164,6 +192,16 @@ try {
   await side.waitForFunction(() => document.body.innerText.split("Clicked it.").length > 2, null, { timeout: 20000 }).catch(() => {});
   const text3 = await side.locator("body").innerText();
   check("second risky click on the granted site needs no prompt", text3.split("Clicked it.").length > 2 && !(await grantButton.isVisible().catch(() => false)));
+
+  // Start from the New Tab page, which BrowserHarness cannot read.
+  const newTab = await ctx.newPage();
+  await newTab.goto("chrome://newtab/").catch(() => {});
+  await newTab.bringToFront();
+  await side.locator("textarea").first().fill("GOAL_SEARCH go to the search page and search for red shoes");
+  await side.getByRole("button", { name: "Send" }).click();
+  await side.waitForFunction(() => /SEARCH_OK|SEARCH_FAILED|stopped|failed/i.test(document.body.innerText.split("GOAL_SEARCH").pop() || ""), null, { timeout: 45000 }).catch(() => {});
+  const text4 = (await side.locator("body").innerText()).split("GOAL_SEARCH").pop() || "";
+  check("a task can start on the New Tab page, survive a bad element id, follow a bare URL and submit with Enter", text4.includes("SEARCH_OK"), text4.slice(-240).replace(/\n/g, " | "));
 } finally {
   await ctx.close();
   server.close();

@@ -1083,6 +1083,14 @@ export function App() {
       approval.resolve(false);
       setApproval(null);
     }
+    // A page that never answers (for example one showing an alert) must not
+    // leave the panel spinning: Stop always frees it right away.
+    setActivities((items) =>
+      items.map((item) =>
+        item.state === "working" ? { ...item, state: "done" } : item
+      )
+    );
+    setRunning(false);
   };
 
   if (view === "settings") {

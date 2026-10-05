@@ -18,6 +18,7 @@ import {
 } from "./bridge-client";
 import { originPatternForUrl } from "../settings/browser-access";
 import { readPage } from "./read-page";
+import { normalizeNavigableUrl } from "./url-normalize";
 import {
   cdpCommand,
   getJavaScriptDialog,
@@ -302,17 +303,43 @@ async function googleDocsEditorAction(
       action: "type",
       input: { ...input, replace: false }
     });
-    if (fallback.ok) {
-      return {
-        ...fallback,
-        data: {
-          ...(fallback.data as Record<string, unknown>),
-          warning: `Real keyboard input was unavailable (${error instanceof Error ? error.message : String(error)}); used page text events, which Google Docs may ignore. Check the document.`
-        }
-      };
-    }
-    return fallback;
+    if (!fallback.ok) return fallback;
+    // Google Docs ignores page-level events, so this cannot be reported as
+    // typed: say so instead of letting the model claim success.
+    return {
+      ok: false,
+      error: {
+        code: "TRUSTED_TYPE_FAILED",
+        message: `Could not type into Google Docs with real keyboard input (${error instanceof Error ? error.message : String(error)}). Close DevTools on this tab if it is open, then try again.`
+      }
+    };
   }
+}
+
+const PAGE_RESPONSE_TIMEOUT_MS = 20_000;
+
+class PageTimeout extends Error {}
+
+function sendWithTimeout(
+  tabId: number,
+  payload: unknown
+): Promise<ToolResult> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new PageTimeout("page did not respond")),
+      PAGE_RESPONSE_TIMEOUT_MS
+    );
+    chrome.tabs.sendMessage(tabId, payload).then(
+      (value: ToolResult) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 async function sendToTab(
@@ -320,8 +347,19 @@ async function sendToTab(
   payload: unknown
 ): Promise<ToolResult> {
   try {
-    return await chrome.tabs.sendMessage(tabId, payload);
-  } catch {
+    return await sendWithTimeout(tabId, payload);
+  } catch (firstError) {
+    if (firstError instanceof PageTimeout) {
+      // Usually an alert/confirm/leave-page dialog blocking the page.
+      return {
+        ok: false,
+        error: {
+          code: "PAGE_NOT_RESPONDING",
+          message:
+            "The page did not respond. It may be showing a dialog (alert, confirm or leave-page): use the dialog tool, or ask the user to close it."
+        }
+      };
+    }
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab || !isInjectableUrl(tab.url)) {
       return {
@@ -399,6 +437,13 @@ async function runTool(
 
   if (tool === "mcp") {
     return runExternalMcpTool(input, options);
+  }
+
+  if (
+    (tool === "navigate" || tool === "open_tab") &&
+    typeof input.url === "string"
+  ) {
+    input = { ...input, url: normalizeNavigableUrl(input.url) };
   }
 
   if (tool === "open_tab") {
@@ -2617,6 +2662,26 @@ async function runTool(
       type: "OBSERVE_PAGE",
       tab_id: tabId
     });
+  }
+
+  if (tool === "press_key" && typeof input.key === "string" && input.key) {
+    // Real key presses: a synthetic Enter does not submit search boxes or
+    // forms on most sites.
+    if (typeof input.element_id === "string") {
+      const focused = await sendToTab(tabId, {
+        type: "EXECUTE_CONTENT_ACTION",
+        action: "focus",
+        input: { element_id: input.element_id }
+      });
+      if (!focused.ok) return focused;
+    }
+    try {
+      const platformInfo = await chrome.runtime.getPlatformInfo();
+      await trustedSendKeys(tabId, input.key, 1, platformInfo.os);
+      return { ok: true, data: { key: input.key, mode: "keyboard" } };
+    } catch {
+      // Debugger unavailable or an unusual key: use page-level events.
+    }
   }
 
   if (
