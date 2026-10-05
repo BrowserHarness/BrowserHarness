@@ -1,0 +1,56 @@
+// The page a scheduled task runs in. The service worker opens it in a
+// background tab when the task's alarm fires; it closes itself when done.
+import { saveTaskHistoryEntry } from "./runtime/history";
+import { runScheduledTask } from "./runtime/scheduled-run";
+import { describeSchedule, loadSchedules, recordScheduledRun } from "./runtime/schedules";
+
+const title = document.getElementById("title") as HTMLElement;
+const lines = document.getElementById("log") as HTMLElement;
+const outcomeBox = document.getElementById("outcome") as HTMLElement;
+
+function log(text: string) {
+  const item = document.createElement("li");
+  item.textContent = text;
+  lines.append(item);
+}
+
+const HEADINGS = {
+  worked: "Done",
+  failed: "Didn't finish",
+  "needs you": "Needs you"
+} as const;
+
+async function main() {
+  const params = new URLSearchParams(location.search);
+  const id = params.get("schedule") || "";
+  const item = (await loadSchedules()).find((candidate) => candidate.id === id);
+  if (!item) {
+    title.textContent = "This scheduled task no longer exists.";
+    return;
+  }
+  document.title = `Running: ${item.task}`;
+  title.textContent = `Running your scheduled task: ${item.task}`;
+  log(describeSchedule(item.schedule));
+
+  const outcome = await runScheduledTask(item, log);
+  await recordScheduledRun(item.id, outcome.status, outcome.message);
+  await saveTaskHistoryEntry({ task: `Scheduled: ${item.task}`, result: outcome.message, url: outcome.url }).catch(() => undefined);
+
+  title.textContent = `${HEADINGS[outcome.status]}: ${item.task}`;
+  outcomeBox.textContent = outcome.message;
+  document.title = `${HEADINGS[outcome.status]}: ${item.task}`;
+  try {
+    chrome.notifications.create(`browserharness-run:${item.id}:${Date.now()}`, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+      title: `${HEADINGS[outcome.status]}: ${item.task.slice(0, 60)}`,
+      message: outcome.message.replace(/[*_`#|]/g, "").slice(0, 240),
+      priority: outcome.status === "worked" ? 0 : 1
+    });
+  } catch {
+    // Notifications may be turned off; the result is in history either way.
+  }
+  if (!params.has("keep")) setTimeout(() => window.close(), 5000);
+}
+
+void main();

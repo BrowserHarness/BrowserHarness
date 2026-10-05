@@ -12,6 +12,7 @@ export const BUILT_IN_COMMANDS: SlashCommandInfo[] = [
   { name: "forget", usage: "/forget <words>", description: "Delete saved facts that mention these words" },
   { name: "memory", usage: "/memory", description: "See and edit what BrowserHarness knows about you" },
   { name: "skills", usage: "/skills", description: "See, run, rename and share your Skills" },
+  { name: "schedule", usage: "/schedule every weekday at 8am <task>", description: "Run a task on a schedule" },
   { name: "help", usage: "/help", description: "List every command" }
 ];
 

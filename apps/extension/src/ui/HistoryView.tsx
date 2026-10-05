@@ -7,9 +7,12 @@ import {
   IconButton,
   Paper,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Typography
 } from "@mui/material";
+import { ScheduledView } from "./ScheduledView";
 import {
   clearTaskHistory,
   loadTaskHistory,
@@ -19,11 +22,14 @@ import {
 
 export function HistoryView({
   onBack,
-  onRunAgain
+  onRunAgain,
+  initialTab = "past"
 }: {
   onBack: () => void;
   onRunAgain?: (task: string) => void;
+  initialTab?: "past" | "scheduled";
 }) {
+  const [tab, setTab] = useState(initialTab);
   const [entries, setEntries] = useState<TaskHistoryEntry[]>([]);
   const [query, setQuery] = useState("");
   const shown = searchTaskHistory(entries, query);
@@ -50,15 +56,26 @@ export function HistoryView({
         <Typography variant="h6" sx={{ flex: 1 }}>
           Task history
         </Typography>
-        <IconButton
-          aria-label="Clear task history"
-          onClick={() => void clear()}
-          disabled={entries.length === 0}
-        >
-          <ClearAllIcon />
-        </IconButton>
+        {tab === "past" && (
+          <IconButton
+            aria-label="Clear task history"
+            onClick={() => void clear()}
+            disabled={entries.length === 0}
+          >
+            <ClearAllIcon />
+          </IconButton>
+        )}
       </Stack>
 
+      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
+        <Tab value="past" label="Past tasks" sx={{ minHeight: 36 }} />
+        <Tab value="scheduled" label="Scheduled" sx={{ minHeight: 36 }} />
+      </Tabs>
+
+      {tab === "scheduled" ? (
+        <ScheduledView />
+      ) : (
+      <>
       {entries.length > 0 && (
         <TextField
           fullWidth
@@ -98,6 +115,9 @@ export function HistoryView({
             </Paper>
           ))}
         </Stack>
+      )}
+
+      </>
       )}
 
       <Button sx={{ mt: 2 }} onClick={onBack}>

@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { approvalFor, autoApproves } from "../runtime/approval-mode";
+import { autoApproves } from "../runtime/approval-mode";
+import {
+  APPROVAL_WORDS,
+  approvalQuestionFor,
+  extensionMessage,
+  runAgentTask,
+  safeHostname
+} from "../runtime/agent-task";
 import { dictationAvailable, speak, startDictation } from "./voice";
 import { downloadCsv, markdownTables } from "./table-csv";
 import {
@@ -54,6 +61,12 @@ import {
 } from "../runtime/about-me";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
+  describeSchedule,
+  newScheduledTask,
+  parseScheduleText,
+  saveScheduledTask
+} from "../runtime/schedules";
+import {
   addGrant,
   isGrantableHost,
   isHostGranted,
@@ -107,22 +120,14 @@ import {
   loadFallbackConnection,
   type ProviderConnection
 } from "../settings/provider-store";
-import {
-  directChatWithFallback,
-  agentDecisionWithFallback,
-  readOnlyWorkerDecisionWithFallback
-} from "../runtime/model-router";
-import {
-  runBrowserTask,
-  type BrowserToolExecution
-} from "../runtime/browser-engine";
+import { directChatWithFallback } from "../runtime/model-router";
 import { replaySavedWorkflowAdaptive } from "../runtime/workflow-adaptive-replay";
 import type {
   AdaptiveReplayDependencies,
   AdaptiveReplayToolExecution
 } from "../runtime/adaptive-replay";
 import { classifyTaskIntent } from "../runtime/intent";
-import type { PageObservation, ToolName, ToolResult } from "../runtime/protocol";
+import type { ToolName } from "../runtime/protocol";
 import {
   finalizeRecordedSteps,
   inferWorkflowInputs,
@@ -136,39 +141,7 @@ import { SettingsView } from "./SettingsView";
 import { ModelMenu } from "./ModelMenu";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
-import {
-  saveTaskEpisodeMemory
-} from "../runtime/task-memory";
-import {
-  indexTaskEpisodeMemory,
-  searchTaskMemoryHybrid
-} from "../runtime/semantic-memory";
-import {
-  searchProceduralMemory
-} from "../runtime/procedural-memory";
-import {
-  discoverMcpCatalog as buildMcpCatalog
-} from "../runtime/mcp-catalog";
-import {
-  getMcpServerTrustMode
-} from "../settings/mcp-trust-store";
-import {
-  clearBrowserWorkingMemory,
-  saveBrowserWorkingMemory
-} from "../runtime/working-memory";
 import { waitForUserAction } from "../runtime/user-handoff";
-import {
-  runReadOnlySubagent
-} from "../runtime/subagent-runner";
-import {
-  buildDagWorkerTask,
-  parseTaskDag,
-  runTaskDag
-} from "../runtime/task-dag";
-import {
-  parseReadOnlySubagentTasks,
-  runReadOnlySubagentBatch
-} from "../runtime/subagent-supervisor";
 
 type Message = {
   id: string;
@@ -193,59 +166,17 @@ type Handoff = {
   resolve: (status: "continue" | "cancelled") => void;
 };
 
-const APPROVAL_WORDS =
-  /\b(send|submit|publish|buy|purchase|checkout|place order|pay|delete|remove|change password|security)\b/i;
-
-async function extensionMessage<T>(request: unknown): Promise<ToolResult<T>> {
-  return chrome.runtime.sendMessage(request);
-}
-
-function safeHostname(url?: string) {
-  if (!url) return "";
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
-}
-
-function approvalDescription(
-  observation: PageObservation,
-  tool: string,
-  input: Record<string, unknown>
-) {
-  const id = input.element_id;
-  const element =
-    typeof id === "string"
-      ? observation.elements.find((candidate) => candidate.element_id === id)
-      : undefined;
-  const host = safeHostname(observation.url) || "this page";
-
-  if (tool === "click" && element) {
-    if (element.requires_approval) {
-      return `${element.approval_reason || `Activate “${element.accessible_name || "this control"}”`} on ${host}`;
-    }
-    if (APPROVAL_WORDS.test(element.accessible_name)) {
-      return `Click “${element.accessible_name || "this control"}” on ${host}`;
-    }
-  }
-
-  if (tool === "press_key" && String(input.key || "").toLowerCase() === "enter") {
-    if (!element) {
-      return `Press Enter on ${host}; this may submit the active form`;
-    }
-    if (element.enter_requires_approval) {
-      return `Press Enter in “${element.accessible_name || element.role}” on ${host}; this may submit a non-GET form`;
-    }
-  }
-
-  return null;
-}
-
 export function App() {
   const [view, setView] = useState<
     "chat" | "settings" | "history" | "skills" | "memory"
-  >("chat");
+  >(() => {
+    // Notifications open the panel page with ?view=scheduled.
+    const asked = new URLSearchParams(location.search).get("view");
+    return asked === "scheduled" ? "history" : asked === "skills" || asked === "memory" || asked === "history" ? asked : "chat";
+  });
+  const [historyTab, setHistoryTab] = useState<"past" | "scheduled">(() =>
+    new URLSearchParams(location.search).get("view") === "scheduled" ? "scheduled" : "past"
+  );
   const [skills, setSkills] = useState<UserSkill[]>([]);
   const [tab, setTab] = useState<CurrentTab | null>(null);
   const [primary, setPrimary] = useState<ProviderConnection | null>(null);
@@ -429,6 +360,34 @@ export function App() {
       case "skills":
         setView("skills");
         return;
+      case "schedule": {
+        if (!command.args) {
+          setHistoryTab("scheduled");
+          setView("history");
+          return;
+        }
+        const parsed = parseScheduleText(command.args);
+        if (!parsed) {
+          addAssistantMessage(
+            "I couldn't tell when to run it. Start with the time, like `/schedule every weekday at 8am check my inbox`, `/schedule every 2 hours …` or `/schedule tomorrow at 7am …`. You can also use History → Scheduled."
+          );
+          return;
+        }
+        if (!parsed.task) {
+          addAssistantMessage("What should it do at that time? Add the task after the time.");
+          return;
+        }
+        const item = newScheduledTask(parsed.task, parsed.schedule);
+        if (!item.next_run_at) {
+          addAssistantMessage("That time has already passed. Pick a time in the future.");
+          return;
+        }
+        await saveScheduledTask(item);
+        addAssistantMessage(
+          `Scheduled: **${item.task}**\n\n${describeSchedule(item.schedule)}. Next run ${new Date(item.next_run_at).toLocaleString([], { weekday: "long", hour: "numeric", minute: "2-digit" })}. It runs in its own background tab while Chrome is open, and anything that needs your approval waits for you. See it under History → Scheduled.`
+        );
+        return;
+      }
       default:
         addAssistantMessage(helpText(await loadSkills()));
     }
@@ -947,280 +906,26 @@ export function App() {
       const taskSessionTitle =
         typed.length > 48 ? `${typed.slice(0, 45)}…` : typed;
 
-      const result = await runBrowserTask(
-        task + attachmentNote + aboutMe,
-        {
-          session: {
-            id: taskSessionId,
-            title: taskSessionTitle
-          },
-          decide: async ({
-            task: browserTask,
-            observation,
-            trail,
-            evidence,
-            recalled_memory,
-            recalled_procedures,
-            mcp_catalog,
-            screenshotDataUrl,
-            signal
-          }) => {
-            const routed = await agentDecisionWithFallback(
-              agentPrimary,
-              agentFallback,
-              browserTask,
-              observation,
-              trail,
-              signal,
-              evidence,
-              screenshotDataUrl,
-              recalled_memory,
-              recalled_procedures,
-              mcp_catalog
-            );
-            return {
-              decision: routed.result,
-              usedFallback: routed.usedFallback
-            };
-          },
-          tool: async <T = unknown>(
-            tool: ToolName,
-            input: Record<string, unknown> = {},
-            execution?: BrowserToolExecution
-          ): Promise<ToolResult<T>> => {
-            if (tool === "agent") {
-              const launchWorker = async (spec: { task: string; max_steps: number }, index: number) => {
-                    const workerTask = spec.task;
-                    const workerSessionId =
-                      `${taskSessionId}:worker:${index + 1}:${crypto.randomUUID()}`;
-                    const workerSessionTitle =
-                      workerTask.length > 48
-                        ? `Worker ${index + 1}: ${workerTask.slice(0, 37)}…`
-                        : `Worker ${index + 1}: ${workerTask}`;
-
-                    return runReadOnlySubagent(
-                      workerTask,
-                      {
-                        session: {
-                          id: workerSessionId,
-                          title: workerSessionTitle
-                        },
-                        decide: async ({
-                          task: subtask,
-                          observation,
-                          trail,
-                          evidence,
-                          mcp_catalog,
-                          signal: workerSignal
-                        }) => {
-                          const routed =
-                            await readOnlyWorkerDecisionWithFallback(
-                              agentPrimary,
-                              agentFallback,
-                              subtask,
-                              observation,
-                              trail,
-                              workerSignal,
-                              evidence,
-                              mcp_catalog
-                            );
-                          return {
-                            decision: routed.result,
-                            usedFallback:
-                              routed.usedFallback
-                          };
-                        },
-                        baseTool: (
-                          workerTool,
-                          workerInput = {}
-                        ) =>
-                          extensionMessage({
-                            type: "BROWSER_TOOL",
-                            tool: workerTool,
-                            input: workerInput,
-                            session_id:
-                              workerSessionId,
-                            session_title:
-                              workerSessionTitle
-                          }),
-                        recallMemory: async (
-                          subtask,
-                          observation
-                        ) =>
-                          (
-                            await searchTaskMemoryHybrid(
-                              `${subtask} ${safeHostname(observation.url)}`,
-                              3
-                            )
-                          ).map(
-                            (hit) => hit.episode
-                          ),
-                        recallProcedures: (
-                          subtask,
-                          observation
-                        ) =>
-                          searchProceduralMemory(
-                            `${subtask} ${safeHostname(observation.url)}`,
-                            3
-                          ),
-                        discoverMcpCatalog: (
-                          subtask,
-                          observation
-                        ) =>
-                          buildMcpCatalog(
-                            `${subtask} ${safeHostname(observation.url)}`,
-                            (mcpInput) =>
-                              extensionMessage({
-                                type: "BROWSER_TOOL",
-                                tool: "mcp",
-                                input: mcpInput
-                              }),
-                            getMcpServerTrustMode
-                          ),
-                        isCancelled: () =>
-                          cancelled.current,
-                        waitWhilePaused: async () => {
-                          while (
-                            pausedRef.current &&
-                            !cancelled.current
-                          ) {
-                            await new Promise(
-                              (resolve) =>
-                                window.setTimeout(
-                                  resolve,
-                                  150
-                                )
-                            );
-                          }
-                        },
-                        onFallback: () => {
-                          addActivity(
-                            `Worker ${index + 1} used fallback model`,
-                            "done"
-                          );
-                        }
-                      },
-                      controller.signal,
-                      spec.max_steps
-                    );
-                  };
-
-              if (Array.isArray(input.dag)) {
-                const dag = parseTaskDag(input.dag);
-                if (!dag.ok) {
-                  return {
-                    ok: false,
-                    error: dag.error
-                  } as ToolResult<T>;
-                }
-                const outcome = await runTaskDag(
-                  dag.nodes,
-                  ({ node, prerequisites }, ) =>
-                    launchWorker(
-                      {
-                        task: buildDagWorkerTask(
-                          node,
-                          prerequisites
-                        ),
-                        max_steps: node.step_budget
-                      },
-                      dag.nodes.findIndex(
-                        (item) => item.id === node.id
-                      )
-                    ),
-                  controller.signal
-                );
-                return {
-                  ok: true,
-                  data: outcome as T
-                };
-              }
-
-              const parsed =
-                parseReadOnlySubagentTasks(input);
-              if (!parsed.ok) {
-                return {
-                  ok: false,
-                  error: parsed.error
-                } as ToolResult<T>;
-              }
-
-              const batch =
-                await runReadOnlySubagentBatch(
-                  parsed.tasks,
-                  launchWorker,
-                  controller.signal
-                );
-
-              return {
-                ok: true,
-                data: batch as T
-              };
-            }
-
-            return extensionMessage<T>({
-              type: "BROWSER_TOOL",
-              tool,
-              input,
-              session_id: taskSessionId,
-              session_title: taskSessionTitle,
-              approval_granted: execution?.approvalGranted
-            });
-          },
-          approvalDescription: (observation, tool, input) => {
+      const result = await runAgentTask(task + attachmentNote + aboutMe, {
+        agentPrimary,
+        agentFallback,
+        session: { id: taskSessionId, title: taskSessionTitle },
+        signal: controller.signal,
+        hooks: {
+          addActivity,
+          finishActivity,
+          isCancelled: () => cancelled.current,
+          isPaused: () => pausedRef.current,
+          approvalQuestion: (observation, tool, input) => {
             approvalHost.current = safeHostname(observation.url);
-            return approvalFor(
-              approvalMode.current,
-              approvalDescription(observation, tool, input),
-              observation,
-              tool,
-              input
-            );
+            return approvalQuestionFor(approvalMode.current, observation, tool, input);
           },
           requestApproval: async (description) => {
             const approved = await requestApproval(description);
             setApproval(null);
             return approved;
           },
-          persistWorkingMemory: (memory) =>
-            saveBrowserWorkingMemory(memory),
-          recallMemory: async (
-            browserTask,
-            observation
-          ) =>
-            (
-              await searchTaskMemoryHybrid(
-                `${browserTask} ${safeHostname(observation.url)}`,
-                3
-              )
-            ).map((hit) => hit.episode),
-          recallProcedures: (
-            browserTask,
-            observation
-          ) =>
-            searchProceduralMemory(
-              `${browserTask} ${safeHostname(observation.url)}`,
-              3
-            ),
-          discoverMcpCatalog: (
-            browserTask,
-            observation
-          ) =>
-            buildMcpCatalog(
-              `${browserTask} ${safeHostname(observation.url)}`,
-              (input) =>
-                extensionMessage({
-                  type: "BROWSER_TOOL",
-                  tool: "mcp",
-                  input
-                }),
-              getMcpServerTrustMode
-            ),
-          requestUserAction: async (
-            reason,
-            observation,
-            handoffSignal
-          ) => {
+          requestUserAction: async (reason, observation, handoffSignal) => {
             try {
               return await waitForUserAction({
                 tab_id: observation.tab_id,
@@ -1232,50 +937,10 @@ export function App() {
             } finally {
               setHandoff(null);
             }
-          },
-          isCancelled: () => cancelled.current,
-          waitWhilePaused: async () => {
-            while (pausedRef.current && !cancelled.current) {
-              await new Promise((resolve) =>
-                window.setTimeout(resolve, 150)
-              );
-            }
-          },
-          withActivity: async (label, operation) => {
-            const id = addActivity(label);
-            try {
-              const value = await operation();
-              finishActivity(id);
-              return value;
-            } catch (error) {
-              finishActivity(
-                id,
-                cancelled.current ? "done" : "error"
-              );
-              throw error;
-            }
-          },
-          onFallback: () => {
-            addActivity(
-              "Primary unavailable — used fallback model",
-              "done"
-            );
           }
-        },
-        controller.signal
-      );
-
+        }
+      });
       requestAbort.current = null;
-      await saveTaskEpisodeMemory(
-        result.session_evidence
-      )
-        .then(async (episode) => {
-          await indexTaskEpisodeMemory(episode).catch(
-            () => null
-          );
-          await clearBrowserWorkingMemory(taskSessionId);
-        })
-        .catch(() => undefined);
       const evidence = result.session_evidence;
       if (skillRun) {
         if (result.status === "completed") {
@@ -1394,7 +1059,11 @@ export function App() {
   if (view === "history") {
     return (
       <HistoryView
-        onBack={() => setView("chat")}
+        initialTab={historyTab}
+        onBack={() => {
+          setHistoryTab("past");
+          setView("chat");
+        }}
         onRunAgain={(task) => {
           setPrompt(task);
           setView("chat");

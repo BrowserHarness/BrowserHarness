@@ -13,8 +13,8 @@ test("MCP tool registry exposes the full Local Bridge action surface", () => {
   const actions = BROWSERHARNESS_MCP_TOOLS.map(
     (tool) => tool.action
   );
-  assert.equal(actions.length, 35);
-  assert.equal(new Set(actions).size, 35);
+  assert.equal(actions.length, 36);
+  assert.equal(new Set(actions).size, 36);
   assert.ok(actions.includes("observe_page"));
   assert.ok(actions.includes("memory"));
   assert.ok(actions.includes("site_skill"));

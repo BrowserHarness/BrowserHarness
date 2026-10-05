@@ -29,6 +29,7 @@ const requiredTools = [
   "upload",
   "save_pdf",
   "extract_table",
+  "skills",
   "cdp"
 ]
 

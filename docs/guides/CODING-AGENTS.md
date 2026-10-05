@@ -33,10 +33,15 @@ tools.
 Sending, buying, deleting and submitting still need your approval in the
 BrowserHarness side panel.
 
+Your saved Skills work here too: ask "use my find-red-shoes Skill" and the
+agent reads its steps with `browserharness_skills`.
+
 ## Commands
 - `browserharness-bridge status`: is the Bridge running and is Chrome connected
 - `browserharness-bridge agents`: which agents were found
 - `browserharness-bridge pair`: pair Chrome again
+- `browserharness-bridge skills`: list your saved Skills
+- `browserharness-bridge skill <name> [details]`: print one Skill's steps, ready for any agent or script
 - `browserharness-bridge uninstall`: remove everything the installer added (`--purge` also deletes the token)
 
 If `browserharness-bridge` is not found, use
