@@ -22,6 +22,7 @@ const TOOL_SPECS = [
     start: optional(z.number().int().min(0), "Continue from next_start of the previous read"),
     max_chars: optional(z.number().int().positive(), "Character limit for this read")
   }, true],
+  ["extract_table", "Read every data table on the page (also inside frames) as headers and rows. Use it for lists, prices and comparisons instead of copying page text.", {}, true],
   ["ax_snapshot", "Fresh accessibility-tree snapshot with @eN refs; works better on dynamic sites. Use its refs for trusted_* tools.", {
     max_elements: optional(z.number().int().positive(), "Maximum elements to return")
   }, true],
@@ -327,6 +328,17 @@ export function renderPage(observation) {
   ].join("\n");
 }
 
+function imageFrom(data) {
+  if (!data || typeof data !== "object" || typeof data.data_url !== "string") return null;
+  const match = /^data:(image\/[a-z+]+);base64,(.+)$/s.exec(data.data_url);
+  if (!match) return null;
+  const { data_url: _dataUrl, ...details } = data;
+  return {
+    details,
+    content: { type: "image", mimeType: match[1], data: match[2] }
+  };
+}
+
 export function bridgeResultToMcp(result) {
   const safe =
     result && typeof result === "object"
@@ -338,11 +350,15 @@ export function bridgeResultToMcp(result) {
             message: "BrowserHarness Bridge returned an invalid result"
           }
         };
-  const { page, ...outcome } = safe;
+  const { page, ...rest } = safe;
+  // Screenshots go to the agent as an image it can look at, not as text.
+  const image = imageFrom(rest.data);
+  const outcome = image ? { ...rest, data: image.details } : rest;
   const content =
     outcome.ok === true && isObservation(outcome.data)
       ? [{ type: "text", text: renderPage(outcome.data) }]
       : [{ type: "text", text: clip(JSON.stringify(outcome, null, 2), MAX_RESULT_TEXT) }];
+  if (image) content.push(image.content);
   if (isObservation(page)) {
     content.push({ type: "text", text: `Page after this action:\n${renderPage(page)}` });
   }

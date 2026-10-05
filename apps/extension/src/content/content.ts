@@ -1,5 +1,6 @@
 import type { RecordedWorkflowStep, WorkflowLocator } from "../runtime/workflows";
 import { adapterForUrl } from "./adapters/registry";
+import { extractTables } from "./tables";
 import {
   collectRoots,
   highestRefNumber,
@@ -36,7 +37,8 @@ type ContentRequest =
     }
   | { type: "WATCH_ARM" }
   | { type: "WATCH_DISARM" }
-  | { type: "WATCH_REPLAY_STEP"; step: RecordedWorkflowStep };
+  | { type: "WATCH_REPLAY_STEP"; step: RecordedWorkflowStep }
+  | { type: "EXTRACT_TABLES" };
 
 type ContentRuntimeGlobal = typeof globalThis & {
   __browserharnessContentRuntime?: {
@@ -1052,6 +1054,11 @@ const contentMessageListener = (
           title: document.title
         }
       });
+      return;
+    }
+    if (request.type === "EXTRACT_TABLES") {
+      const tables = extractTables();
+      sendResponse({ ok: true, data: { url: location.href, title: document.title, tables } });
       return;
     }
     if (request.type === "WATCH_REPLAY_STEP") {

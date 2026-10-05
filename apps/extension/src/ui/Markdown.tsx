@@ -65,6 +65,37 @@ function block(node: BlockNode, index: number): ReactNode {
           {inline(node.inline)}
         </Typography>
       );
+    case "table":
+      return (
+        <Box key={index} sx={{ my: 0.75, overflowX: "auto", maxWidth: "100%" }}>
+          <Box
+            component="table"
+            sx={{
+              borderCollapse: "collapse",
+              fontSize: "0.8rem",
+              "& th, & td": { border: 1, borderColor: "divider", px: 1, py: 0.5, textAlign: "left", verticalAlign: "top" },
+              "& th": { bgcolor: "action.hover", fontWeight: 600 }
+            }}
+          >
+            <thead>
+              <tr>
+                {node.headers.map((cell, i) => (
+                  <th key={i}>{inline(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {node.rows.map((row, r) => (
+                <tr key={r}>
+                  {row.map((cell, c) => (
+                    <td key={c}>{inline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </Box>
+        </Box>
+      );
     default:
       return (
         <Typography key={index} variant="body2" sx={{ my: 0.5 }}>

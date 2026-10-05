@@ -13,8 +13,8 @@ test("MCP tool registry exposes the full Local Bridge action surface", () => {
   const actions = BROWSERHARNESS_MCP_TOOLS.map(
     (tool) => tool.action
   );
-  assert.equal(actions.length, 34);
-  assert.equal(new Set(actions).size, 34);
+  assert.equal(actions.length, 35);
+  assert.equal(new Set(actions).size, 35);
   assert.ok(actions.includes("observe_page"));
   assert.ok(actions.includes("memory"));
   assert.ok(actions.includes("site_skill"));
@@ -258,4 +258,13 @@ test("MCP shows pages as compact text, and the page after an action", () => {
   const clicked = bridgeResultToMcp({ ok: true, data: { clicked: true }, page });
   assert.deepEqual(JSON.parse(clicked.content[0].text), { ok: true, data: { clicked: true } });
   assert.match(clicked.content[1].text, /^Page after this action:\ntab_id: 3/);
+});
+
+test("MCP sends screenshots as images", () => {
+  const mapped = bridgeResultToMcp({
+    ok: true,
+    data: { mode: "viewport", data_url: "data:image/png;base64,iVBORw0KGgo=" }
+  });
+  assert.deepEqual(JSON.parse(mapped.content[0].text), { ok: true, data: { mode: "viewport" } });
+  assert.deepEqual(mapped.content[1], { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" });
 });

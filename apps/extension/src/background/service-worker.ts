@@ -2667,6 +2667,10 @@ async function runTool(
     }
   }
 
+  if (tool === "extract_table") {
+    return sendToTab(tabId, { type: "EXTRACT_TABLES" });
+  }
+
   if (tool === "observe_page") {
     return sendToTab(tabId, {
       type: "OBSERVE_PAGE",
@@ -2733,6 +2737,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "network",
   "upload",
   "save_pdf",
+  "extract_table",
   "cdp",
   "navigate",
   "back",

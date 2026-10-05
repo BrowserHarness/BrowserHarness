@@ -16,6 +16,8 @@ const BROWSER_CONTEXT_PATTERNS: RegExp[] = [
   /\b(go|navigate|head)\s+to\b/i,
   /\bvisit\b/i,
   /\bsearch\s+(on|the web|online)\b/i,
+  /\b(extract|scrape|export)\b.+\b(table|tables|list|rows|data|prices)\b/i,
+  /\b(to|as|into)\s+(a\s+)?(csv|spreadsheet)\b/i,
   new RegExp(`\\b(on|in|at|from|open|launch|use)\\s+(${KNOWN_SITES})\\b`, "i"),
   /\b[a-z0-9-]+\.(com|org|net|io|ai|dev|app|co|in|edu|gov|uk)\b/i
 ];

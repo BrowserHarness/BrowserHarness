@@ -39,6 +39,9 @@ BrowserHarness extension. Pages, cookies and logins stay on their computer.
 
 ## When the simple tools are not enough
 - Long pages: \`browserharness_read_page\` (continue with \`start: next_start\`).
+- Tables and grids: \`browserharness_extract_table\` returns headers and rows
+  (frames included) instead of copying them out of page text.
+- Seeing the page: \`browserharness_screenshot\` comes back as an image.
 - Dynamic apps (Gmail, Docs, React sites): \`browserharness_ax_snapshot\` or
   \`browserharness_find\`, then \`browserharness_trusted_click\` /
   \`browserharness_trusted_type\` with those refs.
