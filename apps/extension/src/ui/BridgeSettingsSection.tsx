@@ -220,11 +220,11 @@ export function BridgeSettingsSection() {
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack spacing={1.5}>
         <Typography variant="subtitle1">
-          Local Agent Bridge
+          Local Agent Bridge: address and token
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Let local tools such as Hermes, Codex, Claude Code or another
-          agent control BrowserHarness through the bridge. It is loopback-only by default; a remote Bridge on your own server is also possible over wss:// with a long pairing token.
+          Manual Bridge settings. Most people only need Pair under Coding
+          agents above. It is loopback-only by default; a remote Bridge on your own server is also possible over wss:// with a long pairing token.
           BrowserHarness task sessions, semantic refs and approval policy still apply.
         </Typography>
 

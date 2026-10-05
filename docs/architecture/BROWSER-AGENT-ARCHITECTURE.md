@@ -82,6 +82,7 @@ Each step ships on its own, with real-Chromium checks.
    - **Agent registration:** the installer detects Claude Code, Codex, Cursor and Hermes. It registers the MCP server in each, and writes a BrowserHarness skill file explaining how to drive the browser (observe → act → verify, sessions, approvals).
    - **Typed MCP tools:** per-tool input schemas (`click {element_id}`, `type {element_id,text}` …) instead of a generic `args` object.
    - **Acceptance:** on a clean machine, one command, then Claude Code completes a task in the user's Chrome.
+   - **Status (built):** `install` / `uninstall` / `pair` / `agents` commands, code pairing, typed tools, Settings → Coding agents. Real-Chromium check `npm run smoke:bridge` (18 checks) installs into a temporary home with the four agents, pairs by code, and an MCP client completes a task. The real `claude mcp list` reports the server connected. Not yet run on a real Mac or Windows machine, or with a real agent model driving the task.
 2. **AX-first observation.**
    - **Main view:** `observe_page` uses the CDP accessibility tree (interactive nodes, viewport first, shadow DOM and same-origin iframes included), with one `@eN` ref namespace and a snapshot generation id.
    - **Fallback:** the DOM view only when the debugger cannot attach.
