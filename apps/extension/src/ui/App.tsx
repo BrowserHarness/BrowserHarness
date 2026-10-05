@@ -41,8 +41,10 @@ import {
 } from "../runtime/site-commands";
 import { SITE_SKILL_LIBRARY_KEY } from "../runtime/site-skill-store";
 import { siteCommandAnswer } from "./site-command-answer";
+import { applyLearningPlan, matchSkill, planLearning, skillHint } from "../runtime/skill-learning";
 import { MemoryView } from "./MemoryView";
 import {
+  deleteSkill,
   loadSkills,
   recordSkillRun,
   refreshSkillSteps,
@@ -160,6 +162,8 @@ type Message = {
   learned?: { evidence: BrowserTaskSessionEvidence; task: string; skillId?: string };
   /** Set once the person saved or updated a Skill from this answer. */
   skillNote?: string;
+  /** A Skill learned on its own from this answer, which the person can undo. */
+  autoSkill?: { id: string; slug: string };
 };
 
 const RESERVED_COMMANDS = BUILT_IN_COMMANDS.map((command) => command.name);
@@ -268,10 +272,12 @@ export function App() {
     text: string,
     learned?: Message["learned"]
   ) => {
+    const id = crypto.randomUUID();
     setMessages((items) => [
       ...items,
-      { id: crypto.randomUUID(), role: "assistant", text, learned }
+      { id, role: "assistant", text, learned }
     ]);
+    return id;
   };
 
   useEffect(() => {
@@ -326,6 +332,38 @@ export function App() {
     }
     await saveSkill(refreshSkillSteps(skill, learned.evidence), RESERVED_COMMANDS);
     noteOnMessage(message.id, `Updated /${skill.slug} with the steps from this run.`);
+  };
+
+  /** What a finished task taught: a new Skill, a shorter one, a run count or a lesson. */
+  const applyLearning = async (plan: ReturnType<typeof planLearning>, messageId: string) => {
+    const saved = await applyLearningPlan(plan, RESERVED_COMMANDS);
+    if (plan.kind === "learn" && saved) {
+      setMessages((items) =>
+        items.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                autoSkill: { id: saved.id, slug: saved.slug },
+                skillNote: `Learned this as /${saved.slug}. I'll follow it next time you ask something similar, or run it with /${saved.slug}.`
+              }
+            : item
+        )
+      );
+    } else if (plan.kind === "improve" && saved) {
+      noteOnMessage(messageId, `Found a shorter way and updated /${saved.slug}.`);
+    }
+  };
+
+  const undoAutoSkill = async (message: Message) => {
+    if (!message.autoSkill) return;
+    await deleteSkill(message.autoSkill.id);
+    setMessages((items) =>
+      items.map((item) =>
+        item.id === message.id
+          ? { ...item, autoSkill: undefined, skillNote: `Forgot /${message.autoSkill?.slug}.` }
+          : item
+      )
+    );
   };
 
   /** A website command runs straight away: no model, just the learned recipe. */
@@ -867,11 +905,8 @@ export function App() {
     const attachmentNote = describeAttachmentsForPrompt(attachments);
 
     // Slash commands: built-ins answer right away; a Skill runs as a task.
-    const command = parseSlashCommand(
-      typed,
-      await loadSkills().catch(() => []),
-      await loadSiteCommands().catch(() => [])
-    );
+    const savedSkills = await loadSkills().catch(() => []);
+    const command = parseSlashCommand(typed, savedSkills, await loadSiteCommands().catch(() => []));
     if (command.kind === "builtin" || command.kind === "unknown" || command.kind === "site") {
       setPrompt("");
       await runCommand(command, typed);
@@ -900,8 +935,10 @@ export function App() {
 
     // About me: pick up plain facts from the request, then share what is known.
     let aboutMe = "";
+    let autoSkills = true;
     try {
       const preferences = await loadPreferences();
+      autoSkills = preferences.autoSkills;
       if (preferences.learnAboutMe && !skillRun) {
         const learned = await addFacts(factsInMessage(typed), "learned");
         if (learned.length) {
@@ -916,7 +953,10 @@ export function App() {
       aboutMe = "";
     }
 
-    const intent = skillRun ? "browser" : classifyTaskIntent(task);
+    // A saved Skill that looks like this request guides the agent.
+    const hinted = !skillRun && autoSkills ? matchSkill(typed, savedSkills)?.skill ?? null : null;
+    const usedSkill = skillRun ?? hinted;
+    const intent = usedSkill ? "browser" : classifyTaskIntent(task);
 
     try {
       if (intent === "chat") {
@@ -979,7 +1019,10 @@ export function App() {
       const taskSessionTitle =
         typed.length > 48 ? `${typed.slice(0, 45)}…` : typed;
 
-      const result = await runAgentTask(task + attachmentNote + aboutMe, {
+      if (hinted) addActivity(`Following your Skill /${hinted.slug}`, "done");
+
+      const result = await runAgentTask(task + attachmentNote, {
+        context: aboutMe + (hinted ? skillHint(hinted) : ""),
         agentPrimary,
         agentFallback,
         session: { id: taskSessionId, title: taskSessionTitle },
@@ -1015,27 +1058,24 @@ export function App() {
       });
       requestAbort.current = null;
       const evidence = result.session_evidence;
-      if (skillRun) {
-        if (result.status === "completed") {
-          await recordSkillRun(skillRun.id, "worked").catch(() => null);
-          addAssistantMessage(result.message, {
-            evidence,
+      const messageId = addAssistantMessage(
+        result.message,
+        result.status === "completed" && (usedSkill || worthSaving(evidence))
+          ? { evidence, task: typed, ...(usedSkill ? { skillId: usedSkill.id } : {}) }
+          : undefined
+      );
+      if (!cancelled.current) {
+        await applyLearning(
+          planLearning({
             task: typed,
-            skillId: skillRun.id
-          });
-        } else {
-          if (!cancelled.current && result.status === "stopped") {
-            await recordSkillRun(skillRun.id, "failed", result.message).catch(() => null);
-          }
-          addAssistantMessage(result.message);
-        }
-      } else {
-        addAssistantMessage(
-          result.message,
-          result.status === "completed" && worthSaving(evidence)
-            ? { evidence, task: typed }
-            : undefined
-        );
+            status: result.status,
+            message: result.message,
+            evidence,
+            used: usedSkill,
+            autoSkills
+          }),
+          messageId
+        ).catch(() => undefined);
       }
       if (result.status === "completed") {
         await saveHistory(typed, result.message);
@@ -1352,6 +1392,11 @@ export function App() {
                       {message.skillNote && (
                         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
                           {message.skillNote}
+                          {message.autoSkill && (
+                            <Button size="small" onClick={() => void undoAutoSkill(message)} sx={{ ml: 0.5, minWidth: 0 }}>
+                              Undo
+                            </Button>
+                          )}
                         </Typography>
                       )}
                     </>

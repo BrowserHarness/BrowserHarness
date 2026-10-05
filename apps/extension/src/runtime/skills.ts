@@ -14,7 +14,8 @@ export interface UserSkill {
   /** Markdown steps the agent follows. */
   instructions: string;
   start_url?: string;
-  source: "chat" | "recording" | "import";
+  /** "auto": learned without being asked; becomes "chat" once the person keeps it. */
+  source: "chat" | "recording" | "import" | "auto";
   created_at: string;
   updated_at: string;
   runs: number;

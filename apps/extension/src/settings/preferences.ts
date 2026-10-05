@@ -14,6 +14,8 @@ export interface UserPreferences {
   approvalMode: ApprovalMode;
   /** Pick up facts like "I live in Pune" from requests into About me. */
   learnAboutMe: boolean;
+  /** Keep finished multi-step tasks as Skills, and use matching Skills as hints. */
+  autoSkills: boolean;
 }
 
 const KEY = "browserharness.preferences";
@@ -22,7 +24,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   appearance: "system",
   retainTaskHistory: true,
   approvalMode: "risky",
-  learnAboutMe: true
+  learnAboutMe: true,
+  autoSkills: true
 };
 
 export async function loadPreferences(): Promise<UserPreferences> {
