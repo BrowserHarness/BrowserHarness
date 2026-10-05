@@ -24,6 +24,11 @@
       "approval": "never"
     },
     {
+      "id": "site_commands",
+      "mutation": true,
+      "approval": "policy"
+    },
+    {
       "id": "ax_snapshot",
       "mutation": false,
       "approval": "never"

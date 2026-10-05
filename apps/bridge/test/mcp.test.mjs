@@ -6,15 +6,19 @@ import {
   BROWSERHARNESS_MCP_TOOLS,
   bridgeHttpBase,
   bridgeResultToMcp,
-  createBridgeHttpClient
+  createBridgeHttpClient,
+  siteToolDescription,
+  siteToolInput,
+  siteToolName
 } from "../src/mcp.mjs";
 
 test("MCP tool registry exposes the full Local Bridge action surface", () => {
   const actions = BROWSERHARNESS_MCP_TOOLS.map(
     (tool) => tool.action
   );
-  assert.equal(actions.length, 36);
-  assert.equal(new Set(actions).size, 36);
+  assert.equal(actions.length, 37);
+  assert.equal(new Set(actions).size, 37);
+  assert.ok(actions.includes("site_commands"));
   assert.ok(actions.includes("observe_page"));
   assert.ok(actions.includes("memory"));
   assert.ok(actions.includes("site_skill"));
@@ -267,4 +271,30 @@ test("MCP sends screenshots as images", () => {
   });
   assert.deepEqual(JSON.parse(mapped.content[0].text), { ok: true, data: { mode: "viewport" } });
   assert.deepEqual(mapped.content[1], { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" });
+});
+
+test("website commands become typed tools", () => {
+  const command = {
+    name: "shop-products-search",
+    title: "Shop: GET /api/products/search",
+    site: "shop.example.com",
+    kind: "read",
+    status: "testing",
+    parameters: [
+      { name: "q", label: "q", type: "string", required: true },
+      { name: "page", label: "page", type: "string", required: false, default: "1" },
+      { name: "tags", label: "Tags", type: "string[]", required: false },
+      { name: "bad name", label: "skipped", type: "string", required: false }
+    ]
+  };
+  assert.equal(siteToolName(command.name), "browserharness_site_shop_products_search");
+  const shape = siteToolInput(command);
+  assert.deepEqual(Object.keys(shape), ["q", "page", "tags"]);
+  assert.equal(shape.q.safeParse("kettle").success, true);
+  assert.equal(shape.q.safeParse(undefined).success, false);
+  assert.equal(shape.page.safeParse(undefined).success, true);
+  assert.match(shape.page.description, /Default 1/);
+  assert.equal(shape.tags.safeParse(["a", "b"]).success, true);
+  assert.match(siteToolDescription(command), /read-only.*still testing/s);
+  assert.match(siteToolDescription({ ...command, kind: "form", status: "proven" }), /approval/);
 });

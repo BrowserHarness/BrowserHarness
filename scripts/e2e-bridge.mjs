@@ -179,7 +179,7 @@ try {
   await mcp.connect(new StdioClientTransport({ command: process.execPath, args: [installed, "mcp"], env, stderr: "ignore" }));
   const tools = (await mcp.listTools()).tools;
   const click = tools.find((tool) => tool.name === "browserharness_click");
-  check("MCP lists typed tools", tools.length === 37 && click?.inputSchema?.required?.includes("element_id"), `${tools.length} tools`);
+  check("MCP lists typed tools", tools.length === 38 && click?.inputSchema?.required?.includes("element_id"), `${tools.length} tools`);
   let browserCalls = 0;
   // Returns the tool's outcome (JSON) and the page text it carried, if any.
   const call = async (name, args = {}) => {

@@ -25,6 +25,7 @@
     "smoke:deep": "node scripts/e2e-deep.mjs",
     "smoke:features": "node scripts/e2e-features.mjs",
     "smoke:learning": "node scripts/e2e-learning.mjs",
-    "smoke:automation": "node scripts/e2e-automation.mjs"
+    "smoke:automation": "node scripts/e2e-automation.mjs",
+    "smoke:sites": "node scripts/e2e-sites.mjs"
   }
 }

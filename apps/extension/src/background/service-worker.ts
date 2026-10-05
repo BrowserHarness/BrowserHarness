@@ -13,6 +13,13 @@ import type {
 import { getAttachmentsByIds } from "../runtime/attachments";
 import { loadSkills, skillTask } from "../runtime/skills";
 import {
+  describeSiteCommand,
+  findSiteCommand,
+  loadSiteCommands,
+  parseCommandArgs,
+  recipeParameters
+} from "../runtime/site-commands";
+import {
   ALARM_PREFIX,
   SCHEDULES_STORAGE_KEY,
   loadSchedules,
@@ -258,6 +265,120 @@ async function skillsTool(input: Record<string, unknown>): Promise<ToolResult> {
         skill,
         typeof input.details === "string" ? input.details : ""
       )
+    }
+  };
+}
+
+function sameOrigin(url: string | undefined, origin: string): boolean {
+  try {
+    return Boolean(url) && new URL(url as string).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+function samePage(url: string | undefined, target: string): boolean {
+  try {
+    const a = new URL(url as string);
+    const b = new URL(target);
+    a.hash = "";
+    b.hash = "";
+    return a.href === b.href;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Website → command. Without a name it lists the commands learned from Site
+ * Skills; with one it opens the site in a task tab (unless the task is
+ * already there) and runs that recipe through site_skill, so the usual
+ * checks, approvals and run records apply.
+ */
+async function siteCommandsTool(
+  input: Record<string, unknown>,
+  sessionId: string | undefined,
+  sessionTitle: string | undefined,
+  options: ToolExecutionOptions
+): Promise<ToolResult> {
+  const commands = await loadSiteCommands();
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name) {
+    return {
+      ok: true,
+      data: {
+        commands: commands.map(describeSiteCommand),
+        hint: commands.length
+          ? "Run one with site_commands name and parameters. read commands only fetch the site's own data; form commands fill and send a form and may need the person's approval in Chrome."
+          : "No site commands yet. They come from Site Skills: ask BrowserHarness to learn a website (site_skill create), then each of its forms and data requests becomes a command."
+      }
+    };
+  }
+  const command = findSiteCommand(commands, name);
+  if (!command) {
+    return {
+      ok: false,
+      error: {
+        code: "SITE_COMMAND_NOT_FOUND",
+        message: `No site command called ${name}. Call site_commands without a name to list them.`
+      }
+    };
+  }
+  const given =
+    input.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters)
+      ? (input.parameters as Record<string, unknown>)
+      : typeof input.args === "string"
+        ? parseCommandArgs(command, input.args)
+        : {};
+  const mapped = recipeParameters(command, given);
+  if (!mapped.ok) {
+    return { ok: false, error: { code: "SITE_COMMAND_PARAMETERS", message: mapped.error } };
+  }
+
+  const taskId = sessionId || `site-command-${command.name}`;
+  const taskTitle = sessionTitle || command.title;
+  const session = await requestSession(taskId, taskTitle);
+  const current = session?.current_tab_id
+    ? await chrome.tabs.get(session.current_tab_id).catch(() => null)
+    : null;
+  const ready =
+    command.kind === "read"
+      ? sameOrigin(current?.url, command.origin)
+      : samePage(current?.url, command.entry_url);
+  if (!ready) {
+    // Never repurpose the person's own tab: open the site in a task tab.
+    const opened = await runTool("open_tab", { url: command.entry_url }, taskId, taskTitle);
+    if (!opened.ok) return opened;
+  }
+
+  const result = await runTool(
+    "site_skill",
+    {
+      action: "run",
+      id: command.skill_id,
+      revision_id: command.revision_id,
+      recipe_id: command.recipe_id,
+      parameters: mapped.parameters
+    },
+    taskId,
+    taskTitle,
+    options
+  );
+  if (!result.ok) return result;
+  const run = (result.data as { run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> } })?.run;
+  return {
+    ok: true,
+    data: {
+      command: command.name,
+      site: command.site,
+      kind: command.kind,
+      ...(run?.output
+        ? {
+            http_status: run.output.http_status,
+            truncated: run.output.truncated,
+            output: run.output.data
+          }
+        : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 })
     }
   };
 }
@@ -560,6 +681,10 @@ async function runTool(
 
   if (tool === "skills") {
     return skillsTool(input);
+  }
+
+  if (tool === "site_commands") {
+    return siteCommandsTool(input, sessionId, sessionTitle, options);
   }
 
   if (
@@ -2856,6 +2981,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "save_pdf",
   "extract_table",
   "skills",
+  "site_commands",
   "cdp",
   "navigate",
   "back",

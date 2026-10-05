@@ -97,6 +97,7 @@ Each step ships on its own, with real-Chromium checks.
    - **Model guidance:** the model menu shows a "browser-ready" badge from the agent check, and recommends models for page control.
 5. **Website → command for agents.**
    - **What changes:** proven Site Skills and API recipes show up as named tools/commands (for example `browserharness site run amazon-search --q "kettle"`), the equivalent of Kimi's "turn a website into a CLI".
+   - **Status (built):** every recipe of a Site Skill (forms and JSON GET requests) is a named command with friendly typed parameters (`runtime/site-commands.ts`). It runs from the side panel (`/name kettle`, no model call), the agent (`site_commands` tool), MCP (one typed tool per command, `browserharness_site_<name>`, refreshed with `tools/list_changed`) and the CLI (`browserharness-bridge sites`, `site <name> --q kettle`). Commands open the site in their own task tab and run through `site_skill run`, so fresh verification, approvals and run records still apply. Renames live in the Skills screen. Check: `npm run smoke:sites` (21). Not yet tried on real websites.
 6. **Then the PRD release matrix** (W1–W5 × 25 scenarios × 3 runs) on real sites with real models.
 
 ## 5. What we keep that Kimi does not have

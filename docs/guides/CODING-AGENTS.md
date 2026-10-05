@@ -36,12 +36,28 @@ BrowserHarness side panel.
 Your saved Skills work here too: ask "use my find-red-shoes Skill" and the
 agent reads its steps with `browserharness_skills`.
 
+## Websites as commands
+When BrowserHarness learns a website (ask it in the side panel to "learn this
+site as a Skill"), each search form and each data request behind the page
+becomes a named command, for example `shop-products-search`. Your agent sees
+each one as its own tool (`browserharness_site_shop_products_search` with
+typed parameters), so one call returns the site's own data instead of many
+clicks. You can run the same commands yourself:
+
+- In the side panel: `/shop-products-search kettle` (or `q=kettle page=2`).
+- On the command line: `browserharness-bridge site shop-products-search --q kettle`.
+
+Rename a command on the Skills screen; agents see the new name right away.
+Commands that fill and send a form still follow your approval rules.
+
 ## Commands
 - `browserharness-bridge status`: is the Bridge running and is Chrome connected
 - `browserharness-bridge agents`: which agents were found
 - `browserharness-bridge pair`: pair Chrome again
 - `browserharness-bridge skills`: list your saved Skills
 - `browserharness-bridge skill <name> [details]`: print one Skill's steps, ready for any agent or script
+- `browserharness-bridge sites`: list the commands learned from websites
+- `browserharness-bridge site <name> [value | --param value | param=value]`: run one and print the result
 - `browserharness-bridge telegram setup --token <token>`: use BrowserHarness from your phone (see [TELEGRAM.md](TELEGRAM.md))
 - `browserharness-bridge uninstall`: remove everything the installer added (`--purge` also deletes the token)
 

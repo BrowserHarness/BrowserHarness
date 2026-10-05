@@ -354,7 +354,7 @@ function option(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
-async function bridgeRequest(config, pathname, body) {
+async function bridgeRequest(config, pathname, body, timeoutMs = 5000) {
   const response = await fetch(`${httpBase(config)}${pathname}`, {
     method: "POST",
     headers: {
@@ -362,7 +362,7 @@ async function bridgeRequest(config, pathname, body) {
       authorization: `Bearer ${config.token}`
     },
     body: JSON.stringify(body || {}),
-    signal: AbortSignal.timeout(5000)
+    signal: AbortSignal.timeout(timeoutMs)
   });
   return response.json();
 }
@@ -388,6 +388,48 @@ async function skillsCommand(config, name, details) {
   } else {
     for (const skill of result.data.skills) {
       process.stdout.write(`${skill.name.padEnd(28)} ${skill.title}\n`);
+    }
+  }
+}
+
+/**
+ * `sites` lists the commands BrowserHarness learned from websites;
+ * `site <name> [kettle | --q kettle | q=kettle]` runs one in Chrome.
+ */
+async function sitesCommand(config, name, args = []) {
+  const session = name ? `cli-site-${process.pid}` : "cli";
+  const result = await bridgeRequest(
+    config,
+    "/command",
+    {
+      session,
+      title: name ? `Site command ${name}` : "Site commands",
+      action: "site_commands",
+      args: name ? { name, args: args.map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg)).join(" ") } : {}
+    },
+    60_000
+  ).catch(() => ({
+    ok: false,
+    error: { message: "The bridge is not running. Start it with: browserharness-bridge start" }
+  }));
+  if (!result?.ok) throw new Error(result?.error?.message || "Couldn't reach Chrome");
+  if (name && result.data.kind === "read") {
+    // The answer is printed here; close the tab it opened.
+    await bridgeRequest(config, "/command", { session, action: "close_session", args: {} }).catch(() => undefined);
+  }
+  if (flag("json") || (name && result.data.kind === "read" && typeof result.data.output === "object")) {
+    process.stdout.write(`${JSON.stringify(name ? result.data.output ?? result.data : result.data, null, 2)}\n`);
+  } else if (name) {
+    process.stdout.write(
+      result.data.kind === "read"
+        ? `${result.data.output ?? ""}\n`
+        : `${result.data.submitted ? "Filled and sent the form" : "Filled the form without sending it"} on ${result.data.site}.\n`
+    );
+  } else if (!result.data.commands.length) {
+    process.stdout.write(`${result.data.hint}\n`);
+  } else {
+    for (const command of result.data.commands) {
+      process.stdout.write(`${command.usage.padEnd(48)} ${command.kind === "read" ? "gets data " : "fills form"}  ${command.site}\n`);
     }
   }
 }
@@ -638,6 +680,12 @@ try {
     const name = process.argv[3];
     if (!name) throw new Error("Usage: browserharness-bridge skill <name> [details]");
     await skillsCommand(config, name, process.argv.slice(4).join(" "));
+  } else if (command === "sites") {
+    await sitesCommand(config);
+  } else if (command === "site") {
+    const name = process.argv[3];
+    if (!name) throw new Error("Usage: browserharness-bridge site <name> [value | --param value | param=value]");
+    await sitesCommand(config, name, process.argv.slice(4).filter((arg) => arg !== "--json"));
   } else if (command === "pair") {
     if (flag("show-token")) {
       print({
@@ -654,7 +702,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|telegram|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|telegram|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {
