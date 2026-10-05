@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import {
@@ -16,6 +17,18 @@ import {
   REMOTE_MIN_TOKEN_LENGTH
 } from "./core.mjs";
 import { serveBrowserHarnessMcp } from "./mcp.mjs";
+import {
+  detectAgents,
+  findOnPath,
+  installContext,
+  installLauncher,
+  uninstallLauncher,
+  installService,
+  registerAgents,
+  stableCliPath,
+  uninstallService,
+  unregisterAgents
+} from "./install.mjs";
 import { createLlmAdapterManager } from "./llm-adapters.mjs";
 import {
   createMcpClientManager,
@@ -23,7 +36,10 @@ import {
 } from "./mcp-client.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
-const HOME = path.join(os.homedir(), ".browserharness-bridge");
+// Set by the single-file build (scripts/build-bridge.mjs).
+const BUNDLED = typeof __BROWSERHARNESS_BUNDLED__ !== "undefined";
+const USER_HOME = os.homedir();
+const HOME = path.join(USER_HOME, ".browserharness-bridge");
 const CONFIG_FILE = path.join(HOME, "config.json");
 const PID_FILE = path.join(HOME, "daemon.pid");
 const ADDR_FILE = path.join(HOME, "daemon.addr");
@@ -144,9 +160,10 @@ async function serve(config) {
   process.on("SIGTERM", () => void shutdown());
 }
 
-async function start(config, created) {
+async function start(config, created, cliPath = THIS_FILE, { quiet = false } = {}) {
   const current = await readStatus(config);
   if (current.running) {
+    if (quiet) return;
     print({
       ...current,
       ws: wsBase(config),
@@ -160,7 +177,7 @@ async function start(config, created) {
 
   const child = spawn(
     process.execPath,
-    [THIS_FILE, "serve"],
+    [cliPath, "serve"],
     {
       detached: true,
       stdio: ["ignore", log.fd, log.fd]
@@ -176,6 +193,7 @@ async function start(config, created) {
     );
   }
 
+  if (quiet) return;
   print({
     ...status,
     ws: wsBase(config),
@@ -184,13 +202,13 @@ async function start(config, created) {
       ? {
           pairing_token: config.token,
           note:
-            "Pairing token created. Paste it into BrowserHarness Settings → Local Agent Bridge."
+            "Next: press Pair in BrowserHarness (Settings → Coding agents), then run: browserharness-bridge pair"
         }
       : {})
   });
 }
 
-async function stop(config) {
+async function stop(config, { quiet = false } = {}) {
   const current = await readStatus(config);
   if (!current.running) {
     await Promise.all([
@@ -230,7 +248,7 @@ async function stop(config) {
     rm(PID_FILE, { force: true }),
     rm(ADDR_FILE, { force: true })
   ]);
-  print(status);
+  if (!quiet) print(status);
 }
 
 async function listMcpServers() {
@@ -304,6 +322,187 @@ async function logs() {
   }
 }
 
+
+function flag(name) {
+  return process.argv.includes(`--${name}`);
+}
+
+function option(name) {
+  const index = process.argv.indexOf(`--${name}`);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+async function bridgeRequest(config, pathname, body) {
+  const response = await fetch(`${httpBase(config)}${pathname}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${config.token}`
+    },
+    body: JSON.stringify(body || {}),
+    signal: AbortSignal.timeout(5000)
+  });
+  return response.json();
+}
+
+async function waitForExtension(config, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await readStatus(config, 800);
+    if (status.extension_connected) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+async function askLine(question) {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(question)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+const PAIR_HELP =
+  "In Chrome, open BrowserHarness → Settings → Coding agents and press Pair. It shows a 6-digit code.";
+
+// How to run this program again from a terminal.
+function commandHint(cliPath = THIS_FILE) {
+  return findOnPath("browserharness-bridge")
+    ? "browserharness-bridge"
+    : `node "${cliPath}"`;
+}
+
+/**
+ * Approve the extension's pairing request by its code. With --code it runs
+ * without questions; in a terminal it asks for the code.
+ */
+async function pair(config, { code, interactive, json }) {
+  const status = await readStatus(config);
+  if (!status.running) {
+    throw new Error(`The Bridge is not running. Run: ${commandHint()} install`);
+  }
+  let attempts = interactive ? 3 : 1;
+  let entered = code;
+  if (!entered && interactive) print(PAIR_HELP);
+  while (attempts > 0) {
+    attempts -= 1;
+    if (!entered && interactive) {
+      entered = await askLine("Type the code here (or press Enter to skip): ");
+      if (!entered) {
+        print(`Skipped. Pair later with: ${commandHint()} pair`);
+        return { paired: false };
+      }
+    }
+    if (!entered) {
+      throw new Error(`${PAIR_HELP} Then run: ${commandHint()} pair --code <code>`);
+    }
+    const result = await bridgeRequest(config, "/pair/approve", { code: entered });
+    if (result.ok) {
+      const connected = await waitForExtension(config, 15_000);
+      const outcome = { paired: true, extension_connected: connected };
+      if (json) print(outcome);
+      else
+        print(
+          connected
+            ? "Paired. BrowserHarness in Chrome is connected."
+            : "Approved. BrowserHarness will connect in a few seconds."
+        );
+      return outcome;
+    }
+    print(result.error?.message || "That code did not match.");
+    entered = undefined;
+  }
+  throw new Error(`Pairing was not completed. Run ${commandHint()} pair to try again.`);
+}
+
+function context(cliPath) {
+  return installContext({ home: USER_HOME, cliPath });
+}
+
+async function install(config, created) {
+  const json = flag("json");
+  const say = (line) => {
+    if (!json) print(line);
+  };
+  const cliPath = await stableCliPath({ cliPath: THIS_FILE, home: USER_HOME, bundled: BUNDLED });
+  const ctx = context(cliPath);
+
+  say("Installing BrowserHarness Bridge…");
+  await mkdir(LOG_DIR, { recursive: true });
+  const launcher = await installLauncher(ctx);
+  if ((await readStatus(config)).running) {
+    await stop(config, { quiet: true });
+  }
+
+  let service = { kind: "none", running: false };
+  if (!flag("no-service")) {
+    service = await installService(ctx);
+  }
+  if (!service.running) {
+    await start(config, false, cliPath, { quiet: true });
+  }
+  const status = await waitForState(config, true, 8000);
+  if (!status.running) {
+    throw new Error(`BrowserHarness Bridge did not start. Check ${LOG_FILE}`);
+  }
+  say(
+    service.kind !== "none" && (service.running || service.kind === "startup-folder")
+      ? "✓ Bridge is running and starts when you log in."
+      : `✓ Bridge is running.${service.note ? ` ${service.note}` : ""}`
+  );
+
+  let agents = [];
+  if (!flag("no-agents")) {
+    const only = option("agents")?.split(",").map((value) => value.trim()).filter(Boolean);
+    agents = await registerAgents(ctx, { only });
+    for (const agent of agents) {
+      if (agent.status === "connected") say(`✓ ${agent.name}: connected (ask it to use BrowserHarness, or type /browserharness)`);
+      else if (agent.status === "failed") say(`✗ ${agent.name}: ${agent.error}`);
+    }
+    if (!agents.some((agent) => agent.status === "connected")) {
+      say("No coding agents found (Claude Code, Codex, Cursor, Hermes). Install one, then run this again.");
+    }
+  }
+
+  const summary = {
+    installed: true,
+    cli: cliPath,
+    launcher,
+    service: { kind: service.kind, file: service.file, starts_at_login: service.kind !== "none" && (service.running || service.kind === "startup-folder") },
+    agents,
+    extension_connected: Boolean(status.extension_connected)
+  };
+  if (json) print(summary);
+
+  if (status.extension_connected) {
+    say("✓ BrowserHarness in Chrome is already connected. You're ready.");
+  } else if (!flag("no-pair") && process.stdin.isTTY) {
+    await pair(config, { interactive: true });
+  } else if (!json) {
+    say(`Last step: ${PAIR_HELP} Then run: ${launcher ? "browserharness-bridge" : `node "${cliPath}"`} pair`);
+  }
+  return summary;
+}
+
+async function uninstall(config) {
+  const cliPath = BUNDLED
+    ? path.join(HOME, "bin", "browserharness-bridge.mjs")
+    : THIS_FILE;
+  const ctx = context(cliPath);
+  const agents = await unregisterAgents(ctx);
+  await uninstallLauncher(ctx);
+  const service = await uninstallService(ctx);
+  if ((await readStatus(config)).running) {
+    await stop(config, { quiet: true }).catch(() => undefined);
+  }
+  await rm(path.join(HOME, "bin"), { recursive: true, force: true });
+  if (flag("purge")) await rm(HOME, { recursive: true, force: true });
+  print({ uninstalled: true, service: service.file, agents, purged: flag("purge") });
+}
+
 const command = process.argv[2] || "start";
 const { config, created } = await ensureConfig();
 
@@ -327,15 +526,29 @@ try {
     await listMcpServers();
   } else if (command === "remote") {
     await setRemote(config, process.argv.slice(3));
+  } else if (command === "install") {
+    await install(config, created);
+  } else if (command === "uninstall") {
+    await uninstall(config);
+  } else if (command === "agents") {
+    print({ agents: detectAgents(context(THIS_FILE)) });
   } else if (command === "pair") {
-    print({
-      ws: wsBase(config),
-      pairing_token: config.token,
-      config: CONFIG_FILE
-    });
+    if (flag("show-token")) {
+      print({
+        ws: wsBase(config),
+        pairing_token: config.token,
+        config: CONFIG_FILE
+      });
+    } else {
+      await pair(config, {
+        code: option("code"),
+        interactive: process.stdin.isTTY && !option("code"),
+        json: flag("json")
+      });
+    }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [start|status|stop|restart|logs|pair|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [install|uninstall|pair|agents|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {

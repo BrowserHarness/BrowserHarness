@@ -25,6 +25,22 @@ BrowserHarness browser runtime
 
 The daemon creates a local pairing token in `~/.browserharness-bridge/config.json`. The extension stores the token only in Chrome extension-local storage.
 
+## Pairing by code (no token copy)
+1. The person presses **Pair** in BrowserHarness (Settings → Coding agents). The extension calls `POST /pair/request`; the Bridge accepts it only with an `Origin: chrome-extension://<32-letter id>` header and returns a six-digit code, valid for 5 minutes.
+2. The person types that code into the terminal (`browserharness-bridge pair`, or the installer's last step). The CLI calls `POST /pair/approve {code}` with the Bearer token, which only someone who can read the config file has. Extension-origin requests cannot approve. Five wrong codes clear all pending requests.
+3. The extension polls `POST /pair/status {request_id}` and receives the token once, only for the extension id that asked.
+
+Every HTTP and WebSocket request with a web (`http(s)://`) Origin is refused with 403, so web pages, including DNS-rebinding pages, cannot reach the Bridge. Local programs (no Origin) and the extension are allowed.
+
+## Install for coding agents
+`browserharness-bridge install` (or `install.sh` / `install.cmd` next to the single-file build `browserharness-bridge.mjs`):
+- copies the single-file build to `~/.browserharness-bridge/bin/` (a source checkout is used where it is);
+- starts the Bridge at login: systemd user unit (Linux), LaunchAgent `com.browserharness.bridge` (macOS), Startup-folder script (Windows). Without a systemd user session it starts the Bridge now only;
+- registers the `browserharness` MCP server in Claude Code (`claude mcp add --scope user`, else `~/.claude.json`), Codex (`~/.codex/config.toml`), Cursor (`~/.cursor/mcp.json`) and Hermes (`~/.hermes/config.yaml`), and writes a `browserharness` skill (`~/.claude/skills`, `~/.agents/skills`, `~/.hermes/skills`; Cursor reads the first two). Each config file is backed up once as `<file>.before-browserharness`; broken or hand-written entries are left alone;
+- asks for the pairing code when run in a terminal.
+
+`browserharness-bridge uninstall` removes the service, the agent entries, the skill files and the launcher; `--purge` also deletes the config and token. `browserharness-bridge agents` lists which agents were found.
+
 ## Command envelope
 
 ```json
@@ -154,4 +170,4 @@ Extension side:
 - `ws://` stays loopback-only. A non-loopback Bridge must be `wss://host/ws`, and saving it requires a pairing token of at least 32 characters.
 - Chrome host access for the Bridge origin is requested at save time as for the local Bridge.
 
-Approvals, task-session ownership and autonomy ceilings apply identically over a remote Bridge. Anyone holding the pairing token can drive the paired browser, so treat it like a credential: rotate it by replacing `token` in `~/.browserharness-bridge/config.json` with a new random value of 32+ characters, restarting the daemon, and re-pasting it into the extension.
+Approvals, task-session ownership and autonomy ceilings apply identically over a remote Bridge. Anyone holding the pairing token can drive the paired browser, so treat it like a credential: rotate it by replacing `token` in `~/.browserharness-bridge/config.json` with a new random value of 32+ characters, restarting the daemon, and pairing the extension again.

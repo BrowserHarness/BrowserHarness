@@ -4,42 +4,142 @@ import * as z from "zod/v4";
 
 export const BROWSERHARNESS_MCP_VERSION = "0.1.0";
 
-export const BROWSERHARNESS_MCP_TOOLS = [
-  ["observe_page", "Observe the selected BrowserHarness task tab and return fresh semantic page evidence."],
-  ["read_page", "Read bounded page/document content using BrowserHarness extraction limits and continuation."],
-  ["ax_snapshot", "Capture a fresh accessibility-tree snapshot for semantic targeting."],
-  ["evaluate", "Run BrowserHarness's bounded page-context evaluation tool."],
-  ["site_skill", "Create, inspect, run, refine, compare, promote, rollback or delete versioned Site Skills."],
-  ["memory", "Inspect working/episodic/procedural BrowserHarness memory and retrieval evidence."],
-  ["select_option", "Select values in a native select using fresh semantic targeting."],
-  ["hover", "Hover a fresh semantic target with real CDP pointer delivery verification."],
-  ["drag", "Drag between fresh semantic targets using a real held-button CDP pointer path."],
-  ["find", "Search the fresh accessibility tree by text and/or role."],
-  ["navigate", "Navigate the selected task tab to a URL and wait for a usable document."],
-  ["back", "Navigate back in browser history and wait for a usable document."],
-  ["reload", "Reload the selected task tab and wait for a usable document."],
-  ["click", "Click a semantic target through the normal BrowserHarness page action path."],
-  ["trusted_click", "Click using trusted CDP mouse input with occlusion and delivery verification."],
-  ["type", "Enter text through the normal BrowserHarness page action path."],
-  ["trusted_type", "Enter text using trusted CDP text input."],
-  ["press_key", "Press a key through the normal BrowserHarness page action path."],
-  ["trusted_key", "Press one trusted CDP key."],
-  ["send_keys", "Dispatch trusted modifier chords, named keys, sequences and repeats."],
-  ["scroll", "Scroll the selected BrowserHarness task tab."],
-  ["wait", "Wait for a bounded interval inside the BrowserHarness task."],
-  ["open_tab", "Open a BrowserHarness-owned task tab, backgrounded by default."],
-  ["find_tab", "Select a task-session tab by exact observed URL without stealing foreground focus."],
-  ["list_tabs", "List tabs that belong to the current BrowserHarness task session."],
-  ["switch_tab", "Explicitly activate a task-session tab in the foreground."],
-  ["close_tab", "Close a BrowserHarness-owned tab; borrowed user tabs cannot be closed."],
-  ["close_session", "Close all task-owned tabs and retire the BrowserHarness task session while preserving borrowed tabs."],
-  ["screenshot", "Capture viewport, full-page or semantic-element screenshots through CDP."],
-  ["dialog", "Inspect or handle native JavaScript dialogs."],
-  ["network", "Start, inspect, detail or stop BrowserHarness network capture."],
-  ["upload", "Set explicitly supplied local files on a resolved file input."],
-  ["save_pdf", "Export the current page through Chrome print-to-PDF."],
-  ["cdp", "Use BrowserHarness's authenticated raw Chrome DevTools Protocol escape hatch."]
-].map(([action, description]) => ({ action, description }));
+const elementId = () =>
+  z
+    .string()
+    .min(1)
+    .describe("An @eN ref from the latest observe_page or ax_snapshot, e.g. \"@e12\". Never invent one.");
+const url = () => z.string().min(1).describe("Full URL, e.g. https://example.com");
+const tabId = () => z.number().int().describe("tab_id from list_tabs or observe_page");
+const optional = (schema, description) => schema.optional().describe(description);
+const action = (values, description) => z.enum(values).describe(description);
+
+// One entry per browser tool: what it does, its typed inputs, and whether it
+// only reads. Extra keys are still passed through for advanced options.
+const TOOL_SPECS = [
+  ["observe_page", "Look at the task tab: URL, title, visible text and the interactive elements with their @eN refs. Call it first and after every page change.", {}, true],
+  ["read_page", "Read the page's full text (scrolls and continues across long pages). Use when the visible text is not enough.", {
+    start: optional(z.number().int().min(0), "Continue from next_start of the previous read"),
+    max_chars: optional(z.number().int().positive(), "Character limit for this read")
+  }, true],
+  ["ax_snapshot", "Fresh accessibility-tree snapshot with @eN refs; works better on dynamic sites. Use its refs for trusted_* tools.", {
+    max_elements: optional(z.number().int().positive(), "Maximum elements to return")
+  }, true],
+  ["find", "Search the page's accessibility tree by text and/or role instead of guessing refs.", {
+    query: optional(z.string(), "Text to look for"),
+    role: optional(z.string(), "Role such as button, link, textbox"),
+    limit: optional(z.number().int().positive(), "Maximum matches")
+  }, true],
+  ["evaluate", "Run a short read-only JavaScript expression in the page and return its value.", {
+    expression: z.string().min(1).describe("JavaScript expression"),
+    max_chars: optional(z.number().int().positive(), "Limit on the returned text")
+  }],
+  ["navigate", "Open a URL in the task tab and wait for the page to load.", { url: url() }],
+  ["back", "Go back in the task tab's history.", {}],
+  ["reload", "Reload the task tab.", {
+    bypass_cache: optional(z.boolean(), "Skip the browser cache")
+  }],
+  ["click", "Click an element.", { element_id: elementId() }],
+  ["type", "Type text into a field (replaces its content unless replace is false).", {
+    element_id: elementId(),
+    text: z.string().describe("Text to type; use \\n for new lines"),
+    replace: optional(z.boolean(), "false appends instead of replacing")
+  }],
+  ["press_key", "Press a key on an element, e.g. Enter to submit a search.", {
+    element_id: optional(z.string(), "@eN ref of the element to focus first"),
+    key: z.string().min(1).describe("Enter, Tab, Escape, ArrowDown, Backspace…")
+  }],
+  ["select_option", "Choose an option in a dropdown (<select>).", {
+    element_id: elementId(),
+    value: optional(z.string(), "Option value or visible label"),
+    values: optional(z.array(z.string()), "Several values for a multi-select")
+  }],
+  ["scroll", "Scroll the page or the scrollable area under an element.", {
+    direction: optional(z.enum(["up", "down", "left", "right"]), "Default down"),
+    amount: optional(z.number(), "Pixels; default about one screen"),
+    element_id: optional(z.string(), "Scroll inside this element")
+  }],
+  ["hover", "Move the real mouse over an element (menus, tooltips).", { element_id: elementId() }],
+  ["drag", "Drag one element onto another with the real mouse.", {
+    source_element_id: elementId(),
+    target_element_id: elementId(),
+    steps: optional(z.number().int().positive(), "Pointer steps along the path")
+  }],
+  ["trusted_click", "Click with real mouse input, for sites that ignore normal clicks. Use an ax_snapshot ref.", { element_id: elementId() }],
+  ["trusted_type", "Type with real keyboard input, for editors that ignore normal typing.", {
+    element_id: optional(z.string(), "@eN ref to focus first; omit to type at the current focus"),
+    text: z.string()
+  }],
+  ["trusted_key", "Press one key with real keyboard input.", { key: z.string().min(1) }],
+  ["send_keys", "Send real keyboard shortcuts or sequences at the current focus, e.g. \"Mod+A\", \"Shift+Tab\", \"Enter Escape\".", {
+    keys: z.string().min(1).describe("Space-separated keys or chords; Mod is Cmd on macOS, Ctrl elsewhere"),
+    repeat: optional(z.number().int().min(1).max(100), "Repeat count")
+  }],
+  ["wait", "Wait a short time for the page to settle.", {
+    milliseconds: z.number().int().min(0).max(30_000)
+  }],
+  ["open_tab", "Open a new task tab in the background.", { url: url() }],
+  ["find_tab", "Select a task tab by its exact URL without bringing it to the front; active:true selects the tab the person is looking at.", {
+    url: optional(z.string(), "Exact URL of a tab in this task"),
+    active: optional(z.boolean(), "Use the person's current tab")
+  }],
+  ["list_tabs", "List the tabs that belong to this task.", {}, true],
+  ["switch_tab", "Bring a task tab to the front (only when really needed).", { tab_id: tabId() }],
+  ["close_tab", "Close a tab this task opened. The person's own tabs are never closed.", { tab_id: tabId() }],
+  ["close_session", "Finish the task: close the tabs it opened and keep the person's own tabs.", {}],
+  ["screenshot", "Capture a screenshot of the task tab, the full page, or one element.", {
+    full_page: optional(z.boolean(), "Whole page instead of the viewport"),
+    element_id: optional(z.string(), "Clip to one ax_snapshot ref")
+  }, true],
+  ["dialog", "Inspect or answer a JavaScript alert, confirm or prompt.", {
+    action: action(["status", "accept", "dismiss"], "What to do"),
+    prompt_text: optional(z.string(), "Text for a prompt dialog")
+  }],
+  ["network", "Record and inspect the page's network requests (useful to find JSON APIs).", {
+    action: action(["start", "list", "detail", "stop"], "What to do"),
+    request_id: optional(z.string(), "For detail"),
+    include_body: optional(z.boolean(), "Include response bodies in detail"),
+    limit: optional(z.number().int().positive(), "Rows for list")
+  }],
+  ["upload", "Attach local files to a file input.", {
+    element_id: elementId(),
+    files: optional(z.array(z.string()), "Absolute file paths")
+  }],
+  ["save_pdf", "Save the current page as a PDF.", {
+    filename: optional(z.string(), "File name"),
+    landscape: optional(z.boolean(), "Landscape pages")
+  }],
+  ["memory", "Search BrowserHarness's memory of past tasks and saved procedures.", {
+    action: action(["active", "search", "procedures", "list", "get", "delete"], "What to do"),
+    query: optional(z.string(), "Search text"),
+    id: optional(z.string(), "Episode id for get/delete"),
+    limit: optional(z.number().int().positive(), "Maximum results")
+  }],
+  ["site_skill", "Saved website Skills: list, run, create from the current page, verify, history, compare, promote, rollback or delete.", {
+    action: action(
+      ["list", "get", "create", "verify", "run", "refine", "history", "compare", "promote", "rollback", "delete"],
+      "What to do"
+    ),
+    id: optional(z.string(), "Skill id"),
+    revision_id: optional(z.string(), "Specific revision"),
+    recipe_id: optional(z.string(), "Recipe to run"),
+    parameters: optional(z.record(z.string(), z.unknown()), "Values for run"),
+    name: optional(z.string(), "Name for create")
+  }],
+  ["cdp", "Raw Chrome DevTools Protocol call; last resort when no other tool fits.", {
+    method: z.string().min(1).describe("CDP method, e.g. Page.getLayoutMetrics"),
+    params: optional(z.record(z.string(), z.unknown()), "CDP params")
+  }]
+];
+
+export const BROWSERHARNESS_MCP_TOOLS = TOOL_SPECS.map(
+  ([action, description, input, readOnly]) => ({
+    action,
+    description,
+    input,
+    readOnly: readOnly === true
+  })
+);
 
 function validateBridgeConfig(config) {
   if (!config || typeof config !== "object") {
@@ -200,28 +300,31 @@ export function bridgeResultToMcp(result) {
   };
 }
 
-const commandInputSchema = z.object({
+const sessionFields = {
   session: z
     .string()
     .min(1)
-    .describe("Stable BrowserHarness task-session id. Reuse it for every tool call in one task."),
+    .optional()
+    .describe("Task id. Reuse the same value for every call in one task; omit to use this conversation's default task."),
   title: z
     .string()
     .min(1)
     .max(160)
     .optional()
-    .describe("Optional human-readable task title."),
-  args: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe("Arguments for this BrowserHarness browser tool.")
-});
+    .describe("Short task title shown to the person in Chrome")
+};
+
+export function toolInputSchema(spec) {
+  return z.object({ ...sessionFields, ...spec.input }).loose();
+}
 
 export function createBrowserHarnessMcpServer(
   config,
   options = {}
 ) {
   const client = createBridgeHttpClient(config, options);
+  const defaultSession =
+    options.defaultSession || `agent-${process.pid}-${Date.now().toString(36)}`;
   const server = new McpServer(
     {
       name: "browserharness",
@@ -248,15 +351,19 @@ export function createBrowserHarnessMcpServer(
       `browserharness_${spec.action}`,
       {
         description: spec.description,
-        inputSchema: commandInputSchema
+        inputSchema: toolInputSchema(spec),
+        annotations: spec.readOnly
+          ? { readOnlyHint: true, openWorldHint: true }
+          : { openWorldHint: true }
       },
-      async ({ session, title, args }) =>
+      async ({ session, title, args, ...input }) =>
         bridgeResultToMcp(
           await client.command({
-            session,
-            title,
+            session: session || defaultSession,
+            title: title || "Agent task",
             action: spec.action,
-            args: args || {}
+            // `args` is still accepted from older callers.
+            args: { ...(args && typeof args === "object" ? args : {}), ...input }
           })
         )
     );

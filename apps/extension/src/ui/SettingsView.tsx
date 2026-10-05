@@ -67,6 +67,7 @@ import {
 } from "../runtime/model-client";
 import { MvpSettingsSections } from "./MvpSettingsSections";
 import { SimpleConnect } from "./SimpleConnect";
+import { CodingAgentsCard } from "./CodingAgentsCard";
 import {
   ensureEndpointAccess,
   hasEndpointAccess
@@ -503,6 +504,8 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           state={connectionState}
           message={connectionMessage}
         />
+
+        <CodingAgentsCard />
 
         <Accordion variant="outlined" disableGutters>
           <AccordionSummary expandIcon={<ChevronDownIcon />}>

@@ -1,6 +1,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
+import { createPairingManager, extensionIdFromOrigin } from "./pairing.mjs";
 
 export const BRIDGE_PROTOCOL_VERSION = "0.1";
 
@@ -41,6 +42,16 @@ function safeEqual(a, b) {
 
 function authorized(req, token) {
   return safeEqual(req.headers.authorization || "", `Bearer ${token}`);
+}
+
+/**
+ * Requests from web pages carry an http(s) Origin. Only the extension
+ * (chrome-extension://) or local programs (no Origin) may talk to the Bridge,
+ * which also stops DNS-rebinding pages from reaching it.
+ */
+function allowedOrigin(req) {
+  const origin = req.headers.origin;
+  return origin === undefined || Boolean(extensionIdFromOrigin(origin));
 }
 
 function normalizeCommand(body) {
@@ -98,10 +109,90 @@ export function createBridgeServer({
   let extension = null;
   let extensionMeta = null;
   const pending = new Map();
+  const pairing = createPairingManager({ token });
 
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://bridge.local");
+
+      if (!allowedOrigin(req)) {
+        json(res, 403, {
+          ok: false,
+          error: {
+            code: "ORIGIN_NOT_ALLOWED",
+            message: "BrowserHarness Bridge only accepts the BrowserHarness extension and local programs"
+          }
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname.startsWith("/pair/")) {
+        const extensionId = extensionIdFromOrigin(req.headers.origin);
+        const fromExtension = Boolean(extensionId);
+        const body = await readJson(req, 16 * 1024);
+
+        if (url.pathname === "/pair/request" || url.pathname === "/pair/status") {
+          if (!fromExtension) {
+            json(res, 403, {
+              ok: false,
+              error: {
+                code: "EXTENSION_ORIGIN_REQUIRED",
+                message: "Only the BrowserHarness extension can ask to pair"
+              }
+            });
+            return;
+          }
+          json(
+            res,
+            200,
+            url.pathname === "/pair/request"
+              ? { ok: true, data: pairing.request({ extensionId }) }
+              : {
+                  ok: true,
+                  data: pairing.poll(String(body.request_id || ""), extensionId)
+                }
+          );
+          return;
+        }
+
+        // Approving needs the token, so only someone at this computer's
+        // terminal (who can read the Bridge config) can approve.
+        if (fromExtension || !authorized(req, token)) {
+          json(res, 401, {
+            ok: false,
+            error: {
+              code: "UNAUTHORIZED",
+              message: "Invalid BrowserHarness Bridge token"
+            }
+          });
+          return;
+        }
+        if (url.pathname === "/pair/pending") {
+          json(res, 200, { ok: true, data: { requests: pairing.pending() } });
+          return;
+        }
+        if (url.pathname === "/pair/approve") {
+          const approved = pairing.approve(body.code);
+          json(
+            res,
+            approved ? 200 : 404,
+            approved
+              ? { ok: true, data: approved }
+              : {
+                  ok: false,
+                  error: {
+                    code: "PAIRING_CODE_NOT_FOUND",
+                    message: "No pairing request shows that code. Press Pair in BrowserHarness again."
+                  }
+                }
+          );
+          return;
+        }
+        if (url.pathname === "/pair/deny") {
+          json(res, 200, { ok: pairing.deny(String(body.request_id || "")) });
+          return;
+        }
+      }
 
       if (req.method === "GET" && url.pathname === "/status") {
         const configuredMcpServers = mcpManager
@@ -355,6 +446,7 @@ export function createBridgeServer({
     const url = new URL(req.url || "/", "http://bridge.local");
     if (
       url.pathname !== "/ws" ||
+      !allowedOrigin(req) ||
       !safeEqual(url.searchParams.get("token") || "", token)
     ) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
