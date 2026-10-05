@@ -33,6 +33,7 @@ import {
   trustedClick,
   trustedDrag,
   trustedHover,
+  trustedInsertAtFocus,
   trustedKey,
   trustedSendKeys,
   trustedType
@@ -249,6 +250,68 @@ function isInjectableUrl(url?: string): boolean {
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
+  }
+}
+
+// Same id as content/adapters/google-docs.ts. Not imported: sharing a module
+// with the content script would split content.js into chunks it cannot load.
+const GOOGLE_DOCS_EDITOR_ID = "bc-google-doc-editor";
+
+/**
+ * Google Docs draws text on a canvas and only accepts real keyboard input in
+ * a hidden editor frame. Focus that frame, then type through the debugger.
+ */
+async function googleDocsEditorAction(
+  tabId: number,
+  tool: string,
+  input: Record<string, unknown>
+): Promise<ToolResult> {
+  const focused = await sendToTab(tabId, {
+    type: "EXECUTE_CONTENT_ACTION",
+    action: "focus_editor",
+    input: {}
+  });
+  if (!focused.ok) return focused;
+  if (tool === "click" || tool === "trusted_click") {
+    return {
+      ok: true,
+      data: {
+        focused: GOOGLE_DOCS_EDITOR_ID,
+        next: `The document is ready for text. Write it with type and element_id ${GOOGLE_DOCS_EDITOR_ID}.`
+      }
+    };
+  }
+  const text = typeof input.text === "string" ? input.text : "";
+  if (!text) {
+    return {
+      ok: false,
+      error: { code: "ELEMENT_NOT_FOUND", message: "type needs the text to write" }
+    };
+  }
+  try {
+    const typed = await trustedInsertAtFocus(tabId, text);
+    return {
+      ok: true,
+      data: { ...typed, editor: "google-docs", mode: "keyboard" }
+    };
+  } catch (error) {
+    // Debugger unavailable (for example DevTools is open on this tab):
+    // fall back to the page-level text events.
+    const fallback = await sendToTab(tabId, {
+      type: "EXECUTE_CONTENT_ACTION",
+      action: "type",
+      input: { ...input, replace: false }
+    });
+    if (fallback.ok) {
+      return {
+        ...fallback,
+        data: {
+          ...(fallback.data as Record<string, unknown>),
+          warning: `Real keyboard input was unavailable (${error instanceof Error ? error.message : String(error)}); used page text events, which Google Docs may ignore. Check the document.`
+        }
+      };
+    }
+    return fallback;
   }
 }
 
@@ -1082,6 +1145,13 @@ async function runTool(
   const tab = resolved.tab;
   session = resolved.session;
   const tabId = tab.id!;
+
+  if (
+    input.element_id === GOOGLE_DOCS_EDITOR_ID &&
+    ["click", "trusted_click", "type", "trusted_type"].includes(tool)
+  ) {
+    return googleDocsEditorAction(tabId, tool, input);
+  }
 
   if (tool === "site_skill") {
     const action =

@@ -800,6 +800,36 @@ export async function trustedType(
   return { typed: text.length };
 }
 
+/**
+ * Real keyboard text at the current focus, line by line, with a real Enter
+ * between lines. Editors such as Google Docs ignore synthetic DOM events.
+ */
+export async function trustedInsertAtFocus(
+  tabId: number,
+  text: string
+): Promise<{ typed: number }> {
+  await enableFocusEmulation(tabId);
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    if (index > 0) {
+      for (const type of ["keyDown", "keyUp"] as const) {
+        await cdpCommand(tabId, "Input.dispatchKeyEvent", {
+          type,
+          key: "Enter",
+          code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+          ...(type === "keyDown" ? { text: "\r", unmodifiedText: "\r" } : {})
+        });
+      }
+    }
+    if (lines[index]) {
+      await cdpCommand(tabId, "Input.insertText", { text: lines[index] });
+    }
+  }
+  return { typed: text.length };
+}
+
 export async function trustedKey(
   tabId: number,
   key: string
