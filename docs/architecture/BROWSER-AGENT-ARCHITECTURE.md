@@ -91,6 +91,7 @@ Each step ships on its own, with real-Chromium checks.
 3. **Actions return the new snapshot.**
    - **What changes:** click, type, key and navigate return the changed page state, so the planner needs no separate observe turn.
    - **Acceptance:** about half the model calls per task in smoke runs.
+   - **Status (built):** over the Bridge/MCP, every page-changing action returns `page` (the observation after it; `observe:false` turns it off), and MCP shows pages as compact text (one line per element) instead of JSON. In `smoke:bridge` the agent task takes 3 browser calls instead of 5. The side-panel agent already re-read the page after each action without a model call, so its count is unchanged.
 4. **Native tool calling in the side-panel agent.**
    - **What changes:** the OpenAI-style `tools` and Anthropic `tool_use` APIs replace JSON-in-text. The LM Studio JSON schema remains the fallback.
    - **Model guidance:** the model menu shows a "browser-ready" badge from the agent check, and recommends models for page control.

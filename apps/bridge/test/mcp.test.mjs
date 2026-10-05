@@ -237,3 +237,25 @@ test("MCP status reports Bridge availability without requiring a task session", 
     false
   );
 });
+
+test("MCP shows pages as compact text, and the page after an action", () => {
+  const page = {
+    tab_id: 3,
+    url: "https://example.com/",
+    title: "Example",
+    visible_text: "Hello   world",
+    elements: [
+      { element_id: "@e1", role: "button", accessible_name: "Save", tag: "button", disabled: false },
+      { element_id: "@e2", role: "link", accessible_name: "Far", tag: "a", in_viewport: false, requires_approval: true }
+    ]
+  };
+  const observed = bridgeResultToMcp({ ok: true, data: page });
+  assert.equal(observed.content.length, 1);
+  assert.match(observed.content[0].text, /^tab_id: 3\nurl: https:\/\/example.com\//);
+  assert.match(observed.content[0].text, /@e1 button "Save" <button>\n@e2 link "Far" <a> \[offscreen,approval-required\]/);
+  assert.match(observed.content[0].text, /visible text:\nHello world$/);
+
+  const clicked = bridgeResultToMcp({ ok: true, data: { clicked: true }, page });
+  assert.deepEqual(JSON.parse(clicked.content[0].text), { ok: true, data: { clicked: true } });
+  assert.match(clicked.content[1].text, /^Page after this action:\ntab_id: 3/);
+});

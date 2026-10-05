@@ -25,6 +25,9 @@ BrowserHarness browser runtime
 
 The daemon creates a local pairing token in `~/.browserharness-bridge/config.json`. The extension stores the token only in Chrome extension-local storage.
 
+## Page after an action
+A successful page-changing command (click, type, press_key, navigate, open_tab, scroll, trusted_* …) answers `{ok, data, page}` where `page` is a fresh `observe_page` result, so agents need no separate observe call. Send `"observe": false` in `args` to skip it. The MCP server renders pages as compact text: one `@eN role "name" <tag> [flags]` line per element plus visible text.
+
 ## Pairing by code (no token copy)
 1. The person presses **Pair** in BrowserHarness (Settings → Coding agents). The extension calls `POST /pair/request`; the Bridge accepts it only with an `Origin: chrome-extension://<32-letter id>` header and returns a six-digit code, valid for 5 minutes.
 2. The person types that code into the terminal (`browserharness-bridge pair`, or the installer's last step). The CLI calls `POST /pair/approve {code}` with the Bearer token, which only someone who can read the config file has. Extension-origin requests cannot approve. Five wrong codes clear all pending requests.

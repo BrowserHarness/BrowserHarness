@@ -29,8 +29,11 @@ BrowserHarness extension. Pages, cookies and logins stay on their computer.
    \`browserharness_click\`, \`browserharness_type\` (\`element_id\`, \`text\`),
    \`browserharness_press_key\` (\`key: "Enter"\`), \`browserharness_select_option\`,
    \`browserharness_scroll\`, \`browserharness_navigate\` (full https:// URL).
-3. Observe again and check that the page changed the way you expected before
-   the next step. Refs go stale after the page changes; never reuse or invent one.
+3. Every action returns the page as it looks afterwards ("Page after this
+   action"), so you do not need to call observe_page again. Check that the
+   page changed the way you expected before the next step. Use refs from the
+   latest page only; never invent one. A ref whose element is gone fails with
+   a clear error: look at the latest page and pick again.
 4. When done, report what the page shows, then call
    \`browserharness_close_session\` unless the user wants the tabs kept.
 
