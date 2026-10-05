@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import DeleteSweepOutlinedIcon from "@mui/icons-material/DeleteSweepOutlined";
+import { BackIcon, ClearAllIcon } from "./icons";
 import {
   Alert,
   Box,
@@ -36,7 +35,7 @@ export function HistoryView({ onBack }: { onBack: () => void }) {
     <Box sx={{ minHeight: "100vh", p: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1} mb={2}>
         <IconButton onClick={onBack} aria-label="Back to chat">
-          <ArrowBackIcon />
+          <BackIcon />
         </IconButton>
         <Typography variant="h6" sx={{ flex: 1 }}>
           Task history
@@ -46,7 +45,7 @@ export function HistoryView({ onBack }: { onBack: () => void }) {
           onClick={() => void clear()}
           disabled={entries.length === 0}
         >
-          <DeleteSweepOutlinedIcon />
+          <ClearAllIcon />
         </IconButton>
       </Stack>
 

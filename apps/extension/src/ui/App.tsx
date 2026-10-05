@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AddIcon,
+  HistoryIcon,
+  PauseIcon,
+  PolishIcon,
+  RecordIcon,
+  ReplayIcon,
+  SendIcon,
+  SettingsIcon,
+  StopIcon
+} from "./icons";
+import {
   addGrant,
   isGrantableHost,
   isHostGranted,
@@ -27,19 +38,10 @@ import {
   buildExplainPrompt,
   parsePendingExplain
 } from "../runtime/quick-explain";
-import AddIcon from "@mui/icons-material/Add";
-import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import {
   buildPolishPrompt,
   cleanPolishedPrompt
 } from "../runtime/prompt-polish";
-import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
-import PauseIcon from "@mui/icons-material/Pause";
-import ReplayIcon from "@mui/icons-material/Replay";
-import HistoryOutlinedIcon from "@mui/icons-material/HistoryOutlined";
-import SendRoundedIcon from "@mui/icons-material/SendRounded";
-import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
-import StopIcon from "@mui/icons-material/Stop";
 import {
   Alert,
   AppBar,
@@ -59,6 +61,7 @@ import {
   Typography
 } from "@mui/material";
 import {
+  hasCredentials,
   loadActiveConnection,
   loadFallbackConnection,
   type ProviderConnection
@@ -626,7 +629,8 @@ export function App() {
     const attachmentNote = describeAttachmentsForPrompt(attachments);
 
     if (
-      !primary?.apiKey ||
+      !primary ||
+      !hasCredentials(primary) ||
       !primary.model ||
       primary.chatHealth.status !== "healthy"
     ) {
@@ -1170,7 +1174,7 @@ export function App() {
               onClick={() => setView("history")}
               aria-label="Task history"
             >
-              <HistoryOutlinedIcon />
+              <HistoryIcon />
             </IconButton>
           </Tooltip>
           <Tooltip title="Settings">
@@ -1179,7 +1183,7 @@ export function App() {
               onClick={() => setView("settings")}
               aria-label="Settings"
             >
-              <SettingsOutlinedIcon />
+              <SettingsIcon />
             </IconButton>
           </Tooltip>
         </Toolbar>
@@ -1198,7 +1202,7 @@ export function App() {
               size="small"
               color="error"
               label="Recording"
-              icon={<FiberManualRecordIcon />}
+              icon={<RecordIcon />}
             />
           )}
         </Stack>
@@ -1470,7 +1474,7 @@ export function App() {
                         disabled={!prompt.trim() || running || polishing}
                         aria-label="Polish request"
                       >
-                        <AutoFixHighIcon fontSize="small" />
+                        <PolishIcon fontSize="small" />
                       </IconButton>
                     </span>
                   </Tooltip>
@@ -1484,7 +1488,7 @@ export function App() {
                       disabled={running}
                       aria-label={recording ? "Finish recording" : "Record workflow"}
                     >
-                      <FiberManualRecordIcon fontSize="small" />
+                      <RecordIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                   <IconButton
@@ -1494,7 +1498,7 @@ export function App() {
                     disabled={!prompt.trim() || running || recording}
                     aria-label="Send"
                   >
-                    <SendRoundedIcon />
+                    <SendIcon />
                   </IconButton>
                 </Stack>
               )

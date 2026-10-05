@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import RefreshIcon from "@mui/icons-material/Refresh";
+import { BackIcon, DeleteIcon, RefreshIcon } from "./icons";
 import {
   Alert,
   Autocomplete,
@@ -26,6 +24,7 @@ import {
   loadConnections,
   loadRoutingConfig,
   providerBaseUrl,
+  isSubscriptionProvider,
   removeConnection,
   saveConnection,
   saveRoutingConfig,
@@ -210,7 +209,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   const handleProviderChange = (next: ProviderId) => {
     setProvider(next);
     setApiKey("");
-    setModel("");
+    setModel(isSubscriptionProvider(next) ? "default" : "");
     setModels([]);
     setModelsError("");
     setBaseUrl(PROVIDERS[next].defaultBaseUrl || "");
@@ -406,7 +405,12 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     await refreshRegistry();
   };
 
-  const modelIds = models.map((entry) => entry.id);
+  const subscription = isSubscriptionProvider(provider);
+  const modelIds = subscription
+    ? provider === "claude-subscription"
+      ? ["default", "sonnet", "opus", "haiku"]
+      : ["default"]
+    : models.map((entry) => entry.id);
   const capabilityFor = (id: string) =>
     models.find((entry) => entry.id === id)?.primaryCapability || "manual";
 
@@ -414,7 +418,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     <Box sx={{ minHeight: "100vh", p: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1} mb={2}>
         <IconButton onClick={onBack} aria-label="Back to chat">
-          <ArrowBackIcon />
+          <BackIcon />
         </IconButton>
         <Typography variant="h6">Models & connections</Typography>
       </Stack>
@@ -439,6 +443,12 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                 <MenuItem value="nvidia">NVIDIA</MenuItem>
                 <MenuItem value="openai-compatible">
                   OpenAI-compatible
+                </MenuItem>
+                <MenuItem value="claude-subscription">
+                  Claude subscription (no API key)
+                </MenuItem>
+                <MenuItem value="chatgpt-subscription">
+                  ChatGPT subscription (no API key)
                 </MenuItem>
               </Select>
             </FormControl>
@@ -485,6 +495,17 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                 </Button>
               )}
 
+            {subscription ? (
+              <Alert severity="info">
+                {provider === "claude-subscription"
+                  ? "Uses your Claude plan through the Claude Code app installed and signed in on this computer. "
+                  : "Uses your ChatGPT plan through the Codex CLI installed and signed in on this computer. "}
+                BrowserHarness never sees your login: the Local Agent Bridge
+                (Settings → Local Agent Bridge) runs the official app for each
+                request. Text only, so screenshots are not sent, and each
+                step is slower than an API call.
+              </Alert>
+            ) : (
             <TextField
               label="API key"
               value={apiKey}
@@ -497,6 +518,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
               fullWidth
               helperText="Stored locally. BrowserHarness never writes provider keys to Git or analytics."
             />
+            )}
 
             <Stack direction="row" spacing={1} alignItems="flex-start">
               <Autocomplete
@@ -592,7 +614,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
               onClick={() => void handleTestAndSave()}
               disabled={
                 connectionState === "testing" ||
-                !apiKey.trim() ||
+                (!subscription && !apiKey.trim()) ||
                 !model.trim() ||
                 (provider === "openai-compatible" &&
                   !effectiveBaseUrl)
@@ -654,7 +676,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                       void handleDelete(connection.id)
                     }
                   >
-                    <DeleteOutlineIcon fontSize="small" />
+                    <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
 

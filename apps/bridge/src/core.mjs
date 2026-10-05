@@ -77,6 +77,7 @@ export function createBridgeServer({
   token,
   commandTimeoutMs = 30_000,
   mcpManager = null,
+  llmManager = null,
   allowRemote = false
 } = {}) {
   if (!token) throw new Error("Bridge pairing token is required");
@@ -408,6 +409,75 @@ export function createBridgeServer({
 
         if (message.type === "heartbeat") {
           ws.send(JSON.stringify({ type: "heartbeat_ack" }));
+          return;
+        }
+
+        if (
+          message.type === "llm_request" &&
+          typeof message.id === "string"
+        ) {
+          const reply = (body) =>
+            ws.send(
+              JSON.stringify({ type: "llm_result", id: message.id, ...body })
+            );
+          if (extension !== ws) {
+            reply({
+              ok: false,
+              error: {
+                code: "LLM_EXTENSION_REQUIRED",
+                message:
+                  "Subscription requests must come from the paired BrowserHarness extension"
+              }
+            });
+            return;
+          }
+          if (!llmManager) {
+            reply({
+              ok: false,
+              error: {
+                code: "LLM_ADAPTERS_UNAVAILABLE",
+                message: "BrowserHarness Bridge subscription adapters are not enabled"
+              }
+            });
+            return;
+          }
+          try {
+            const args =
+              message.args &&
+              typeof message.args === "object" &&
+              !Array.isArray(message.args)
+                ? message.args
+                : {};
+            let data;
+            if (message.action === "status") {
+              data = await llmManager.status(String(args.adapter || ""));
+            } else if (message.action === "complete") {
+              data = await llmManager.complete({
+                adapter: String(args.adapter || ""),
+                model: args.model === undefined ? "default" : args.model,
+                system: typeof args.system === "string" ? args.system : "",
+                prompt: args.prompt,
+                timeoutMs: Number(args.timeout_ms) || undefined
+              });
+            } else {
+              throw Object.assign(
+                new Error(
+                  `Unsupported LLM request action: ${String(message.action || "")}`
+                ),
+                { code: "LLM_BAD_REQUEST" }
+              );
+            }
+            reply({ ok: true, data });
+          } catch (error) {
+            reply({
+              ok: false,
+              error: {
+                code:
+                  typeof error?.code === "string" ? error.code : "LLM_FAILED",
+                message: error instanceof Error ? error.message : String(error)
+              }
+            });
+          }
           return;
         }
 

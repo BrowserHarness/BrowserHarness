@@ -86,8 +86,19 @@ export type WatchRequest =
       step: RecordedWorkflowStep;
     };
 
+export type BridgeLlmRequest = {
+  type: "BRIDGE_LLM";
+  action: "status" | "complete";
+  adapter: "claude_cli" | "codex_cli";
+  model?: string;
+  system?: string;
+  prompt?: string;
+  timeout_ms?: number;
+};
+
 export type ExtensionRequest =
   | { type: "GET_CURRENT_TAB" }
+  | BridgeLlmRequest
   | BrowserToolRequest
   | WatchRequest;
 
