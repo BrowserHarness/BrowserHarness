@@ -95,14 +95,14 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
   "lm-studio": {
     id: "lm-studio",
     label: "LM Studio (local)",
-    defaultBaseUrl: "http://localhost:1234/v1",
+    defaultBaseUrl: "http://127.0.0.1:1234/v1",
     modelDiscovery: "openai-models",
     local: true
   },
   ollama: {
     id: "ollama",
     label: "Ollama (local)",
-    defaultBaseUrl: "http://localhost:11434/v1",
+    defaultBaseUrl: "http://127.0.0.1:11434/v1",
     modelDiscovery: "openai-models",
     local: true
   },

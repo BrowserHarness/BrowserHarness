@@ -41,6 +41,15 @@ import {
   type RuntimeRoutingConfig
 } from "../settings/provider-store";
 import {
+  SUBSCRIPTION_MODELS,
+  accountLabel,
+  loadAccounts,
+  makeAccount,
+  removeAccount,
+  saveAccount,
+  type ProviderAccount
+} from "../settings/account-store";
+import {
   discoverModels,
   type DiscoveredModel
 } from "../settings/model-catalog";
@@ -109,6 +118,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   >("idle");
   const [connectionMessage, setConnectionMessage] = useState("");
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
+  const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
   const [routing, setRouting] = useState<RuntimeRoutingConfig>({});
   const [endpointAccess, setEndpointAccess] = useState(true);
   const [readiness, setReadiness] = useState<SubscriptionReadiness | null>(null);
@@ -128,12 +138,14 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     discoveryAvailable && (!needsKey || Boolean(apiKey.trim())) && Boolean(effectiveBaseUrl);
 
   const refreshRegistry = async () => {
-    const [saved, currentRouting] = await Promise.all([
+    const [saved, currentRouting, services] = await Promise.all([
       loadConnections(),
-      loadRoutingConfig()
+      loadRoutingConfig(),
+      loadAccounts()
     ]);
     setConnections(saved);
     setRouting(currentRouting);
+    setAccounts(services);
   };
 
   useEffect(() => {
@@ -273,7 +285,9 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     await testAndSave(candidateConfig());
   };
 
-  const testAndSave = async (config: ProviderConfig) => {
+  const testAndSave = async (
+    config: ProviderConfig
+  ): Promise<ProviderConnection> => {
     const declaredCapabilities =
       classifyModelCapabilities(config.model);
     const embeddingOnly =
@@ -418,6 +432,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
         `Not usable for Chat: ${chatHealth.message || chatHealth.status}`
       );
     }
+    return connection;
   };
 
   const connectFromSimple = async (config: ProviderConfig) => {
@@ -431,7 +446,21 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
         return;
       }
     }
-    await testAndSave(config);
+    await saveAccount(makeAccount(config.provider, config.apiKey, config.baseUrl));
+    const connection = await testAndSave(config);
+    if (connection.chatHealth.status === "healthy") {
+      // The model the user just picked is the one the chat should use.
+      const current = await loadRoutingConfig();
+      await saveRoutingConfig({
+        ...current,
+        primaryConnectionId: connection.id,
+        fallbackConnectionId:
+          current.fallbackConnectionId === connection.id
+            ? undefined
+            : current.fallbackConnectionId
+      });
+      await refreshRegistry();
+    }
   };
 
   const updateRouting = async (
@@ -454,9 +483,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   };
 
   const modelIds = subscription
-    ? provider === "claude-subscription"
-      ? ["default", "sonnet", "opus", "haiku"]
-      : ["default"]
+    ? SUBSCRIPTION_MODELS[provider] || ["default"]
     : models.map((entry) => entry.id);
   const capabilityFor = (id: string) =>
     models.find((entry) => entry.id === id)?.primaryCapability || "manual";
@@ -728,6 +755,44 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
         </Paper>
           </AccordionDetails>
         </Accordion>
+
+        {accounts.length > 0 && (
+          <Stack spacing={1}>
+            <Typography variant="subtitle1">Connected services</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Every model from these services is in the model menu at the top of the chat.
+            </Typography>
+            {accounts.map((account) => (
+              <Paper
+                key={account.id}
+                variant="outlined"
+                sx={{ p: 1.5, display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={600} noWrap>
+                    {accountLabel(account)}
+                  </Typography>
+                  {account.baseUrl && (
+                    <Typography variant="caption" color="text.secondary" noWrap component="div">
+                      {account.baseUrl}
+                    </Typography>
+                  )}
+                </Box>
+                <Tooltip title="Disconnect this service and forget its models">
+                  <IconButton
+                    size="small"
+                    aria-label={`Disconnect ${accountLabel(account)}`}
+                    onClick={() =>
+                      void removeAccount(account.id).then(refreshRegistry)
+                    }
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Paper>
+            ))}
+          </Stack>
+        )}
 
         <Stack spacing={1.5}>
           <Typography variant="subtitle1">

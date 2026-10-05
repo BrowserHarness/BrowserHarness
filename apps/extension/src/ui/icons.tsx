@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   Circle,
   History,
@@ -42,6 +43,7 @@ function makeIcon(
 
 export const AddIcon = makeIcon(Plus);
 export const BackIcon = makeIcon(ArrowLeft);
+export const CheckIcon = makeIcon(Check);
 export const ChevronDownIcon = makeIcon(ChevronDown);
 export const ClearAllIcon = makeIcon(Trash2);
 export const DeleteIcon = makeIcon(Trash2);

@@ -51,8 +51,6 @@ import {
   CircularProgress,
   Divider,
   IconButton,
-  Menu,
-  MenuItem,
   Paper,
   Stack,
   TextField,
@@ -92,6 +90,7 @@ import {
   type WorkflowRecordingSummary
 } from "../runtime/workflows";
 import { SettingsView } from "./SettingsView";
+import { ModelMenu } from "./ModelMenu";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
 import {
@@ -206,7 +205,6 @@ export function App() {
   const [lastWorkflow, setLastWorkflow] = useState<SavedWorkflow | null>(null);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
-  const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const cancelled = useRef(false);
   const pausedRef = useRef(false);
   const requestAbort = useRef<AbortController | null>(null);
@@ -628,12 +626,9 @@ export function App() {
     if (!task || running) return;
     const attachmentNote = describeAttachmentsForPrompt(attachments);
 
-    if (
-      !primary ||
-      !hasCredentials(primary) ||
-      !primary.model ||
-      primary.chatHealth.status !== "healthy"
-    ) {
+    // A model the user picked from the model menu may not have been checked
+    // yet: try it. Only send them to settings when nothing usable is chosen.
+    if (!primary || !hasCredentials(primary) || !primary.model) {
       setView("settings");
       return;
     }
@@ -688,7 +683,7 @@ export function App() {
       }
 
       const agentPrimary =
-        primary.agentHealth.status === "healthy"
+        primary.agentHealth.status !== "failed"
           ? primary
           : fallback?.agentHealth.status === "healthy"
             ? fallback
@@ -696,7 +691,7 @@ export function App() {
 
       if (!agentPrimary) {
         throw new Error(
-          "No validated Agent-capable model is available. Open Models & connections and run the Agent capability check."
+          `${primary.model} did not pass the browser-control check. Pick another model from the model menu at the top.`
         );
       }
 
@@ -1139,35 +1134,11 @@ export function App() {
               </IconButton>
             </Tooltip>
           )}
-          <Button size="small" onClick={(event) => setModelAnchor(event.currentTarget)}>
-            {fallback ? "Auto" : primary?.model || "Connect AI"}
-          </Button>
-          <Menu
-            anchorEl={modelAnchor}
-            open={Boolean(modelAnchor)}
-            onClose={() => setModelAnchor(null)}
-          >
-            {primary ? (
-              <MenuItem disabled>
-                {`Primary · ${primary.label}`}
-              </MenuItem>
-            ) : (
-              <MenuItem disabled>No provider connected</MenuItem>
-            )}
-            {fallback && (
-              <MenuItem disabled>
-                {`Fallback · ${fallback.label}`}
-              </MenuItem>
-            )}
-            <MenuItem
-              onClick={() => {
-                setModelAnchor(null);
-                setView("settings");
-              }}
-            >
-              Manage models…
-            </MenuItem>
-          </Menu>
+          <ModelMenu
+            current={primary}
+            onChanged={refreshContext}
+            onManage={() => setView("settings")}
+          />
           <Tooltip title="Task history">
             <IconButton
               size="small"

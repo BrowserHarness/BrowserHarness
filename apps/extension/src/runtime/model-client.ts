@@ -524,6 +524,7 @@ async function openAICompatibleRequest(
       signal
     );
 
+  body = tuneRequestBody(config, body);
   let response = await request(body);
 
   if (
@@ -547,14 +548,94 @@ async function openAICompatibleRequest(
     );
   }
 
-  const json = await response.json();
-  const content = String(json?.choices?.[0]?.message?.content || "").trim();
+  let json = await response.json();
+  let content = answerText(json);
+  if (!content && spentBudgetThinking(json)) {
+    // Thinking models (OpenRouter auto routing, Qwen, DeepSeek R1...) can use
+    // the whole token budget on reasoning and return no answer. Retry once
+    // with room to finish before giving up.
+    const budget = Math.min(
+      Math.max(Number(body.max_tokens || 512) * 4, 4096),
+      16_384
+    );
+    const retry = await request({
+      ...body,
+      max_tokens: budget,
+      ...(body.max_completion_tokens ? { max_completion_tokens: budget } : {})
+    });
+    if (retry.ok) {
+      json = await retry.json();
+      content = answerText(json);
+    }
+  }
   if (!content) {
     throw new Error(
-      `Model ${config.model} returned an empty response. Choose a chat/instruct model.`
+      spentBudgetThinking(json)
+        ? `Model ${config.model} spent its whole answer thinking and gave no reply. Try again, or pick another model from the model menu.`
+        : `Model ${config.model} returned an empty response. Pick another model from the model menu.`
     );
   }
   return content;
+}
+
+/** Remove a thinking block some local models put inside the answer. */
+export function stripThinking(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/^\s*<think>[\s\S]*$/i, "")
+    .trim();
+}
+
+function answerText(json: unknown): string {
+  const choice = (json as { choices?: Array<{ message?: { content?: unknown } }> })
+    ?.choices?.[0];
+  const raw = choice?.message?.content;
+  const text = Array.isArray(raw)
+    ? raw
+        .map((part) =>
+          part && typeof part === "object" && "text" in part
+            ? String((part as { text?: unknown }).text || "")
+            : ""
+        )
+        .join("")
+    : String(raw || "");
+  return stripThinking(text);
+}
+
+function spentBudgetThinking(json: unknown): boolean {
+  const choice = (
+    json as {
+      choices?: Array<{
+        finish_reason?: string;
+        message?: { reasoning?: unknown; reasoning_content?: unknown; content?: unknown };
+      }>;
+    }
+  )?.choices?.[0];
+  if (!choice) return false;
+  return (
+    choice.finish_reason === "length" ||
+    Boolean(choice.message?.reasoning) ||
+    Boolean(choice.message?.reasoning_content) ||
+    /<think>/i.test(String(choice.message?.content || ""))
+  );
+}
+
+/**
+ * Give thinking models room to answer: OpenRouter is asked to keep reasoning
+ * short and out of the reply; local models (free to run) get a larger budget.
+ */
+export function tuneRequestBody(
+  config: ProviderConfig,
+  body: Record<string, unknown>
+): Record<string, unknown> {
+  const tuned = { ...body };
+  if (config.provider === "openrouter" && tuned.reasoning === undefined) {
+    tuned.reasoning = { effort: "low", exclude: true };
+  }
+  if (isLocalProvider(config.provider)) {
+    tuned.max_tokens = Math.max(Number(tuned.max_tokens || 0), 4096);
+  }
+  return tuned;
 }
 
 function anthropicImageContent(dataUrl: string) {

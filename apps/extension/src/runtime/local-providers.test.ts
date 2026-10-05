@@ -21,8 +21,8 @@ afterEach(() => {
 
 describe("local model providers", () => {
   it("default to the usual local ports and need no key", () => {
-    expect(providerBaseUrl("lm-studio")).toBe("http://localhost:1234/v1");
-    expect(providerBaseUrl("ollama")).toBe("http://localhost:11434/v1");
+    expect(providerBaseUrl("lm-studio")).toBe("http://127.0.0.1:1234/v1");
+    expect(providerBaseUrl("ollama")).toBe("http://127.0.0.1:11434/v1");
     expect(providerBaseUrl("lm-studio", "http://localhost:5000/v1/")).toBe("http://localhost:5000/v1");
     expect(isLocalProvider("ollama")).toBe(true);
     expect(hasEditableBaseUrl("lm-studio")).toBe(true);
@@ -39,7 +39,7 @@ describe("local model providers", () => {
     const models = await discoverModels({ provider: "lm-studio", apiKey: "" });
     expect(models.map((m) => m.id)).toEqual(["qwen2.5-7b-instruct"]);
     const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("http://localhost:1234/v1/models");
+    expect(url).toBe("http://127.0.0.1:1234/v1/models");
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
@@ -54,7 +54,7 @@ describe("local model providers", () => {
     vi.stubGlobal("fetch", fetchSpy);
     expect(await directChatCompletion(lm, "hi")).toBe("OK");
     const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("http://localhost:1234/v1/chat/completions");
+    expect(url).toBe("http://127.0.0.1:1234/v1/chat/completions");
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
