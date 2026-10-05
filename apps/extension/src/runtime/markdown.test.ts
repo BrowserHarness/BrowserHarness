@@ -19,4 +19,16 @@ describe("markdown subset", () => {
     expect(JSON.stringify(nodes)).not.toContain('"href":"javascript');
     expect(nodes.some((n) => n.type === "text" && n.text.includes("<img"))).toBe(true);
   });
+
+  it("parses GitHub-style tables, stopping at the first non-row line", () => {
+    const blocks = parseMarkdown("Prices:\n| Item | Price |\n| --- | ---: |\n| **Widget** | a \\| b |\n\nDone.");
+    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "table", "paragraph"]);
+    const table = blocks[1] as Extract<(typeof blocks)[number], { type: "table" }>;
+    expect(table.headers.map((cell) => cell[0])).toEqual([
+      { type: "text", text: "Item" },
+      { type: "text", text: "Price" }
+    ]);
+    expect(table.rows[0][0]).toEqual([{ type: "bold", text: "Widget" }]);
+    expect(table.rows[0][1]).toEqual([{ type: "text", text: "a | b" }]);
+  });
 });

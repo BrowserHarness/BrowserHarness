@@ -28,6 +28,7 @@ const requiredTools = [
   "network",
   "upload",
   "save_pdf",
+  "extract_table",
   "cdp"
 ]
 

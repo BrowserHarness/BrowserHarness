@@ -5,6 +5,9 @@ import {
   ChevronDown,
   Circle,
   History,
+  Mic,
+  Volume2,
+  Download,
   Pause,
   Plus,
   RefreshCw,
@@ -56,3 +59,6 @@ export const ReplayIcon = makeIcon(RotateCcw);
 export const SendIcon = makeIcon(SendHorizontal);
 export const SettingsIcon = makeIcon(Settings);
 export const StopIcon = makeIcon(Square, { fill: "currentColor" });
+export const MicIcon = makeIcon(Mic);
+export const SpeakIcon = makeIcon(Volume2);
+export const DownloadIcon = makeIcon(Download);

@@ -1,15 +1,25 @@
 export type AppearanceMode = "system" | "light" | "dark";
 
+/**
+ * When the agent asks before acting:
+ * - risky: only for send, submit, buy, delete and account changes (default)
+ * - every: before every action that changes a page
+ * - auto: never, except payments and account security
+ */
+export type ApprovalMode = "risky" | "every" | "auto";
+
 export interface UserPreferences {
   appearance: AppearanceMode;
   retainTaskHistory: boolean;
+  approvalMode: ApprovalMode;
 }
 
 const KEY = "browserharness.preferences";
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   appearance: "system",
-  retainTaskHistory: true
+  retainTaskHistory: true,
+  approvalMode: "risky"
 };
 
 export async function loadPreferences(): Promise<UserPreferences> {

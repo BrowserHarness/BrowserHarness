@@ -7,16 +7,26 @@ import {
   IconButton,
   Paper,
   Stack,
+  TextField,
   Typography
 } from "@mui/material";
 import {
   clearTaskHistory,
   loadTaskHistory,
+  searchTaskHistory,
   type TaskHistoryEntry
 } from "../runtime/history";
 
-export function HistoryView({ onBack }: { onBack: () => void }) {
+export function HistoryView({
+  onBack,
+  onRunAgain
+}: {
+  onBack: () => void;
+  onRunAgain?: (task: string) => void;
+}) {
   const [entries, setEntries] = useState<TaskHistoryEntry[]>([]);
+  const [query, setQuery] = useState("");
+  const shown = searchTaskHistory(entries, query);
 
   const refresh = async () => {
     setEntries(await loadTaskHistory());
@@ -49,13 +59,26 @@ export function HistoryView({ onBack }: { onBack: () => void }) {
         </IconButton>
       </Stack>
 
+      {entries.length > 0 && (
+        <TextField
+          fullWidth
+          size="small"
+          label="Search past tasks"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          sx={{ mb: 2 }}
+        />
+      )}
+
       {entries.length === 0 ? (
         <Alert severity="info">
-          No local task history yet. BrowserHarness keeps up to 50 completed tasks on this device.
+          No local task history yet. BrowserHarness keeps up to 500 completed tasks on this device.
         </Alert>
+      ) : shown.length === 0 ? (
+        <Alert severity="info">No past task matches “{query}”.</Alert>
       ) : (
         <Stack spacing={1.5}>
-          {entries.map((entry) => (
+          {shown.map((entry) => (
             <Paper variant="outlined" sx={{ p: 1.5 }} key={entry.id}>
               <Stack spacing={0.75}>
                 <Typography variant="subtitle2">{entry.task}</Typography>
@@ -64,6 +87,13 @@ export function HistoryView({ onBack }: { onBack: () => void }) {
                   {new Date(entry.timestamp).toLocaleString()}
                   {entry.url ? ` · ${entry.url}` : ""}
                 </Typography>
+                {onRunAgain && (
+                  <Box>
+                    <Button size="small" onClick={() => onRunAgain(entry.task)}>
+                      Run again
+                    </Button>
+                  </Box>
+                )}
               </Stack>
             </Paper>
           ))}

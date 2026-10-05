@@ -17,6 +17,7 @@ import {
   loadPreferences,
   updatePreferences,
   type AppearanceMode,
+  type ApprovalMode,
   type UserPreferences
 } from "../settings/preferences";
 import {
@@ -50,6 +51,11 @@ export function MvpSettingsSections() {
     setPreferences(next);
   };
 
+  const setApprovalMode = async (approvalMode: ApprovalMode) => {
+    const next = await updatePreferences({ approvalMode });
+    setPreferences(next);
+  };
+
   const setHistoryRetention = async (retainTaskHistory: boolean) => {
     const next = await updatePreferences({ retainTaskHistory });
     setPreferences(next);
@@ -80,6 +86,25 @@ export function MvpSettingsSections() {
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Stack spacing={1.5}>
           <Typography variant="subtitle1">Permissions</Typography>
+          <FormControl fullWidth size="small">
+            <InputLabel id="approval-mode-label">Ask me before the agent acts</InputLabel>
+            <Select
+              labelId="approval-mode-label"
+              label="Ask me before the agent acts"
+              value={preferences.approvalMode}
+              onChange={(event) => void setApprovalMode(event.target.value as ApprovalMode)}
+            >
+              <MenuItem value="risky">Only for risky actions (send, submit, buy, delete)</MenuItem>
+              <MenuItem value="every">Before every action</MenuItem>
+              <MenuItem value="auto">Never, except payments and passwords</MenuItem>
+            </Select>
+          </FormControl>
+          {preferences.approvalMode === "auto" && (
+            <Alert severity="warning">
+              The agent will send, submit and delete without asking. It still asks
+              before payments, orders and password or account-security changes.
+            </Alert>
+          )}
           <Alert severity="info">
             Consequential actions such as send, submit, purchase, delete, or
             account/security changes ask for approval. Choose “Always allow on this

@@ -71,3 +71,19 @@ describe("task history privacy", () => {
     expect(await loadTaskHistory()).toEqual([]);
   });
 });
+
+describe("searching past tasks", () => {
+  const entries = [
+    { id: "1", task: "Find cheap flights to Goa", result: "IndiGo ₹4,200", timestamp: "2026-10-05T10:00:00Z", url: "https://www.google.com/travel" },
+    { id: "2", task: "Write a video script", result: "Done in Google Docs", timestamp: "2026-10-04T10:00:00Z" }
+  ];
+
+  it("matches every word across the task, answer and page", async () => {
+    const { searchTaskHistory } = await import("./history");
+    expect(searchTaskHistory(entries, "goa flights").map((entry) => entry.id)).toEqual(["1"]);
+    expect(searchTaskHistory(entries, "docs").map((entry) => entry.id)).toEqual(["2"]);
+    expect(searchTaskHistory(entries, "google").map((entry) => entry.id)).toEqual(["1", "2"]);
+    expect(searchTaskHistory(entries, "  ")).toHaveLength(2);
+    expect(searchTaskHistory(entries, "hotel")).toHaveLength(0);
+  });
+});

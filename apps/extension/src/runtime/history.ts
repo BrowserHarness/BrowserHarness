@@ -9,7 +9,7 @@ export interface TaskHistoryEntry {
 }
 
 const HISTORY_KEY = "browserharness.taskHistory";
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 500;
 
 export async function loadTaskHistory(): Promise<TaskHistoryEntry[]> {
   const stored = await chrome.storage.local.get(HISTORY_KEY);
@@ -36,4 +36,20 @@ export async function saveTaskHistoryEntry(
 
 export async function clearTaskHistory(): Promise<void> {
   await chrome.storage.local.remove(HISTORY_KEY);
+}
+
+/**
+ * Past tasks matching every word of the query (task, answer or page),
+ * newest first. An empty query returns everything.
+ */
+export function searchTaskHistory(
+  entries: TaskHistoryEntry[],
+  query: string
+): TaskHistoryEntry[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return entries;
+  return entries.filter((entry) => {
+    const haystack = `${entry.task}\n${entry.result}\n${entry.url || ""}`.toLowerCase();
+    return words.every((word) => haystack.includes(word));
+  });
 }

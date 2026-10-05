@@ -3,6 +3,7 @@ import type { RecordedWorkflowStep } from "./workflows";
 export type ToolName =
   | "observe_page"
   | "read_page"
+  | "extract_table"
   | "ax_snapshot"
   | "find"
   | "evaluate"

@@ -14,6 +14,11 @@
       "approval": "never"
     },
     {
+      "id": "extract_table",
+      "mutation": false,
+      "approval": "never"
+    },
+    {
       "id": "ax_snapshot",
       "mutation": false,
       "approval": "never"

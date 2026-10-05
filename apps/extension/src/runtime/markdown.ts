@@ -10,7 +10,38 @@ export type BlockNode =
   | { type: "heading"; level: 1 | 2 | 3; inline: InlineNode[] }
   | { type: "list"; ordered: boolean; items: InlineNode[][] }
   | { type: "code"; text: string }
-  | { type: "quote"; inline: InlineNode[] };
+  | { type: "quote"; inline: InlineNode[] }
+  | { type: "table"; headers: InlineNode[][]; rows: InlineNode[][][] };
+
+/** The |---|---| line under a markdown table's header row. */
+export const TABLE_SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+/** The cells of one markdown table row; an escaped `\|` stays a literal bar. */
+export function splitTableRow(line: string): string[] {
+  let body = line.trim();
+  if (body.startsWith("|")) body = body.slice(1);
+  if (body.endsWith("|") && !body.endsWith("\\|")) body = body.slice(0, -1);
+  const cells: string[] = [];
+  let current = "";
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index];
+    if (char === "\\" && body[index + 1] === "|") {
+      current += "|";
+      index += 1;
+    } else if (char === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function isTableStart(lines: string[], i: number): boolean {
+  return lines[i].includes("|") && i + 1 < lines.length && TABLE_SEPARATOR.test(lines[i + 1]);
+}
 
 const INLINE =
   /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\([^)\s]+\))|(https?:\/\/[^\s<)]+)/g;
@@ -97,6 +128,17 @@ export function parseMarkdown(source: string): BlockNode[] {
       i += 1;
       continue;
     }
+    if (isTableStart(lines, i)) {
+      const headers = splitTableRow(line).map(parseInline);
+      const rows: InlineNode[][][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+        rows.push(splitTableRow(lines[i]).map(parseInline));
+        i += 1;
+      }
+      blocks.push({ type: "table", headers, rows });
+      continue;
+    }
     const bullet = /^\s*([-*]|\d+\.)\s+/;
     if (bullet.test(line)) {
       const ordered = /^\s*\d+\./.test(line);
@@ -124,7 +166,8 @@ export function parseMarkdown(source: string): BlockNode[] {
       !lines[i].startsWith("```") &&
       !/^#{1,3}\s/.test(lines[i]) &&
       !bullet.test(lines[i]) &&
-      !lines[i].startsWith(">")
+      !lines[i].startsWith(">") &&
+      !isTableStart(lines, i)
     ) {
       para.push(lines[i]);
       i += 1;

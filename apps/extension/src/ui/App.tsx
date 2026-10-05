@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from "react";
+import { approvalFor, autoApproves } from "../runtime/approval-mode";
+import { dictationAvailable, speak, startDictation } from "./voice";
+import { downloadCsv, markdownTables } from "./table-csv";
+import {
+  loadPreferences,
+  PREFERENCES_STORAGE_KEY,
+  type ApprovalMode,
+  type UserPreferences
+} from "../settings/preferences";
 import {
   AddIcon,
   HistoryIcon,
+  DownloadIcon,
+  MicIcon,
+  SpeakIcon,
   PauseIcon,
   PolishIcon,
   RecordIcon,
@@ -296,10 +308,32 @@ export function App() {
       .catch(() => undefined);
   }, []);
 
+  const approvalMode = useRef<ApprovalMode>("risky");
+  useEffect(() => {
+    void loadPreferences()
+      .then((preferences) => {
+        approvalMode.current = preferences.approvalMode;
+      })
+      .catch(() => undefined);
+    const onChange = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string
+    ) => {
+      const next = changes[PREFERENCES_STORAGE_KEY]?.newValue as UserPreferences | undefined;
+      if (area === "local" && next?.approvalMode) approvalMode.current = next.approvalMode;
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, []);
+
   const requestApproval = async (
     description: string,
     hostOverride?: string
   ) => {
+    if (autoApproves(approvalMode.current, description)) {
+      addActivity(`Approved automatically (automatic mode): ${description}`, "done");
+      return true;
+    }
     const host =
       hostOverride ?? (approvalHost.current || safeHostname(tab?.url));
     if (host && isHostGranted(siteGrants.current, host)) {
@@ -321,6 +355,36 @@ export function App() {
     new Promise<"continue" | "cancelled">((resolve) => {
       setHandoff({ reason, resolve });
     });
+
+  const [listening, setListening] = useState(false);
+  const stopListening = useRef<(() => void) | null>(null);
+  const handleDictate = () => {
+    if (listening) {
+      stopListening.current?.();
+      return;
+    }
+    const before = prompt.trim();
+    setListening(true);
+    stopListening.current = startDictation({
+      onText: (text) => setPrompt(before ? `${before} ${text}` : text),
+      onEnd: () => {
+        setListening(false);
+        stopListening.current = null;
+      },
+      onError: (error) => {
+        if (error === "not-allowed" || error === "service-not-allowed") {
+          void chrome.tabs.create({ url: chrome.runtime.getURL("mic.html") });
+          addAssistantMessage(
+            "Allow the microphone in the tab I opened, then press the microphone button again."
+          );
+        } else if (error === "unsupported") {
+          addAssistantMessage("Speech input is not available in this browser.");
+        } else if (error !== "no-speech" && error !== "aborted") {
+          addAssistantMessage(`Speech input stopped: ${error}.`);
+        }
+      }
+    });
+  };
 
   const handleRecord = async () => {
     if (!tab?.tab_id) {
@@ -929,7 +993,13 @@ export function App() {
           },
           approvalDescription: (observation, tool, input) => {
             approvalHost.current = safeHostname(observation.url);
-            return approvalDescription(observation, tool, input);
+            return approvalFor(
+              approvalMode.current,
+              approvalDescription(observation, tool, input),
+              observation,
+              tool,
+              input
+            );
           },
           requestApproval: async (description) => {
             const approved = await requestApproval(description);
@@ -1098,7 +1168,15 @@ export function App() {
   }
 
   if (view === "history") {
-    return <HistoryView onBack={() => setView("chat")} />;
+    return (
+      <HistoryView
+        onBack={() => setView("chat")}
+        onRunAgain={(task) => {
+          setPrompt(task);
+          setView("chat");
+        }}
+      />
+    );
   }
 
   return (
@@ -1236,7 +1314,32 @@ export function App() {
                   }}
                 >
                   {message.role === "assistant" ? (
-                    <Markdown text={message.text} />
+                    <>
+                      <Markdown text={message.text} />
+                      {markdownTables(message.text).map((table, index, all) => (
+                        <Button
+                          key={index}
+                          size="small"
+                          startIcon={<DownloadIcon fontSize="small" />}
+                          onClick={() =>
+                            downloadCsv(table, `browserharness-table${all.length > 1 ? `-${index + 1}` : ""}.csv`)
+                          }
+                          sx={{ mt: 0.5, mr: 1 }}
+                        >
+                          {all.length > 1 ? `Download table ${index + 1} (CSV)` : "Download CSV"}
+                        </Button>
+                      ))}
+                      <Tooltip title="Read aloud">
+                        <IconButton
+                          size="small"
+                          aria-label="Read aloud"
+                          onClick={() => speak(message.text)}
+                          sx={{ mt: 0.5, opacity: 0.6 }}
+                        >
+                          <SpeakIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </>
                   ) : (
                     <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
                       {message.text}
@@ -1457,6 +1560,21 @@ export function App() {
                       </IconButton>
                     </span>
                   </Tooltip>
+                  {dictationAvailable() && (
+                    <Tooltip title={listening ? "Stop listening" : "Speak your request"}>
+                      <span>
+                        <IconButton
+                          size="small"
+                          color={listening ? "error" : "default"}
+                          onClick={handleDictate}
+                          disabled={running}
+                          aria-label={listening ? "Stop listening" : "Speak your request"}
+                        >
+                          <MicIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  )}
                   <Tooltip
                     title={recording ? "Finish teaching" : "Watch Me & Learn"}
                   >
