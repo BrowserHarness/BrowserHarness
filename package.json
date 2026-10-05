@@ -21,6 +21,7 @@
     "smoke:connect": "node scripts/e2e-connect.mjs",
     "smoke:docs": "node scripts/e2e-docs.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
-    "smoke:bridge": "node scripts/e2e-bridge.mjs"
+    "smoke:bridge": "node scripts/e2e-bridge.mjs",
+    "smoke:deep": "node scripts/e2e-deep.mjs"
   }
 }

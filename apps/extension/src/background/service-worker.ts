@@ -27,6 +27,7 @@ import {
 import {
   captureAxSnapshot,
   elementForAxRef,
+  accessibleNameForRef,
   findAxElements
 } from "./cdp-semantic";
 import {
@@ -2147,8 +2148,12 @@ async function runTool(
       };
     }
 
-    const element = elementForAxRef(tabId, input.element_id);
-    const label = element?.name || "";
+    // Refs from observe_page work here too, so look the name up when the
+    // ref did not come from the latest ax_snapshot.
+    let label = elementForAxRef(tabId, input.element_id)?.name || "";
+    if (!label) {
+      label = await accessibleNameForRef(tabId, input.element_id).catch(() => "");
+    }
     const risky = isRiskyTrustedLabel(label);
 
     if (risky && !options.approvalGranted) {

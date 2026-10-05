@@ -42,6 +42,20 @@ export interface AxFindOptions {
   limit?: number;
 }
 
+interface DomNode {
+  nodeId: number;
+  backendNodeId: number;
+  nodeType: number;
+  attributes?: string[];
+  children?: DomNode[];
+  shadowRoots?: DomNode[];
+  contentDocument?: DomNode;
+  shadowRootType?: string;
+}
+
+/** The page attribute that holds an element's @eN ref (shared with the content script). */
+export const REF_ATTRIBUTE = "data-browserharness-ref";
+
 const refsByTab = new Map<number, Map<string, number>>();
 const elementsByTab = new Map<number, Map<string, AxSemanticElement>>();
 
@@ -90,6 +104,56 @@ function propertyChecked(
   return undefined;
 }
 
+interface DomIndex {
+  /** backendNodeId → the element itself, or the parent element of a text node. */
+  elementFor: Map<number, DomNode>;
+  /** ref attribute value (eN) → backendNodeId. */
+  byRef: Map<string, number>;
+  highest: number;
+}
+
+function refOf(node: DomNode): string {
+  const attributes = node.attributes || [];
+  for (let index = 0; index < attributes.length; index += 2) {
+    if (attributes[index] === REF_ATTRIBUTE) return attributes[index + 1] || "";
+  }
+  return "";
+}
+
+/** One pass over the whole page, shadow roots and same-process iframes included. */
+async function indexDom(tabId: number): Promise<DomIndex> {
+  const { root } = await cdpCommand<{ root: DomNode }>(tabId, "DOM.getDocument", {
+    depth: -1,
+    pierce: true
+  });
+  const index: DomIndex = { elementFor: new Map(), byRef: new Map(), highest: 0 };
+  const stack: Array<{ node: DomNode; parent: DomNode | null }> = [{ node: root, parent: null }];
+  while (stack.length) {
+    const { node, parent } = stack.pop()!;
+    if (node.nodeType === 1) {
+      index.elementFor.set(node.backendNodeId, node);
+      const ref = refOf(node);
+      if (ref) {
+        index.byRef.set(ref, node.backendNodeId);
+        const match = /^e(\d+)$/.exec(ref);
+        if (match) index.highest = Math.max(index.highest, Number(match[1]));
+      }
+    } else if (node.nodeType === 3 && parent?.nodeType === 1) {
+      index.elementFor.set(node.backendNodeId, parent);
+    }
+    const element = node.nodeType === 1 ? node : parent;
+    for (const child of [
+      ...(node.children || []),
+      // Browser-owned shadow trees (inside <input>, <video>…) cannot carry refs.
+      ...(node.shadowRoots || []).filter((shadow) => shadow.shadowRootType !== "user-agent"),
+      ...(node.contentDocument ? [node.contentDocument] : [])
+    ]) {
+      stack.push({ node: child, parent: element });
+    }
+  }
+  return index;
+}
+
 export async function captureAxSnapshot(
   tabId: number,
   maxElements = 300
@@ -98,10 +162,12 @@ export async function captureAxSnapshot(
     tabId,
     "Accessibility.getFullAXTree"
   );
+  const dom = await indexDom(tabId);
 
   const refs = new Map<string, number>();
   const elements: AxSemanticElement[] = [];
-  let counter = 0;
+  const seen = new Set<number>();
+  let counter = dom.highest;
 
   for (const node of result.nodes || []) {
     if (node.ignored || !node.backendDOMNodeId) continue;
@@ -114,11 +180,30 @@ export async function captureAxSnapshot(
     if (!INTERACTIVE_ROLES.has(role) && !name) continue;
     if (elements.length >= maxElements) break;
 
-    const ref = `@e${++counter}`;
-    refs.set(ref, node.backendDOMNodeId);
+    // Refs live on page elements (text nodes use their parent), so the
+    // same @eN works for observe_page, ax_snapshot and every action tool.
+    const target = dom.elementFor.get(node.backendDOMNodeId);
+    if (!target || seen.has(target.backendNodeId)) continue;
+    seen.add(target.backendNodeId);
+    let attribute = refOf(target);
+    if (!attribute) {
+      attribute = `e${counter + 1}`;
+      try {
+        await cdpCommand(tabId, "DOM.setAttributeValue", {
+          nodeId: target.nodeId,
+          name: REF_ATTRIBUTE,
+          value: attribute
+        });
+      } catch {
+        continue;
+      }
+      counter += 1;
+    }
+    const ref = `@${attribute}`;
+    refs.set(ref, target.backendNodeId);
     elements.push({
       element_id: ref,
-      backend_node_id: node.backendDOMNodeId,
+      backend_node_id: target.backendNodeId,
       role: role || "generic",
       name,
       ...(value ? { value } : {}),
@@ -226,17 +311,55 @@ export function findAxElements(
     .map((item) => item.element);
 }
 
-export function backendNodeForRef(
+async function nodeStillHasRef(tabId: number, backendNodeId: number, ref: string): Promise<boolean> {
+  try {
+    const { node } = await cdpCommand<{ node: DomNode }>(tabId, "DOM.describeNode", {
+      backendNodeId
+    });
+    return refOf(node) === ref.slice(1);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The page element behind an @eN ref, from ax_snapshot or observe_page alike.
+ * A ref whose element has left the page fails loudly instead of hitting
+ * whatever element now sits there.
+ */
+export async function backendNodeForRef(
   tabId: number,
   ref: string
-): number {
-  const backendNodeId = refsByTab.get(tabId)?.get(ref);
-  if (!backendNodeId) {
+): Promise<number> {
+  const remembered = refsByTab.get(tabId)?.get(ref);
+  if (remembered && (await nodeStillHasRef(tabId, remembered, ref))) {
+    return remembered;
+  }
+  const found = /^@e\d+$/.test(ref)
+    ? (await indexDom(tabId)).byRef.get(ref.slice(1))
+    : undefined;
+  if (!found) {
     throw new Error(
-      `Unknown or stale accessibility ref: ${ref}. Capture a fresh ax_snapshot.`
+      `Unknown or stale element ref: ${ref}. It is not on the page any more; observe the page again and use a current ref.`
     );
   }
-  return backendNodeId;
+  const refs = refsByTab.get(tabId) || new Map<string, number>();
+  refs.set(ref, found);
+  refsByTab.set(tabId, refs);
+  return found;
+}
+
+/** The accessible name of a ref's element, for approval checks. */
+export async function accessibleNameForRef(tabId: number, ref: string): Promise<string> {
+  const known = elementsByTab.get(tabId)?.get(ref);
+  if (known) return known.name;
+  const backendNodeId = await backendNodeForRef(tabId, ref);
+  const { nodes } = await cdpCommand<{ nodes?: AxNode[] }>(
+    tabId,
+    "Accessibility.getPartialAXTree",
+    { backendNodeId, fetchRelatives: false }
+  );
+  return valueOf(nodes?.find((node) => !node.ignored)?.name).trim();
 }
 
 export function elementForAxRef(

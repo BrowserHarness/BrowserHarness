@@ -31,7 +31,7 @@ export async function selectOptions(
     throw new Error("select_option requires at least one value");
   }
 
-  const backendNodeId = backendNodeForRef(tabId, ref);
+  const backendNodeId = await backendNodeForRef(tabId, ref);
   await cdpCommand(tabId, "DOM.scrollIntoViewIfNeeded", {
     backendNodeId
   });
