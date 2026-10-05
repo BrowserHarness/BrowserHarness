@@ -906,9 +906,9 @@ describe("Browser MVP engine scenarios", () => {
       })
     });
 
-    await expect(
-      runBrowserTask("Keep trying", h.dependencies)
-    ).rejects.toThrow("repeated action loop");
+    const result = await runBrowserTask("Keep trying", h.dependencies);
+    expect(result.status).toBe("stopped");
+    expect(result.message).toContain("kept repeating the same click");
 
     expect(
       h.toolMock.mock.calls.filter(([tool]) => tool === "click")
@@ -961,18 +961,26 @@ describe("Browser MVP engine scenarios", () => {
     ).toHaveLength(1);
   });
 
-  it("fails clearly when the initial page cannot be observed", async () => {
-    const tool = vi.fn(async () => ({
-      ok: false,
-      error: {
-        code: "UNSUPPORTED_PAGE",
-        message: "Protected browser page"
-      }
-    })) as BrowserEngineDependencies["tool"];
+  it("can start from a page it cannot read, such as the New Tab page", async () => {
+    const tool = vi.fn(async (name: string) =>
+      name === "observe_page"
+        ? {
+            ok: false,
+            error: {
+              code: "UNSUPPORTED_PAGE",
+              message: "Protected browser page"
+            }
+          }
+        : { ok: true, data: {} }
+    ) as BrowserEngineDependencies["tool"];
+    const seen: string[] = [];
 
     const dependencies: BrowserEngineDependencies = {
-      decide: async () => {
-        throw new Error("should not decide");
+      decide: async ({ observation }) => {
+        seen.push(observation.visible_text);
+        return {
+          decision: { kind: "final", message: "Opened nothing yet." }
+        };
       },
       tool,
       approvalDescription: () => null,
@@ -982,10 +990,51 @@ describe("Browser MVP engine scenarios", () => {
       withActivity: async (_label, operation) => operation()
     };
 
-    await expect(
-      runBrowserTask("Summarize this page", dependencies)
-    ).rejects.toThrow("Protected browser page");
+    const result = await runBrowserTask("Go to youtube", dependencies);
+    expect(result.status).toBe("completed");
+    expect(seen[0]).toContain("Protected browser page");
+    expect(seen[0]).toContain("navigate or open_tab");
   });
+
+  it("keeps going after a failed action and stops after three in a row", async () => {
+    const button = {
+      element_id: "@e1",
+      tag: "button",
+      role: "button",
+      accessible_name: "Go",
+      visible: true,
+      disabled: false
+    };
+    let turn = 0;
+    const h = harness({
+      observations: Array.from({ length: 10 }, (_, index) =>
+        page(1, `Page ${index}`, `text ${index}`, [button])
+      ),
+      decisions: () => {
+        turn += 1;
+        return {
+          kind: "tool",
+          tool: "type",
+          input: { element_id: "@e1", text: `try ${turn}` },
+          note: "Typing"
+        };
+      },
+      toolResults: {
+        type: Array.from({ length: 3 }, () => ({
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "Element is not text-editable"
+          }
+        }))
+      }
+    });
+    const result = await runBrowserTask("Fill it", h.dependencies);
+    expect(result.status).toBe("stopped");
+    expect(result.message).toContain("3 failed actions in a row");
+    expect(result.message).toContain("not text-editable");
+  });
+
   it("emits structured evidence only for successful browser actions", async () => {
     const searchElement = {
       element_id: "bc-search",

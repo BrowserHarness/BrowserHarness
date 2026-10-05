@@ -834,6 +834,15 @@ export async function trustedKey(
   tabId: number,
   key: string
 ): Promise<{ key: string }> {
+  // Named keys (Enter, Tab, arrows, Backspace...) need their virtual key code
+  // and text to do anything real; the send_keys builder sets both.
+  try {
+    parseTrustedKeySequence(key, "linux");
+    await trustedSendKeys(tabId, key, 1, "linux");
+    return { key };
+  } catch {
+    // Not a named key the builder knows: fall through to a raw key event.
+  }
   await enableFocusEmulation(tabId);
   const code =
     key === "Enter"

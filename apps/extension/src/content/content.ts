@@ -16,7 +16,7 @@ type ContentRequest =
   | { type: "OBSERVE_PAGE"; tab_id: number }
   | {
       type: "EXECUTE_CONTENT_ACTION";
-      action: "click" | "type" | "press_key" | "scroll" | "focus_editor";
+      action: "click" | "type" | "press_key" | "scroll" | "focus_editor" | "focus";
       input: Record<string, unknown>;
     }
   | { type: "WATCH_ARM" }
@@ -794,6 +794,43 @@ function writeText(
   throw new Error("Element is not text-editable");
 }
 
+function isScrollable(element: Element): boolean {
+  const style = getComputedStyle(element);
+  return (
+    /(auto|scroll|overlay)/.test(style.overflowY) &&
+    element.scrollHeight > element.clientHeight + 4
+  );
+}
+
+/**
+ * Apps like Gmail, Slack and Notion scroll an inner panel, not the window:
+ * scroll the panel around the target (or the middle of the screen) when the
+ * page itself cannot scroll.
+ */
+function scrollTargetFor(elementId?: string): Window | HTMLElement {
+  const nearestScrollable = (start: Element | null): HTMLElement | null => {
+    for (let node = start; node && node !== document.documentElement; node = node.parentElement) {
+      if (node !== document.body && isScrollable(node)) return node as HTMLElement;
+    }
+    return null;
+  };
+  if (elementId) {
+    try {
+      const inner = nearestScrollable(getElement(elementId));
+      if (inner) return inner;
+    } catch {
+      // Unknown element: fall back to the page.
+    }
+  }
+  const page = document.scrollingElement;
+  if (page && page.scrollHeight > window.innerHeight + 4) return window;
+  return (
+    nearestScrollable(
+      document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2)
+    ) || window
+  );
+}
+
 function execute(action: Extract<ContentRequest, { type: "EXECUTE_CONTENT_ACTION" }>) {
   const { input } = action;
   switch (action.action) {
@@ -822,20 +859,43 @@ function execute(action: Extract<ContentRequest, { type: "EXECUTE_CONTENT_ACTION
     }
     case "type":
       return writeText(getElement(input.element_id), String(input.text ?? ""), input.replace !== false);
+    case "focus": {
+      const element = getElement(input.element_id);
+      element.scrollIntoView({ block: "center", inline: "nearest" });
+      element.focus();
+      return { focused: String(input.element_id) };
+    }
     case "press_key": {
       const element =
         typeof input.element_id === "string" ? getElement(input.element_id) : document.activeElement;
       const key = String(input.key ?? "");
-      element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
-      element?.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true }));
+      const keyCode = key === "Enter" ? 13 : key === "Tab" ? 9 : key === "Escape" ? 27 : 0;
+      const init = { key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true } as KeyboardEventInit;
+      const proceed = element?.dispatchEvent(new KeyboardEvent("keydown", init)) ?? false;
+      element?.dispatchEvent(new KeyboardEvent("keyup", init));
+      // Synthetic Enter never submits a form by itself; do what a real one would.
+      const form = (element as HTMLInputElement | null)?.form;
+      if (key === "Enter" && proceed && form) {
+        form.requestSubmit();
+        return { key, submitted: true };
+      }
       return { key };
     }
     case "scroll": {
       const direction = String(input.direction ?? "down");
-      const amount = Number(input.amount ?? Math.round(window.innerHeight * 0.75));
+      const parsed = Number.parseFloat(String(input.amount ?? ""));
+      const target = scrollTargetFor(
+        typeof input.element_id === "string" ? input.element_id : undefined
+      );
+      const viewport = target === window ? window.innerHeight : (target as HTMLElement).clientHeight;
+      const amount = Number.isFinite(parsed) && parsed > 0 ? parsed : Math.round(viewport * 0.75);
       const y = direction === "up" ? -Math.abs(amount) : Math.abs(amount);
-      window.scrollBy({ top: y, behavior: "smooth" });
-      return { direction, amount };
+      target.scrollBy({ top: y, behavior: "instant" as ScrollBehavior });
+      return {
+        direction,
+        amount,
+        container: target === window ? "page" : "inner"
+      };
     }
   }
 }

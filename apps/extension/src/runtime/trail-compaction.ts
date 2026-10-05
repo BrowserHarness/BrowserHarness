@@ -30,10 +30,15 @@ export function digestTrailEntry(entry: string): string {
  */
 export function renderTrailForPrompt(
   trail: string[],
-  keep = TRAIL_RECENT_KEEP
+  keep = TRAIL_RECENT_KEEP,
+  maxEntry = Number.POSITIVE_INFINITY
 ): string {
   if (trail.length === 0) return "No actions yet.";
-  const recent = trail.slice(-keep);
+  const recent = trail
+    .slice(-keep)
+    .map((entry) =>
+      entry.length > maxEntry ? `${entry.slice(0, maxEntry - 1)}…` : entry
+    );
   const older = trail.slice(0, Math.max(trail.length - keep, 0));
   if (older.length === 0) return recent.join("\n");
 
