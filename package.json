@@ -16,6 +16,7 @@
     "test": "npm run test --workspaces --if-present",
     "validate:mvp": "node scripts/validate-mvp.mjs",
     "smoke:e2e": "node scripts/e2e-smoke.mjs",
-    "smoke:agent": "node scripts/e2e-agent.mjs"
+    "smoke:agent": "node scripts/e2e-agent.mjs",
+    "smoke:subscription": "node scripts/e2e-subscription.mjs"
   }
 }

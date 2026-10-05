@@ -41,6 +41,7 @@ let reconnectTimer: number | undefined;
 let currentSettings: BridgeSettings | null = null;
 let handler: BridgeCommandHandler | null = null;
 const pendingMcp = new Map<string, PendingMcpRequest>();
+const pendingLlm = new Map<string, PendingMcpRequest>();
 
 function clearTimers() {
   if (heartbeatTimer !== undefined) {
@@ -67,6 +68,18 @@ function disconnect() {
     });
   }
   pendingMcp.clear();
+  for (const pending of pendingLlm.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({
+      ok: false,
+      error: {
+        code: "BRIDGE_DISCONNECTED",
+        message:
+          "BrowserHarness Bridge disconnected before the subscription request completed"
+      }
+    });
+  }
+  pendingLlm.clear();
 
   if (socket) {
     const existing = socket;
@@ -135,6 +148,37 @@ async function handleMessage(raw: MessageEvent) {
             }
           })
     });
+    return;
+  }
+
+  if (
+    value.type === "llm_result" &&
+    typeof value.id === "string"
+  ) {
+    const pending = pendingLlm.get(value.id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingLlm.delete(value.id);
+    const errorValue = value.error as
+      | { code?: unknown; message?: unknown }
+      | undefined;
+    pending.resolve(
+      value.ok === true
+        ? { ok: true, data: value.data }
+        : {
+            ok: false,
+            error: {
+              code:
+                typeof errorValue?.code === "string"
+                  ? errorValue.code
+                  : "LLM_FAILED",
+              message:
+                typeof errorValue?.message === "string"
+                  ? errorValue.message
+                  : "Subscription request failed"
+            }
+          }
+    );
     return;
   }
 
@@ -353,6 +397,68 @@ export async function requestBridgeMcp(
             error instanceof Error
               ? error.message
               : "Could not send outbound MCP request"
+        }
+      });
+    }
+  });
+}
+
+/**
+ * Ask the Bridge to run a prompt through the user's own ChatGPT or Claude
+ * subscription via the vendor's official CLI. The extension names an adapter
+ * and a model only; the Bridge owns the command line.
+ */
+export async function requestBridgeLlm(
+  action: "status" | "complete",
+  args: Record<string, unknown>,
+  timeoutMs = 150_000
+): Promise<BridgeRpcResult> {
+  if (
+    !socket ||
+    socket.readyState !== WebSocket.OPEN ||
+    !currentSettings?.enabled
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: "BRIDGE_DISCONNECTED",
+        message:
+          "Connect the Local Agent Bridge (Settings) before using a ChatGPT or Claude subscription"
+      }
+    };
+  }
+
+  const id = crypto.randomUUID();
+
+  return new Promise<BridgeRpcResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingLlm.delete(id);
+      resolve({
+        ok: false,
+        error: {
+          code: "LLM_REQUEST_TIMEOUT",
+          message: "The subscription request timed out"
+        }
+      });
+    }, timeoutMs) as unknown as number;
+
+    pendingLlm.set(id, { resolve, timer });
+
+    try {
+      socket?.send(
+        JSON.stringify({ type: "llm_request", id, action, args })
+      );
+    } catch (error) {
+      clearTimeout(timer);
+      pendingLlm.delete(id);
+      resolve({
+        ok: false,
+        error: {
+          code: "BRIDGE_DISCONNECTED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not send the subscription request"
         }
       });
     }

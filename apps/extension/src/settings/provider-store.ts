@@ -7,7 +7,9 @@ export type ProviderId =
   | "openai"
   | "anthropic"
   | "nvidia"
-  | "openai-compatible";
+  | "openai-compatible"
+  | "claude-subscription"
+  | "chatgpt-subscription";
 
 export interface ProviderConfig {
   provider: ProviderId;
@@ -45,6 +47,12 @@ export interface ProviderDefinition {
   label: string;
   defaultBaseUrl?: string;
   modelDiscovery: "openai-models" | "manual";
+  /**
+   * Subscription providers run on the user's own ChatGPT or Claude plan
+   * through the vendor's official CLI, driven by the local Bridge. They have
+   * no API key and no base URL.
+   */
+  subscriptionAdapter?: "claude_cli" | "codex_cli";
 }
 
 export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
@@ -69,8 +77,37 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
     id: "openai-compatible",
     label: "OpenAI-compatible",
     modelDiscovery: "openai-models"
+  },
+  "claude-subscription": {
+    id: "claude-subscription",
+    label: "Claude subscription",
+    modelDiscovery: "manual",
+    subscriptionAdapter: "claude_cli"
+  },
+  "chatgpt-subscription": {
+    id: "chatgpt-subscription",
+    label: "ChatGPT subscription",
+    modelDiscovery: "manual",
+    subscriptionAdapter: "codex_cli"
   }
 };
+
+export function isSubscriptionProvider(provider: ProviderId): boolean {
+  return Boolean(PROVIDERS[provider]?.subscriptionAdapter);
+}
+
+export function subscriptionAdapterFor(
+  provider: ProviderId
+): "claude_cli" | "codex_cli" | undefined {
+  return PROVIDERS[provider]?.subscriptionAdapter;
+}
+
+/** True when the connection has what it needs to make a request. */
+export function hasCredentials(
+  config: Pick<ProviderConfig, "provider" | "apiKey">
+): boolean {
+  return isSubscriptionProvider(config.provider) || Boolean(config.apiKey);
+}
 
 const LEGACY_KEY = "browserharness.providerConfig";
 const CONNECTIONS_KEY = "browserharness.providerConnections";
@@ -96,6 +133,18 @@ export function connectionIdFor(config: Pick<ProviderConfig, "provider" | "model
   ].join("::");
 }
 
+// Text in, text out through a CLI: no screenshots, no embeddings.
+const SUBSCRIPTION_CAPABILITIES: ModelCapabilities = {
+  chat: true,
+  agent: true,
+  vision: false,
+  embedding: false,
+  reranker: false,
+  audio: false,
+  image: false,
+  unknown: false
+};
+
 export function createConnection(
   config: ProviderConfig,
   health?: Partial<
@@ -110,7 +159,9 @@ export function createConnection(
     ...config,
     id,
     label: `${PROVIDERS[config.provider].label} · ${config.model}`,
-    capabilities: classifyModelCapabilities(config.model),
+    capabilities: isSubscriptionProvider(config.provider)
+      ? SUBSCRIPTION_CAPABILITIES
+      : classifyModelCapabilities(config.model),
     chatHealth: health?.chatHealth || { status: "unknown" },
     agentHealth: health?.agentHealth || { status: "unknown" },
     embeddingHealth:

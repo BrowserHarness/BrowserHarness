@@ -1,8 +1,10 @@
 import { renderTrailForPrompt } from "./trail-compaction";
 import {
+  isSubscriptionProvider,
   providerBaseUrl,
   type ProviderConfig
 } from "../settings/provider-store";
+import { subscriptionComplete } from "./subscription-client";
 import type { PageObservation, ToolName } from "./protocol";
 import type { TabEvidence } from "./tab-evidence";
 import type { TaskEpisodeMemory } from "./task-memory";
@@ -326,7 +328,10 @@ export async function embedTexts(
   inputs: string[],
   signal?: AbortSignal
 ): Promise<EmbeddingResult> {
-  if (config.provider === "anthropic") {
+  if (
+    config.provider === "anthropic" ||
+    isSubscriptionProvider(config.provider)
+  ) {
     throw new Error(
       "This provider does not expose an OpenAI-compatible embeddings endpoint."
     );
@@ -491,6 +496,10 @@ async function openAICompatibleRequest(
   signal?: AbortSignal,
   allowNvidiaFallback = false
 ): Promise<string> {
+  if (isSubscriptionProvider(config.provider)) {
+    return subscriptionComplete(config, body.messages, timeoutMs, signal);
+  }
+
   const base = providerBaseUrl(config.provider, config.baseUrl);
   if (!base) throw new Error("Provider base URL is missing.");
 
@@ -870,6 +879,7 @@ export async function nextAgentDecision(
   }
 ): Promise<AgentDecision> {
   const visionAvailable =
+    !isSubscriptionProvider(config.provider) &&
     classifyModelCapabilities(config.model).vision;
 
   if (screenshotDataUrl && !visionAvailable) {

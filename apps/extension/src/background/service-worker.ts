@@ -12,6 +12,7 @@ import {
   type PendingExplain
 } from "../runtime/quick-explain";
 import {
+  requestBridgeLlm,
   startBridgeClient,
   type BridgeCommand
 } from "./bridge-client";
@@ -2722,6 +2723,37 @@ chrome.runtime.onMessage.addListener(
   ) => {
     void (async () => {
       try {
+        if (request.type === "BRIDGE_LLM") {
+          // Content scripts share our id but report the page URL: only extension pages may spend the subscription.
+          if (
+            sender.id !== chrome.runtime.id ||
+            !sender.url?.startsWith(chrome.runtime.getURL(""))
+          ) {
+            sendResponse({
+              ok: false,
+              error: {
+                code: "FORBIDDEN",
+                message: "Subscription requests are only accepted from BrowserHarness pages"
+              }
+            });
+            return;
+          }
+          const result = await requestBridgeLlm(
+            request.action,
+            request.action === "status"
+              ? { adapter: request.adapter }
+              : {
+                  adapter: request.adapter,
+                  model: request.model,
+                  system: request.system,
+                  prompt: request.prompt,
+                  timeout_ms: request.timeout_ms
+                }
+          );
+          sendResponse(result);
+          return;
+        }
+
         if (request.type === "GET_CURRENT_TAB") {
           const tab = await activeTab();
           sendResponse({

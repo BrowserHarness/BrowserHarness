@@ -16,6 +16,7 @@ import {
   REMOTE_MIN_TOKEN_LENGTH
 } from "./core.mjs";
 import { serveBrowserHarnessMcp } from "./mcp.mjs";
+import { createLlmAdapterManager } from "./llm-adapters.mjs";
 import {
   createMcpClientManager,
   DEFAULT_MCP_SERVERS_FILE
@@ -112,6 +113,7 @@ async function serve(config) {
     port: config.port,
     token: config.token,
     allowRemote: config.allow_remote === true,
+    llmManager: createLlmAdapterManager(),
     mcpManager
   });
   const address = await bridge.listen();
