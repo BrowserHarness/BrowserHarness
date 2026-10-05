@@ -10,6 +10,7 @@ import {
   FormControl,
   IconButton,
   InputLabel,
+  ListSubheader,
   MenuItem,
   Paper,
   Select,
@@ -24,6 +25,8 @@ import {
   loadConnections,
   loadRoutingConfig,
   providerBaseUrl,
+  hasEditableBaseUrl,
+  isLocalProvider,
   isSubscriptionProvider,
   removeConnection,
   saveConnection,
@@ -41,6 +44,10 @@ import {
 import {
   classifyModelCapabilities
 } from "../settings/model-capabilities";
+import {
+  checkSubscriptionReady,
+  type SubscriptionReadiness
+} from "../runtime/subscription-client";
 import {
   testAgentCapability,
   testChatCapability,
@@ -100,6 +107,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
   const [routing, setRouting] = useState<RuntimeRoutingConfig>({});
   const [endpointAccess, setEndpointAccess] = useState(true);
+  const [readiness, setReadiness] = useState<SubscriptionReadiness | null>(null);
 
   const providerDefinition = PROVIDERS[provider];
   const effectiveBaseUrl = useMemo(
@@ -108,6 +116,12 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   );
   const discoveryAvailable =
     providerDefinition.modelDiscovery === "openai-models";
+  const subscription = isSubscriptionProvider(provider);
+  const local = isLocalProvider(provider);
+  const needsKey = !subscription && !local;
+  const editableBaseUrl = hasEditableBaseUrl(provider);
+  const readyToDiscover =
+    discoveryAvailable && (!needsKey || Boolean(apiKey.trim())) && Boolean(effectiveBaseUrl);
 
   const refreshRegistry = async () => {
     const [saved, currentRouting] = await Promise.all([
@@ -123,7 +137,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (provider !== "openai-compatible" || !effectiveBaseUrl) {
+    if (!editableBaseUrl || !effectiveBaseUrl) {
       setEndpointAccess(true);
       return;
     }
@@ -131,16 +145,29 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     void hasEndpointAccess(effectiveBaseUrl).then(setEndpointAccess);
   }, [provider, effectiveBaseUrl]);
 
+  const recheckSubscription = async () => {
+    setReadiness(null);
+    setReadiness(await checkSubscriptionReady(provider));
+  };
+
+  useEffect(() => {
+    if (!subscription) {
+      setReadiness(null);
+      return;
+    }
+    void recheckSubscription();
+  }, [provider]);
+
   const resetConnectionTest = () => {
     setConnectionState("idle");
     setConnectionMessage("");
   };
 
   const loadModels = async (signal?: AbortSignal) => {
-    if (!discoveryAvailable || !apiKey.trim() || !effectiveBaseUrl) return;
+    if (!readyToDiscover) return;
 
     if (
-      provider === "openai-compatible" &&
+      editableBaseUrl &&
       !(await hasEndpointAccess(effectiveBaseUrl))
     ) {
       setEndpointAccess(false);
@@ -189,7 +216,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
   };
 
   useEffect(() => {
-    if (!discoveryAvailable || !apiKey.trim() || !effectiveBaseUrl) {
+    if (!readyToDiscover) {
       setModels([]);
       setModelsError("");
       return;
@@ -204,7 +231,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [provider, apiKey, effectiveBaseUrl, discoveryAvailable]);
+  }, [provider, apiKey, effectiveBaseUrl, discoveryAvailable, readyToDiscover]);
 
   const handleProviderChange = (next: ProviderId) => {
     setProvider(next);
@@ -221,13 +248,13 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     apiKey: apiKey.trim(),
     model: model.trim(),
     baseUrl:
-      provider === "openai-compatible" || provider === "nvidia"
+      editableBaseUrl || provider === "nvidia"
         ? effectiveBaseUrl
         : undefined
   });
 
   const handleTestAndSave = async () => {
-    if (provider === "openai-compatible") {
+    if (editableBaseUrl) {
       const granted = await ensureEndpointAccess(effectiveBaseUrl);
       setEndpointAccess(granted);
       if (!granted) {
@@ -405,7 +432,6 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
     await refreshRegistry();
   };
 
-  const subscription = isSubscriptionProvider(provider);
   const modelIds = subscription
     ? provider === "claude-subscription"
       ? ["default", "sonnet", "opus", "haiku"]
@@ -438,28 +464,32 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                   handleProviderChange(event.target.value as ProviderId)
                 }
               >
+                <ListSubheader>Use your subscription (no API key)</ListSubheader>
+                <MenuItem value="claude-subscription">
+                  Claude subscription
+                </MenuItem>
+                <MenuItem value="chatgpt-subscription">
+                  ChatGPT subscription
+                </MenuItem>
+                <ListSubheader>Models on this computer</ListSubheader>
+                <MenuItem value="lm-studio">LM Studio (local)</MenuItem>
+                <MenuItem value="ollama">Ollama (local)</MenuItem>
+                <ListSubheader>API key</ListSubheader>
                 <MenuItem value="openai">OpenAI</MenuItem>
                 <MenuItem value="anthropic">Anthropic</MenuItem>
                 <MenuItem value="nvidia">NVIDIA</MenuItem>
                 <MenuItem value="openai-compatible">
-                  OpenAI-compatible
-                </MenuItem>
-                <MenuItem value="claude-subscription">
-                  Claude subscription (no API key)
-                </MenuItem>
-                <MenuItem value="chatgpt-subscription">
-                  ChatGPT subscription (no API key)
+                  OpenAI-compatible (Groq, OpenRouter, others)
                 </MenuItem>
               </Select>
             </FormControl>
 
-            {(provider === "nvidia" ||
-              provider === "openai-compatible") && (
+            {(provider === "nvidia" || editableBaseUrl) && (
               <TextField
                 label="Base URL"
                 value={effectiveBaseUrl}
                 onChange={(event) => {
-                  if (provider === "openai-compatible") {
+                  if (editableBaseUrl) {
                     setBaseUrl(event.target.value);
                     resetConnectionTest();
                   }
@@ -470,13 +500,15 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                 helperText={
                   provider === "nvidia"
                     ? "NVIDIA hosted NIM API endpoint"
-                    : "Example: https://api.groq.com/openai/v1"
+                    : local
+                      ? "Change this only if your local server uses another port."
+                      : "Example: https://api.groq.com/openai/v1"
                 }
                 fullWidth
               />
             )}
 
-            {provider === "openai-compatible" &&
+            {editableBaseUrl &&
               effectiveBaseUrl &&
               !endpointAccess && (
                 <Button
@@ -495,29 +527,59 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                 </Button>
               )}
 
-            {subscription ? (
-              <Alert severity="info">
+            {subscription && (
+              <Alert
+                severity={
+                  readiness?.state === "ready"
+                    ? "success"
+                    : readiness
+                      ? "warning"
+                      : "info"
+                }
+                action={
+                  <Button color="inherit" size="small" onClick={() => void recheckSubscription()}>
+                    Check again
+                  </Button>
+                }
+              >
+                <strong>
+                  {readiness
+                    ? readiness.state === "ready"
+                      ? "Ready. "
+                      : "Not ready yet. "
+                    : "Checking… "}
+                </strong>
+                {readiness?.message}
+                <br />
                 {provider === "claude-subscription"
-                  ? "Uses your Claude plan through the Claude Code app installed and signed in on this computer. "
-                  : "Uses your ChatGPT plan through the Codex CLI installed and signed in on this computer. "}
-                BrowserHarness never sees your login: the Local Agent Bridge
-                (Settings → Local Agent Bridge) runs the official app for each
-                request. Text only, so screenshots are not sent, and each
-                step is slower than an API call.
+                  ? "Uses your Claude plan through the Claude Code app, installed and signed in on the computer that runs the Bridge. "
+                  : "Uses your ChatGPT plan through the Codex CLI, installed and signed in on the computer that runs the Bridge. "}
+                BrowserHarness never sees your login. Text only (no screenshots), and slower per step than an API.
               </Alert>
-            ) : (
-            <TextField
-              label="API key"
-              value={apiKey}
-              onChange={(event) => {
-                setApiKey(event.target.value);
-                resetConnectionTest();
-              }}
-              type="password"
-              autoComplete="off"
-              fullWidth
-              helperText="Stored locally. BrowserHarness never writes provider keys to Git or analytics."
-            />
+            )}
+
+            {local && (
+              <Alert severity="info">
+                {provider === "lm-studio"
+                  ? "No API key needed. In LM Studio, load a model, open the Developer tab and start the local server, then pick the model below."
+                  : "No API key needed. Run Ollama (ollama serve) with a model pulled. If you see a 403 error, start Ollama with OLLAMA_ORIGINS=chrome-extension://* and try again."}{" "}
+                Local models can be slow, so BrowserHarness waits up to two minutes per answer.
+              </Alert>
+            )}
+
+            {needsKey && (
+              <TextField
+                label="API key"
+                value={apiKey}
+                onChange={(event) => {
+                  setApiKey(event.target.value);
+                  resetConnectionTest();
+                }}
+                type="password"
+                autoComplete="off"
+                fullWidth
+                helperText="Stored locally. BrowserHarness never writes provider keys to Git or analytics."
+              />
             )}
 
             <Stack direction="row" spacing={1} alignItems="flex-start">
@@ -551,7 +613,9 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                       (models.length > 0
                         ? `${models.length} models loaded and capability-classified`
                         : discoveryAvailable
-                          ? "Enter the API key to discover models."
+                          ? local
+                            ? "Start the local server to load models, or type a model name."
+                            : "Enter the API key to discover models."
                           : "Enter a chat/instruct model ID.")
                     }
                     slotProps={{
@@ -580,9 +644,7 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
                     <IconButton
                       onClick={() => void loadModels()}
                       disabled={
-                        modelsLoading ||
-                        !apiKey.trim() ||
-                        !effectiveBaseUrl
+                        modelsLoading || !readyToDiscover
                       }
                       aria-label="Reload models"
                       sx={{ mt: 1 }}
@@ -614,10 +676,9 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
               onClick={() => void handleTestAndSave()}
               disabled={
                 connectionState === "testing" ||
-                (!subscription && !apiKey.trim()) ||
+                (needsKey && !apiKey.trim()) ||
                 !model.trim() ||
-                (provider === "openai-compatible" &&
-                  !effectiveBaseUrl)
+                (editableBaseUrl && !effectiveBaseUrl)
               }
             >
               {connectionState === "testing"

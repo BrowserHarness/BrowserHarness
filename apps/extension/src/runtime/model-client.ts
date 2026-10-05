@@ -1,5 +1,6 @@
 import { renderTrailForPrompt } from "./trail-compaction";
 import {
+  isLocalProvider,
   isSubscriptionProvider,
   providerBaseUrl,
   type ProviderConfig
@@ -448,11 +449,16 @@ export async function testEmbeddingCapability(
 }
 
 function openAIHeaders(config: ProviderConfig) {
+  const apiKey = config.apiKey.trim();
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${config.apiKey.trim()}`
+    // Local servers (LM Studio, Ollama) usually have no key.
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
   };
 }
+
+// Models on this computer can take a long time to load and answer.
+const LOCAL_MODEL_MIN_TIMEOUT_MS = 120_000;
 
 export async function fetchWithTimeout(
   url: string,
@@ -479,7 +485,7 @@ export async function fetchWithTimeout(
   } catch (error) {
     if (timedOut) {
       throw new Error(
-        `Model request timed out after ${Math.round(timeoutMs / 1000)} seconds`
+        `Model request timed out after ${Math.round(timeoutMs / 1000)} seconds. The model may be busy, still loading or too slow: try again, or pick a faster model.`
       );
     }
     throw error;
@@ -498,6 +504,9 @@ async function openAICompatibleRequest(
 ): Promise<string> {
   if (isSubscriptionProvider(config.provider)) {
     return subscriptionComplete(config, body.messages, timeoutMs, signal);
+  }
+  if (isLocalProvider(config.provider)) {
+    timeoutMs = Math.max(timeoutMs, LOCAL_MODEL_MIN_TIMEOUT_MS);
   }
 
   const base = providerBaseUrl(config.provider, config.baseUrl);
@@ -789,13 +798,13 @@ export async function testChatCapability(
           "You are a connection test. Reply with OK only.",
           "Reply with OK only.",
           16,
-          12_000,
+          30_000,
           signal
         )
       : await openAICompatibleRequest(
           config,
           chatBody(config, "Reply with OK only.", 16),
-          12_000,
+          30_000,
           signal,
           true
         );

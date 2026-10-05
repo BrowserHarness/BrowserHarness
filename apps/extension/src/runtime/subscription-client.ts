@@ -116,3 +116,51 @@ export async function subscriptionComplete(
   }
   return text;
 }
+
+export type SubscriptionReadiness =
+  | { state: "ready"; message: string }
+  | { state: "bridge_offline"; message: string }
+  | { state: "cli_missing"; message: string }
+  | { state: "error"; message: string };
+
+/** Is the Bridge connected and the vendor's app installed on this computer? */
+export async function checkSubscriptionReady(
+  provider: ProviderConfig["provider"]
+): Promise<SubscriptionReadiness> {
+  const adapter = subscriptionAdapterFor(provider);
+  if (!adapter) {
+    return { state: "error", message: "This provider is not a subscription adapter." };
+  }
+  const appName = adapter === "claude_cli" ? "Claude Code" : "Codex";
+
+  let result: SubscriptionTransportResult;
+  try {
+    result = await transport({ type: "BRIDGE_LLM", action: "status", adapter });
+  } catch (error) {
+    return {
+      state: "error",
+      message: error instanceof Error ? error.message : "Could not reach the Bridge."
+    };
+  }
+
+  if (!result?.ok) {
+    return result?.error?.code === "BRIDGE_DISCONNECTED"
+      ? {
+          state: "bridge_offline",
+          message:
+            "The Local Agent Bridge is not connected. Start it and turn it on in Settings → Local Agent Bridge."
+        }
+      : {
+          state: "error",
+          message: result?.error?.message || "The Bridge could not check this subscription."
+        };
+  }
+
+  const data = (result.data || {}) as { installed?: boolean; version?: string };
+  return data.installed
+    ? { state: "ready", message: `${appName} found${data.version ? ` (${data.version})` : ""}.` }
+    : {
+        state: "cli_missing",
+        message: `${appName} was not found on the computer running the Bridge. Install it and sign in once, then check again.`
+      };
+}
