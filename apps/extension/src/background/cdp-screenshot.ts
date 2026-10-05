@@ -67,7 +67,7 @@ export async function captureCdpScreenshot(
   let mode: "viewport" | "full-page" | "element" = "viewport";
 
   if (typeof options.element_id === "string" && options.element_id) {
-    const backendNodeId = backendNodeForRef(
+    const backendNodeId = await backendNodeForRef(
       tabId,
       options.element_id
     );

@@ -404,7 +404,7 @@ async function pointForRef(
   tabId: number,
   ref: string
 ): Promise<{ x: number; y: number; backendNodeId: number }> {
-  const backendNodeId = backendNodeForRef(tabId, ref);
+  const backendNodeId = await backendNodeForRef(tabId, ref);
 
   await cdpCommand(tabId, "DOM.scrollIntoViewIfNeeded", {
     backendNodeId
@@ -451,7 +451,9 @@ async function targetOwnsPoint(
     {
       objectId,
       functionDeclaration:
-        "function(x,y){const hit=document.elementFromPoint(x,y);return Boolean(hit&&(hit===this||this.contains(hit)));}",
+        // x,y are top-window coordinates; convert them into the target's own
+        // frame, and hit-test inside its shadow root when it has one.
+        "function(x,y){let win=this.ownerDocument.defaultView;let lx=x,ly=y;while(win&&win.frameElement){const frame=win.frameElement;const rect=frame.getBoundingClientRect();lx-=rect.left+frame.clientLeft;ly-=rect.top+frame.clientTop;win=win.parent;}const root=this.getRootNode();const hit=(root.elementFromPoint?root:this.ownerDocument).elementFromPoint(lx,ly);return Boolean(hit&&(hit===this||this.contains(hit)));}",
       arguments: [{ value: x }, { value: y }],
       returnByValue: true
     }
@@ -470,7 +472,7 @@ async function armDeliveryProof(
     {
       objectId,
       functionDeclaration:
-        "function(token){const key='__browserharnessTrustedClickProofs';const root=window;const store=root[key]||(root[key]={});const target=this;const proof={received:false,handler:null};const handler=(event)=>{const node=event.target;proof.received=Boolean(node&&(node===target||target.contains(node)));};proof.handler=handler;store[token]=proof;document.addEventListener('pointerdown',handler,true);document.addEventListener('mousedown',handler,true);return true;}",
+        "function(token){const key='__browserharnessTrustedClickProofs';const root=window;const store=root[key]||(root[key]={});const target=this;const listenOn=target.getRootNode();const proof={received:false,handler:null,listenOn};const handler=(event)=>{const node=event.target;proof.received=proof.received||Boolean(node&&(node===target||target.contains(node)));};proof.handler=handler;store[token]=proof;listenOn.addEventListener('pointerdown',handler,true);listenOn.addEventListener('mousedown',handler,true);return true;}",
       arguments: [{ value: token }],
       returnByValue: true
     }
@@ -488,7 +490,7 @@ async function collectDeliveryProof(
     {
       objectId,
       functionDeclaration:
-        "function(token){const key='__browserharnessTrustedClickProofs';const store=window[key];const proof=store&&store[token];if(!proof)return false;document.removeEventListener('pointerdown',proof.handler,true);document.removeEventListener('mousedown',proof.handler,true);const received=Boolean(proof.received);delete store[token];return received;}",
+        "function(token){const key='__browserharnessTrustedClickProofs';const store=window[key];const proof=store&&store[token];if(!proof)return false;proof.listenOn.removeEventListener('pointerdown',proof.handler,true);proof.listenOn.removeEventListener('mousedown',proof.handler,true);const received=Boolean(proof.received);delete store[token];return received;}",
       arguments: [{ value: token }],
       returnByValue: true
     }
@@ -602,8 +604,8 @@ export async function trustedDrag(
     Math.max(Math.round(Number(steps) || 8), 2),
     30
   );
-  const sourceBackendNodeId = backendNodeForRef(tabId, sourceRef);
-  const targetBackendNodeId = backendNodeForRef(tabId, targetRef);
+  const sourceBackendNodeId = await backendNodeForRef(tabId, sourceRef);
+  const targetBackendNodeId = await backendNodeForRef(tabId, targetRef);
 
   await cdpCommand(tabId, "DOM.scrollIntoViewIfNeeded", {
     backendNodeId: sourceBackendNodeId
@@ -788,7 +790,7 @@ export async function trustedType(
   text: string
 ): Promise<{ typed: number }> {
   await enableFocusEmulation(tabId);
-  const backendNodeId = backendNodeForRef(tabId, ref);
+  const backendNodeId = await backendNodeForRef(tabId, ref);
 
   await cdpCommand(tabId, "DOM.focus", {
     backendNodeId

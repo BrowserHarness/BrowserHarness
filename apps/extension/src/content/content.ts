@@ -1,6 +1,21 @@
 import type { RecordedWorkflowStep, WorkflowLocator } from "../runtime/workflows";
 import { adapterForUrl } from "./adapters/registry";
 import {
+  collectRoots,
+  highestRefNumber,
+  inTopViewport,
+  isButtonElement,
+  isElementNode,
+  isHtmlElement,
+  isInputElement,
+  isSelectElement,
+  isTextAreaElement,
+  queryAllDeep,
+  queryDeep,
+  viewportFirst,
+  type RootInfo
+} from "./page-roots";
+import {
   MAX_INTERACTIVE_ELEMENTS,
   compactVisibleText
 } from "./observation";
@@ -49,7 +64,7 @@ let lastInputSignature = "";
 
 function isVisible(element: Element): boolean {
   const rect = element.getBoundingClientRect();
-  const style = window.getComputedStyle(element);
+  const style = (element.ownerDocument.defaultView || window).getComputedStyle(element);
   return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
 }
 
@@ -57,7 +72,7 @@ function accessibleName(element: HTMLElement): string {
   return (
     element.getAttribute("aria-label") ||
     element.getAttribute("title") ||
-    (element instanceof HTMLInputElement ? element.placeholder || element.name : "") ||
+    (isInputElement(element) ? element.placeholder || element.name : "") ||
     element.innerText ||
     element.textContent ||
     ""
@@ -72,6 +87,23 @@ function ensureId(element: HTMLElement): string {
   return id;
 }
 
+function refSelector(ref: string): string {
+  return `[${REF_ATTR}="${CSS.escape(ref)}"]`;
+}
+
+/**
+ * Refs are numbered across the whole page (frames and shadow roots
+ * included), so one @eN never names two elements.
+ */
+function syncRefCounter(roots: RootInfo[]): void {
+  refCounter = Math.max(
+    refCounter,
+    highestRefNumber(
+      queryAllDeep(`[${REF_ATTR}]`, roots).map(({ element }) => element.getAttribute(REF_ATTR))
+    )
+  );
+}
+
 function ensureSemanticRef(element: HTMLElement): string {
   const existing = element.getAttribute(REF_ATTR);
   if (existing) return `@${existing}`;
@@ -79,11 +111,7 @@ function ensureSemanticRef(element: HTMLElement): string {
   let candidate = "";
   do {
     candidate = `e${++refCounter}`;
-  } while (
-    document.querySelector(
-      `[${REF_ATTR}="${CSS.escape(candidate)}"]`
-    )
-  );
+  } while (element.ownerDocument.querySelector(refSelector(candidate)));
 
   element.setAttribute(REF_ATTR, candidate);
   return `@${candidate}`;
@@ -96,6 +124,7 @@ function semanticSnapshot(
     accessible_name: string;
     tag: string;
     disabled: boolean;
+    in_viewport?: boolean;
     requires_approval?: boolean;
   }>
 ): string {
@@ -106,6 +135,7 @@ function semanticSnapshot(
         : "";
       const flags = [
         element.disabled ? "disabled" : "",
+        element.in_viewport === false ? "offscreen" : "",
         element.requires_approval ? "approval-required" : ""
       ]
         .filter(Boolean)
@@ -136,17 +166,17 @@ const CONSEQUENTIAL_LABEL =
 function riskForElement(element: HTMLElement) {
   const name = accessibleName(element);
   const form =
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement ||
-    element instanceof HTMLButtonElement ||
-    element instanceof HTMLSelectElement
+    isInputElement(element) ||
+    isTextAreaElement(element) ||
+    isButtonElement(element) ||
+    isSelectElement(element)
       ? element.form
       : element.closest("form");
 
   const formMethod = (form?.getAttribute("method") || "get").toLowerCase();
   const isSubmitControl =
-    (element instanceof HTMLButtonElement && element.type === "submit") ||
-    (element instanceof HTMLInputElement &&
+    (isButtonElement(element) && element.type === "submit") ||
+    (isInputElement(element) &&
       ["submit", "image"].includes(element.type));
 
   const labelRisk = CONSEQUENTIAL_LABEL.test(name);
@@ -154,8 +184,8 @@ function riskForElement(element: HTMLElement) {
   const enterSubmitRisk = Boolean(
     form &&
       formMethod !== "get" &&
-      (element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement)
+      (isInputElement(element) ||
+        isTextAreaElement(element))
   );
 
   return {
@@ -241,7 +271,7 @@ function locatorFor(element: HTMLElement): WorkflowLocator {
     element_text: elementText(element) || undefined,
     attributes: recordedAttributes(element),
     input_type:
-      element instanceof HTMLInputElement ? element.type : undefined,
+      isInputElement(element) ? element.type : undefined,
     requires_approval: risk.requires_approval,
     approval_reason: risk.approval_reason,
     enter_requires_approval: risk.enter_requires_approval
@@ -261,15 +291,13 @@ function stepContext(description?: string) {
 }
 
 function interactiveTarget(target: EventTarget | null): HTMLElement | null {
-  if (!(target instanceof Element)) return null;
+  if (!(isElementNode(target))) return null;
   return target.closest<HTMLElement>('a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])');
 }
 
 function findByLocator(locator: WorkflowLocator): HTMLElement | null {
   if (locator.semantic_ref?.startsWith("@e")) {
-    const direct = document.querySelector<HTMLElement>(
-      `[${REF_ATTR}="${CSS.escape(locator.semantic_ref.slice(1))}"]`
-    );
+    const direct = queryDeep<HTMLElement>(refSelector(locator.semantic_ref.slice(1)));
     if (
       direct &&
       isVisible(direct) &&
@@ -350,8 +378,8 @@ function isTextEntryElement(
 ): element is HTMLElement {
   if (!element) return false;
   if (element.isContentEditable) return true;
-  if (element instanceof HTMLTextAreaElement) return true;
-  if (!(element instanceof HTMLInputElement)) return false;
+  if (isTextAreaElement(element)) return true;
+  if (!(isInputElement(element))) return false;
 
   const type = (element.type || "text").toLowerCase();
   return ![
@@ -371,8 +399,8 @@ function isTextEntryElement(
 
 function currentTextValue(element: HTMLElement): string {
   if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement
+    isInputElement(element) ||
+    isTextAreaElement(element)
   ) {
     return element.value;
   }
@@ -395,7 +423,7 @@ function takePendingText(
   }
 
   if (
-    element instanceof HTMLInputElement &&
+    isInputElement(element) &&
     element.type === "password"
   ) {
     pendingTextElement = null;
@@ -499,7 +527,7 @@ document.addEventListener(
     const element = interactiveTarget(event.target);
     if (!element || !isTextEntryElement(element)) return;
     if (
-      element instanceof HTMLInputElement &&
+      isInputElement(element) &&
       element.type === "password"
     ) {
       return;
@@ -539,7 +567,7 @@ document.addEventListener(
 
     flushPendingText();
     const active =
-      document.activeElement instanceof HTMLElement
+      isHtmlElement(document.activeElement)
         ? interactiveTarget(document.activeElement)
         : null;
 
@@ -556,10 +584,21 @@ document.addEventListener(
 function observe(tabId: number) {
   const selector =
     'a,button,input,textarea,select,[contenteditable="true"],[contenteditable="plaintext-only"],[role],[tabindex]:not([tabindex="-1"])';
-  const elements = Array.from(document.querySelectorAll<HTMLElement>(selector))
-    .filter(isVisible)
+  const roots = collectRoots();
+  syncRefCounter(roots);
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  const visible = viewportFirst(
+    queryAllDeep<HTMLElement>(selector, roots)
+      .filter(({ element }) => isHtmlElement(element) && isVisible(element))
+      .map(({ element, info }) => ({
+        element,
+        info,
+        in_viewport: inTopViewport(element.getBoundingClientRect(), info, viewport)
+      }))
+  );
+  const elements = visible
     .slice(0, MAX_INTERACTIVE_ELEMENTS)
-    .map((element) => {
+    .map(({ element, info, in_viewport }) => {
       const semanticRef = ensureSemanticRef(element);
       ensureId(element);
       return {
@@ -569,10 +608,12 @@ function observe(tabId: number) {
       role: roleFor(element),
       accessible_name: accessibleName(element),
       type:
-        element instanceof HTMLInputElement || element instanceof HTMLButtonElement
+        isInputElement(element) || isButtonElement(element)
           ? element.type
           : undefined,
       visible: true,
+      ...(in_viewport ? {} : { in_viewport: false }),
+      ...(info.kind === "document" ? {} : { inside: info.kind }),
       disabled:
         "disabled" in element &&
         Boolean((element as HTMLButtonElement | HTMLInputElement).disabled),
@@ -604,11 +645,22 @@ function observe(tabId: number) {
     tab_id: tabId,
     url: location.href,
     title: document.title,
-    visible_text: compactVisibleText(document.body?.innerText || ""),
+    visible_text: compactVisibleText(
+      [document.body?.innerText || "", ...roots.slice(1).map(rootText)].join("\n")
+    ),
     snapshot: semanticSnapshot(elements),
     elements,
     adapter: adapterForUrl(location.href)
   };
+}
+
+// Text inside frames and shadow roots, which body.innerText leaves out.
+function rootText(info: RootInfo): string {
+  if (info.kind === "frame") return (info.root as Document).body?.innerText || "";
+  return Array.from(info.root.children)
+    .map((child) => (isHtmlElement(child) ? child.innerText : ""))
+    .filter(Boolean)
+    .join("\n");
 }
 
 function getElement(id: unknown): HTMLElement {
@@ -620,14 +672,14 @@ function getElement(id: unknown): HTMLElement {
   }
 
   const element = id.startsWith("@e")
-    ? document.querySelector<HTMLElement>(
-        `[${REF_ATTR}="${CSS.escape(id.slice(1))}"]`
-      )
-    : document.querySelector<HTMLElement>(
-        `[${ID_ATTR}="${CSS.escape(id)}"]`
-      );
+    ? queryDeep<HTMLElement>(refSelector(id.slice(1)))
+    : queryDeep<HTMLElement>(`[${ID_ATTR}="${CSS.escape(id)}"]`);
 
-  if (!element) throw new Error("Element not found");
+  if (!element || !element.isConnected) {
+    throw new Error(
+      `Element ${id} not found on the page any more. Observe the page again and use a current ref.`
+    );
+  }
   return element;
 }
 
@@ -654,7 +706,7 @@ function setNativeControlValue(
   value: string
 ): void {
   const prototype =
-    element instanceof HTMLTextAreaElement
+    isTextAreaElement(element)
       ? HTMLTextAreaElement.prototype
       : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(
@@ -746,11 +798,11 @@ function writeText(
   }
 
   if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement
+    isInputElement(element) ||
+    isTextAreaElement(element)
   ) {
     if (
-      element instanceof HTMLInputElement &&
+      isInputElement(element) &&
       element.type === "password"
     ) {
       throw new Error(
@@ -905,7 +957,7 @@ function replayStep(step: RecordedWorkflowStep) {
     const locator = step.locator;
     const element = locator
       ? findByLocator(locator)
-      : document.activeElement instanceof HTMLElement
+      : isHtmlElement(document.activeElement)
         ? document.activeElement
         : null;
 

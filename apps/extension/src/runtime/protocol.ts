@@ -47,6 +47,10 @@ export interface InteractiveElement {
   accessible_name: string;
   type?: string;
   visible: boolean;
+  /** false when the element is outside the visible part of the window. */
+  in_viewport?: boolean;
+  /** Set for elements inside a same-origin iframe or a shadow root. */
+  inside?: "frame" | "shadow";
   disabled: boolean;
   requires_approval?: boolean;
   approval_reason?: string;

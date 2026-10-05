@@ -41,6 +41,7 @@ function elementLine(element: InteractiveElement): string {
   const flags = [
     element.type ? `type=${element.type}` : "",
     element.disabled ? "disabled" : "",
+    element.in_viewport === false ? "offscreen" : "",
     element.requires_approval ? "approval-required" : ""
   ]
     .filter(Boolean)

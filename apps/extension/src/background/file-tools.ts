@@ -10,7 +10,7 @@ export async function uploadFiles(
     throw new Error("At least one file path is required");
   }
 
-  const backendNodeId = backendNodeForRef(tabId, ref);
+  const backendNodeId = await backendNodeForRef(tabId, ref);
   await cdpCommand(tabId, "DOM.setFileInputFiles", {
     files,
     backendNodeId
@@ -31,7 +31,7 @@ export async function uploadAttachments(
   if (!records.length) {
     throw new Error("At least one attachment is required");
   }
-  const backendNodeId = backendNodeForRef(tabId, ref);
+  const backendNodeId = await backendNodeForRef(tabId, ref);
   const resolved = await cdpCommand<{
     object?: { objectId?: string };
   }>(tabId, "DOM.resolveNode", { backendNodeId });

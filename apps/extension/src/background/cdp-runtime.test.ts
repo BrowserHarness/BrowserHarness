@@ -1,11 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  cdpCommand: vi.fn()
+  cdpCommand: vi.fn(),
+  // A tiny page model: the elements the last AX tree named, and the ref
+  // attributes BrowserHarness stamped on them.
+  page: { ids: [] as number[], refs: new Map<number, string>() }
 }));
 
 vi.mock("./cdp-manager", () => ({
-  cdpCommand: mocks.cdpCommand
+  cdpCommand: async (tabId: number, method: string, params: Record<string, unknown> = {}) => {
+    const { page } = mocks;
+    const node = (id: number) => ({
+      nodeId: id,
+      backendNodeId: id,
+      nodeType: 1,
+      attributes: page.refs.has(id) ? ["data-browserharness-ref", page.refs.get(id)] : []
+    });
+    if (method === "DOM.getDocument") {
+      return { root: { nodeId: 1, backendNodeId: 1, nodeType: 9, children: page.ids.map(node) } };
+    }
+    if (method === "DOM.setAttributeValue") {
+      page.refs.set(Number(params.nodeId), String(params.value));
+      return {};
+    }
+    if (method === "DOM.describeNode") return { node: node(Number(params.backendNodeId)) };
+    const result = await mocks.cdpCommand(tabId, method, params);
+    if (method === "Accessibility.getFullAXTree") {
+      page.ids = (result?.nodes || [])
+        .map((item: { backendDOMNodeId?: number }) => item.backendDOMNodeId)
+        .filter(Boolean);
+      page.refs.clear();
+    }
+    return result;
+  }
 }));
 
 import {
@@ -73,7 +100,7 @@ describe("CDP semantic and trusted-input runtime", () => {
       })
     ]);
     expect(snapshot.text).toContain('@e1 button "Continue"');
-    expect(backendNodeForRef(7, "@e2")).toBe(102);
+    await expect(backendNodeForRef(7, "@e2")).resolves.toBe(102);
     expect(elementForAxRef(7, "@e1")?.name).toBe("Continue");
   });
 

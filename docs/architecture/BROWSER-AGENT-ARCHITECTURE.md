@@ -87,6 +87,7 @@ Each step ships on its own, with real-Chromium checks.
    - **Main view:** `observe_page` uses the CDP accessibility tree (interactive nodes, viewport first, shadow DOM and same-origin iframes included), with one `@eN` ref namespace and a snapshot generation id.
    - **Fallback:** the DOM view only when the debugger cannot attach.
    - **Acceptance:** shadow-DOM and iframe stand-in pages pass, and stale refs fail loudly instead of hitting the wrong element.
+   - **Status (built, different route):** the page view still comes from the content script, which now walks open and closed shadow roots and same-origin iframes, lists on-screen elements first and flags the rest `offscreen`. It does not attach the debugger, so there is no "started debugging" bar just to look at a page. `ax_snapshot`/`find` now reuse and stamp the same `data-browserharness-ref` attribute, so one `@eN` names one element for every tool; CDP tools resolve any ref through the page attribute and refuse a ref whose element is gone. Trusted clicks hit-test inside iframes and shadow roots. `trusted_click` checks the accessible name for approval on any ref. Check: `npm run smoke:deep` (16). Still out of reach: cross-origin iframes (they need per-frame injection or CDP frame targets).
 3. **Actions return the new snapshot.**
    - **What changes:** click, type, key and navigate return the changed page state, so the planner needs no separate observe turn.
    - **Acceptance:** about half the model calls per task in smoke runs.
