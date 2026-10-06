@@ -23,10 +23,13 @@ import type {
 } from "./mcp-catalog";
 import {
   newReadOnlyWorkerToolState,
-  runReadOnlyWorkerTool
+  runReadOnlyWorkerTool,
+  type WorkerMode
 } from "./subagent-policy";
 
 const DEFAULT_MAX_STEPS = 8;
+/** Acting helpers do whole small tasks, so they get more steps. */
+export const MAX_ACTING_HELPER_STEPS = 15;
 const MAX_SOURCES = 6;
 const MAX_TOOLS = 20;
 
@@ -59,6 +62,12 @@ export interface ReadOnlySubagentDependencies {
     operation: () => Promise<T>
   ): Promise<T>;
   onFallback?(): void;
+  /** "act" lets the helper click and type in tabs it opened. Default "read". */
+  mode?: WorkerMode;
+  /** For acting helpers: the approval question for a risky step, or null. */
+  approvalDescription?: BrowserEngineDependencies["approvalDescription"];
+  /** For acting helpers: asks the person; resolves false when declined. */
+  requestApproval?(description: string): Promise<boolean>;
 }
 
 export interface ReadOnlySubagentFinding {
@@ -105,9 +114,11 @@ export async function runReadOnlySubagent(
   maxSteps = DEFAULT_MAX_STEPS
 ): Promise<ReadOnlySubagentFinding> {
   const workerState = newReadOnlyWorkerToolState();
+  const mode = dependencies.mode || "read";
+  const cap = mode === "act" ? MAX_ACTING_HELPER_STEPS : DEFAULT_MAX_STEPS;
   const steps = Math.min(
-    Math.max(Math.round(Number(maxSteps) || DEFAULT_MAX_STEPS), 1),
-    DEFAULT_MAX_STEPS
+    Math.max(Math.round(Number(maxSteps) || cap), 1),
+    cap
   );
 
   const engineDependencies: BrowserEngineDependencies = {
@@ -119,10 +130,17 @@ export async function runReadOnlySubagent(
         input,
         execution,
         workerState,
-        dependencies.baseTool
+        dependencies.baseTool,
+        mode
       ),
-    approvalDescription: () => null,
-    requestApproval: async () => false,
+    approvalDescription:
+      mode === "act" && dependencies.approvalDescription
+        ? dependencies.approvalDescription
+        : () => null,
+    requestApproval:
+      mode === "act" && dependencies.requestApproval
+        ? dependencies.requestApproval
+        : async () => false,
     recallMemory: dependencies.recallMemory,
     recallProcedures: dependencies.recallProcedures,
     discoverMcpCatalog:

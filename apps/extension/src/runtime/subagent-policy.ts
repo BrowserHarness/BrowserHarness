@@ -12,6 +12,8 @@ export interface ReadOnlyWorkerToolState {
 export interface WorkerToolPolicyResult {
   allowed: boolean;
   reason?: string;
+  /** Error code; scope denials end the worker, a missing own tab does not. */
+  code?: string;
 }
 
 const PASSIVE_TOOLS = new Set<ToolName>([
@@ -30,6 +32,24 @@ const OWNED_TAB_CONTEXT_TOOLS = new Set<ToolName>([
   "reload",
   "scroll"
 ]);
+
+/** What an acting helper may do, only in tabs it opened itself. */
+const ACTING_TOOLS = new Set<ToolName>([
+  "click",
+  "type",
+  "press_key",
+  "select_option",
+  "hover",
+  "drag",
+  "trusted_click",
+  "trusted_type",
+  "trusted_key",
+  "send_keys",
+  "dialog",
+  "extract_table"
+]);
+
+export type WorkerMode = "read" | "act";
 
 const ALLOWED_MEMORY_ACTIONS = new Set([
   "active",
@@ -153,6 +173,45 @@ export function readOnlyWorkerToolPolicy(
   };
 }
 
+/**
+ * An acting helper does one part of a bigger task in its own background tab:
+ * it may click and type there, never in the person's tabs, and it still
+ * cannot run JavaScript, upload files, use raw CDP or change Skills.
+ */
+export function actingWorkerToolPolicy(
+  tool: ToolName,
+  input: Record<string, unknown>,
+  state: ReadOnlyWorkerToolState
+): WorkerToolPolicyResult {
+  if (ACTING_TOOLS.has(tool) || tool === "switch_tab") {
+    const tabId = requestedTabId(input);
+    const allowed =
+      tabId !== undefined
+        ? state.owned_tab_ids.has(tabId)
+        : tool !== "switch_tab" && state.current_owned_tab_id !== undefined;
+    return allowed
+      ? { allowed: true }
+      : {
+          allowed: false,
+          code: "HELPER_NEEDS_OWN_TAB",
+          reason: "Helpers act only in tabs they opened. Open your own tab with open_tab first."
+        };
+  }
+  const readOnly = readOnlyWorkerToolPolicy(tool, input, state);
+  return readOnly.allowed
+    ? readOnly
+    : { allowed: false, reason: (readOnly.reason || "").replace(/Read-only workers?/g, "Helpers") || `Tool ${tool} is outside a helper's scope.` };
+}
+
+export function workerToolPolicy(
+  mode: WorkerMode,
+  tool: ToolName,
+  input: Record<string, unknown>,
+  state: ReadOnlyWorkerToolState
+): WorkerToolPolicyResult {
+  return mode === "act" ? actingWorkerToolPolicy(tool, input, state) : readOnlyWorkerToolPolicy(tool, input, state);
+}
+
 function tabIdFromResult(result: ToolResult): number | undefined {
   if (!result.data || typeof result.data !== "object") {
     return undefined;
@@ -164,15 +223,17 @@ function tabIdFromResult(result: ToolResult): number | undefined {
 export async function runReadOnlyWorkerTool<T = unknown>(
   tool: ToolName,
   input: Record<string, unknown>,
-  _execution: BrowserToolExecution | undefined,
+  execution: BrowserToolExecution | undefined,
   state: ReadOnlyWorkerToolState,
   baseTool: <R = unknown>(
     tool: ToolName,
     input?: Record<string, unknown>,
     execution?: BrowserToolExecution
-  ) => Promise<ToolResult<R>>
+  ) => Promise<ToolResult<R>>,
+  mode: WorkerMode = "read"
 ): Promise<ToolResult<T>> {
-  const policy = readOnlyWorkerToolPolicy(
+  const policy = workerToolPolicy(
+    mode,
     tool,
     input,
     state
@@ -181,7 +242,7 @@ export async function runReadOnlyWorkerTool<T = unknown>(
     return {
       ok: false,
       error: {
-        code: "SUBAGENT_SCOPE_DENIED",
+        code: policy.code || "SUBAGENT_SCOPE_DENIED",
         message:
           policy.reason ||
           "This tool is outside the read-only worker scope."
@@ -197,10 +258,11 @@ export async function runReadOnlyWorkerTool<T = unknown>(
         }
       : input;
 
+  // Only an acting helper's own approved steps carry the approval through.
   const result = await baseTool<T>(
     tool,
     safeInput,
-    undefined
+    mode === "act" ? execution : undefined
   );
 
   if (result.ok && tool === "open_tab") {
@@ -223,7 +285,7 @@ export async function runReadOnlyWorkerTool<T = unknown>(
 
   if (
     result.ok &&
-    OWNED_TAB_CONTEXT_TOOLS.has(tool)
+    (OWNED_TAB_CONTEXT_TOOLS.has(tool) || (mode === "act" && (ACTING_TOOLS.has(tool) || tool === "switch_tab")))
   ) {
     const tabId =
       requestedTabId(input) ||

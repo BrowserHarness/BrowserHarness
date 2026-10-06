@@ -378,10 +378,20 @@
     "approval_forwarding": false,
     "cleanup": "close_session in finally",
     "findings": "bounded message + source URLs/titles + tools used",
+    "acting_helpers": {
+      "request": "agent with act: true",
+      "max_steps": 15,
+      "acts_only_in": "tabs the helper opened (background)",
+      "borrowed_tabs": "never acted on (HELPER_NEEDS_OWN_TAB, recoverable)",
+      "denied": ["evaluate", "cdp", "upload", "save_pdf", "await_user_action", "agent", "Skill and memory writes"],
+      "approval": "risky steps ask the person, named by helper, one question at a time; a declined step stops only that helper",
+      "cleanup": "close_session in finally"
+    },
     "parallel": {
-      "max_workers": 2,
-      "max_steps_per_worker": 8,
-      "concurrency": "parallel",
+      "max_workers": 4,
+      "max_concurrent": 3,
+      "max_steps_per_worker": "8 read-only, 15 acting",
+      "concurrency": "parallel, three at a time",
       "merge_order": "input task order",
       "sibling_failure": "isolated",
       "parent_evidence": [

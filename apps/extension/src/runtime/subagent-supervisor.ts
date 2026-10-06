@@ -1,13 +1,19 @@
-import type {
-  ReadOnlySubagentFinding
+import {
+  MAX_ACTING_HELPER_STEPS,
+  type ReadOnlySubagentFinding
 } from "./subagent-runner";
 
-export const MAX_PARALLEL_READ_ONLY_WORKERS = 2;
+/** Helpers per delegation, read-only or acting. */
+export const MAX_PARALLEL_READ_ONLY_WORKERS = 4;
+/** How many of them run at the same moment; the rest wait their turn. */
+export const MAX_CONCURRENT_HELPERS = 3;
 export const MAX_READ_ONLY_WORKER_STEPS = 8;
 
 export interface ReadOnlySubagentTaskSpec {
   task: string;
   max_steps: number;
+  /** True for a helper that clicks and types in its own tab. */
+  act?: boolean;
 }
 
 export interface ReadOnlySubagentBatchWorker {
@@ -30,16 +36,16 @@ export interface ReadOnlySubagentBatchResult {
   }>;
 }
 
-function boundedSteps(value: unknown): number {
-  const parsed = Math.round(Number(value ?? MAX_READ_ONLY_WORKER_STEPS));
+function boundedSteps(value: unknown, cap = MAX_READ_ONLY_WORKER_STEPS): number {
+  const parsed = Math.round(Number(value ?? cap));
   return Math.min(
     Math.max(
       Number.isFinite(parsed)
         ? parsed
-        : MAX_READ_ONLY_WORKER_STEPS,
+        : cap,
       1
     ),
-    MAX_READ_ONLY_WORKER_STEPS
+    cap
   );
 }
 
@@ -54,7 +60,8 @@ export function parseReadOnlySubagentTasks(
         message: string;
       };
     } {
-  const commonSteps = boundedSteps(input.max_steps);
+  const act = input.act === true;
+  const commonSteps = boundedSteps(input.max_steps, act ? MAX_ACTING_HELPER_STEPS : MAX_READ_ONLY_WORKER_STEPS);
   const rawTasks = Array.isArray(input.tasks)
     ? input.tasks
     : typeof input.task === "string"
@@ -81,7 +88,7 @@ export function parseReadOnlySubagentTasks(
       error: {
         code: "SUBAGENT_TASK_LIMIT",
         message:
-          `BrowserHarness currently allows at most ${MAX_PARALLEL_READ_ONLY_WORKERS} parallel read-only workers per delegation.`
+          `BrowserHarness allows at most ${MAX_PARALLEL_READ_ONLY_WORKERS} helpers per delegation.`
       }
     };
   }
@@ -104,10 +111,11 @@ export function parseReadOnlySubagentTasks(
     const task = raw.trim();
     if (seen.has(task)) continue;
     seen.add(task);
-    tasks.push({
-      task,
-      max_steps: commonSteps
-    });
+    tasks.push(
+      act
+        ? { task, max_steps: commonSteps, act: true }
+        : { task, max_steps: commonSteps }
+    );
   }
 
   if (!tasks.length) {
@@ -159,10 +167,25 @@ export async function runReadOnlySubagentBatch(
     );
   }
 
-  const settled = await Promise.allSettled(
-    tasks.map((spec, index) =>
-      launch(spec, index)
-    )
+  // At most MAX_CONCURRENT_HELPERS run at once; each next one starts as one finishes.
+  const settled: PromiseSettledResult<ReadOnlySubagentFinding>[] = new Array(tasks.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < tasks.length) {
+      const index = next++;
+      if (signal?.aborted) {
+        settled[index] = { status: "rejected", reason: new DOMException("Subagent delegation aborted", "AbortError") };
+        continue;
+      }
+      try {
+        settled[index] = { status: "fulfilled", value: await launch(tasks[index], index) };
+      } catch (reason) {
+        settled[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(MAX_CONCURRENT_HELPERS, tasks.length) }, lane)
   );
 
   if (signal?.aborted) {
