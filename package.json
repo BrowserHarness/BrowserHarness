@@ -31,6 +31,8 @@
     "smoke:self-learning": "node scripts/e2e-self-learning.mjs",
     "smoke:memory": "node scripts/e2e-memory.mjs",
     "smoke:helpers": "node scripts/e2e-helpers.mjs",
-    "sync:help": "node scripts/sync-help.mjs"
+    "sync:help": "node scripts/sync-help.mjs",
+    "package:helper": "node scripts/package-helper.mjs",
+    "smoke:setup": "node scripts/e2e-setup.mjs"
   }
 }

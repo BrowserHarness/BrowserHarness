@@ -15,11 +15,11 @@ summary: "The 6-number code ran out or wasn't accepted."
 ## Why this happens
 - The code is valid for 5 minutes, and it ran out.
 - A wrong number was typed.
-- The pairing was refused in the terminal.
+- The pairing was refused on this computer.
 
 ## How to fix it
 1. In **Settings → Helper app**, press **Pair** to get a new code.
-2. Type all 6 numbers into the installer or terminal window and press Enter.
+2. Type all 6 numbers on the setup page in your browser and press **Connect**. If the setup page is closed, double-click **Install BrowserHarness Helper** again to open it.
 3. Wait for the green tick and **Connected**.
 
 ## Related

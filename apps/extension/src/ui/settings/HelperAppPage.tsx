@@ -27,6 +27,14 @@ import { BridgeNotRunningError, requestPairing, waitForPairing } from "../../set
 import { ensureEndpointAccess } from "../../settings/browser-access";
 import { getMcpServerTrustMode, setMcpServerTrustMode, type McpServerTrustMode } from "../../settings/mcp-trust-store";
 import type { SectionProps } from "./SettingsShell";
+
+/** The double-click downloads, one per kind of computer (scripts/package-helper.mjs). */
+const HELPER_DOWNLOADS = [
+  { label: "Mac with an Apple chip (M1 or newer)", file: "browserharness-helper-mac-apple.zip" },
+  { label: "Mac with an Intel chip", file: "browserharness-helper-mac-intel.zip" },
+  { label: "Windows 10 or 11", file: "browserharness-helper-windows.zip" },
+  { label: "Linux", file: "browserharness-helper-linux.zip" }
+];
 import { ProblemCard, SuccessBanner, useSaved } from "../feedback";
 import { diagnoseAi, diagnoseHelper } from "../../help/problems";
 
@@ -130,28 +138,42 @@ export function PairHelper({ helper }: { helper: ReturnType<typeof useHelperApp>
       <Steps
         steps={[
           <>
-            Install <strong>Node.js</strong> (free, from nodejs.org) if this computer doesn't have it. Choose the
-            version marked “LTS”.
+            Get the helper app for your computer from the same place you got BrowserHarness. Nothing else to install
+            first.
+            <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
+              {HELPER_DOWNLOADS.map((item) => (
+                <li key={item.file}>
+                  {item.label}: <code>{item.file}</code>
+                </li>
+              ))}
+            </Box>
           </>,
           <>
-            Get the helper app download (a file named <code>browserharness-bridge…zip</code>) from the same place you got
-            BrowserHarness, and unzip it.
+            Open the download and double-click <strong>Install BrowserHarness Helper</strong>. On Windows, unzip it first
+            (right-click, then Extract All).
           </>,
           <>
-            Open the unzipped folder. On Windows, double-click <strong>install.cmd</strong>. On a Mac or Linux, open
-            Terminal in that folder and type:
-            <CopyBox text="bash install.sh" />
-          </>,
-          <>
-            The installer asks for a code. Press <strong>Pair</strong> below and type the 6 numbers it shows into the
-            installer window.
+            A setup page opens in your browser. Press <strong>Pair</strong> below, then type the 6 numbers BrowserHarness
+            shows into that page.
           </>
         ]}
       />
+      <MoreDetails summary="My computer says the app can't be checked">
+        <Typography variant="body2">
+          This shows because the helper app isn't signed with an Apple or Microsoft certificate yet. It is safe to go on.
+        </Typography>
+        <Typography variant="body2" mt={1}>
+          <strong>Mac:</strong> close the message, open System Settings, then Privacy &amp; Security. Scroll down and press
+          Open Anyway.
+        </Typography>
+        <Typography variant="body2" mt={1}>
+          <strong>Windows:</strong> press More info, then Run anyway.
+        </Typography>
+      </MoreDetails>
       {step.kind === "code" ? (
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            Type this code into the installer window (or the window where you ran <code>browserharness-bridge pair</code>):
+            Type this code on the setup page in your browser:
           </Typography>
           <Typography aria-label="Pairing code" sx={{ fontSize: 34, fontWeight: 700, letterSpacing: 6, my: 1 }}>
             {spaced(step.code)}
@@ -450,7 +472,16 @@ export function HelperAppPage({ go }: SectionProps) {
             Claude Code you can also type <code>/browserharness</code>.
           </Typography>
           <Note kind="tip">Sending, buying, deleting and submitting still wait for your OK here in Chrome.</Note>
-          <MoreDetails summary="Useful commands">
+          <MoreDetails summary="Commands, for people who use a terminal">
+            <Typography variant="body2">
+              Already have Node.js 20 or newer? The small download (<code>browserharness-bridge…zip</code>) installs
+              with:
+            </Typography>
+            <CopyBox text="bash install.sh" />
+            <Typography variant="body2" mt={1.5}>
+              Open the setup page again (to pair):
+            </Typography>
+            <CopyBox text="browserharness-bridge setup" />
             <Typography variant="body2">Is it running, and is Chrome connected?</Typography>
             <CopyBox text="browserharness-bridge status" />
             <Typography variant="body2" mt={1.5}>

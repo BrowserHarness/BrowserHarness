@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile, copyFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile, copyFile } from "node:fs/promises";
 import path from "node:path";
 import { SKILL_MARKER, SKILL_MD } from "./skill.mjs";
 
@@ -497,6 +497,25 @@ export async function stableCliPath({ cliPath, home, bundled }) {
   if (path.resolve(target) !== path.resolve(cliPath)) {
     await mkdir(path.dirname(target), { recursive: true });
     await copyFile(cliPath, target);
+  }
+  return target;
+}
+
+/**
+ * The double-click download carries its own Node. Copy it next to the helper
+ * app so it keeps working after the download folder is deleted.
+ */
+export async function stableNodePath({ nodePath, home, bundledRuntime, platform = process.platform }) {
+  if (!bundledRuntime) return nodePath;
+  const target = path.join(home, ".browserharness-bridge", "runtime", platform === "win32" ? "node.exe" : "node");
+  if (path.resolve(target) === path.resolve(nodePath)) return nodePath;
+  try {
+    await mkdir(path.dirname(target), { recursive: true });
+    await copyFile(nodePath, target);
+    if (platform !== "win32") await chmod(target, 0o755);
+  } catch (error) {
+    // An older copy may be in use; it still runs the helper app.
+    if (!existsSync(target)) throw error;
   }
   return target;
 }

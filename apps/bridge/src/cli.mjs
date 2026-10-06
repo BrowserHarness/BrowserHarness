@@ -26,6 +26,7 @@ import { createMatrixRelay, matrixApi } from "./matrix.mjs";
 import { createEmailRelay, hostPort, openImap, providerFor, sendSmtp } from "./email.mjs";
 import { CHAT_APP_NAMES } from "./chat-relay.mjs";
 import { createTranscriber, silentWav, voiceServiceUrl } from "./voice.mjs";
+import { createSetupServer, pairingMessage } from "./setup-page.mjs";
 import {
   detectAgents,
   findOnPath,
@@ -35,6 +36,7 @@ import {
   installService,
   registerAgents,
   stableCliPath,
+  stableNodePath,
   uninstallService,
   unregisterAgents
 } from "./install.mjs";
@@ -187,7 +189,7 @@ async function serve(config) {
   process.on("SIGTERM", () => void shutdown());
 }
 
-async function start(config, created, cliPath = THIS_FILE, { quiet = false } = {}) {
+async function start(config, created, cliPath = THIS_FILE, { quiet = false, nodePath = process.execPath } = {}) {
   const current = await readStatus(config);
   if (current.running) {
     if (quiet) return;
@@ -203,10 +205,11 @@ async function start(config, created, cliPath = THIS_FILE, { quiet = false } = {
   const log = await open(LOG_FILE, "a");
 
   const child = spawn(
-    process.execPath,
+    nodePath,
     [cliPath, "serve"],
     {
       detached: true,
+      windowsHide: true,
       stdio: ["ignore", log.fd, log.fd]
     }
   );
@@ -848,31 +851,35 @@ async function pair(config, { code, interactive, json }) {
   throw new Error(`Pairing was not completed. Run ${commandHint()} pair to try again.`);
 }
 
-function context(cliPath) {
-  return installContext({ home: USER_HOME, cliPath });
+function context(cliPath, nodePath) {
+  return installContext({ home: USER_HOME, cliPath, ...(nodePath && { nodePath }) });
 }
 
-async function install(config, created) {
+// Set by the double-click launchers, which bring their own Node.
+const BUNDLED_RUNTIME = process.env.BROWSERHARNESS_BUNDLED_NODE === "1";
+
+async function install(config, created, { quiet = false } = {}) {
   const json = flag("json");
   const say = (line) => {
-    if (!json) print(line);
+    if (!json && !quiet) print(line);
   };
   const cliPath = await stableCliPath({ cliPath: THIS_FILE, home: USER_HOME, bundled: BUNDLED });
-  const ctx = context(cliPath);
 
   say("Installing BrowserHarness Bridge…");
   await mkdir(LOG_DIR, { recursive: true });
-  const launcher = await installLauncher(ctx);
   if ((await readStatus(config)).running) {
     await stop(config, { quiet: true });
   }
+  const nodePath = await stableNodePath({ nodePath: process.execPath, home: USER_HOME, bundledRuntime: BUNDLED_RUNTIME });
+  const ctx = context(cliPath, nodePath);
+  const launcher = await installLauncher(ctx);
 
   let service = { kind: "none", running: false };
   if (!flag("no-service")) {
     service = await installService(ctx);
   }
   if (!service.running) {
-    await start(config, false, cliPath, { quiet: true });
+    await start(config, false, cliPath, { quiet: true, nodePath });
   }
   const status = await waitForState(config, true, 8000);
   if (!status.running) {
@@ -906,6 +913,7 @@ async function install(config, created) {
     extension_connected: Boolean(status.extension_connected)
   };
   if (json) print(summary);
+  if (quiet) return summary;
 
   if (status.extension_connected) {
     say("✓ BrowserHarness in Chrome is already connected. You're ready.");
@@ -915,6 +923,71 @@ async function install(config, created) {
     say(`Last step: ${PAIR_HELP} Then run: ${launcher ? "browserharness-bridge" : `node "${cliPath}"`} pair`);
   }
   return summary;
+}
+
+/** Opens a web address in the person's usual browser. */
+function openInBrowser(url) {
+  const [command, args] =
+    process.platform === "darwin"
+      ? ["open", [url]]
+      : process.platform === "win32"
+        ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
+        : ["xdg-open", [url]];
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => undefined);
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The double-click install: installs quietly, then opens a page in the
+ * browser where the person types the pairing code. No terminal typing.
+ */
+async function setup(config, created) {
+  print("Setting up the BrowserHarness helper app…");
+  const summary = await install(config, created, { quiet: true });
+  const page = createSetupServer({
+    status: async () => {
+      const status = await readStatus(config);
+      return {
+        running: Boolean(status.running),
+        extension_connected: Boolean(status.extension_connected),
+        starts_at_login: summary.service.starts_at_login,
+        agents: summary.agents.map((agent) => ({ name: agent.name, status: agent.status }))
+      };
+    },
+    approve: async (code) => {
+      if (!(await readStatus(config)).running) return pairingMessage({ code: "BRIDGE_NOT_RUNNING" });
+      const result = await bridgeRequest(config, "/pair/approve", { code });
+      if (result.ok) await waitForExtension(config, 15_000);
+      return pairingMessage(result);
+    }
+  });
+  const url = await page.listen();
+  if (flag("json")) print({ setup_url: url, ...summary });
+  const opened = !flag("no-open") && openInBrowser(url);
+  print(
+    opened
+      ? `A setup page opened in your browser. Keep this window open until the page says Connected.\nIf no page opened, copy this address into your browser: ${url}`
+      : `Open this address in your browser to finish: ${url}`
+  );
+
+  // Done once Chrome is connected (and the page had time to show it), or
+  // after 30 minutes with nobody on the page.
+  let connectedAt = 0;
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const status = await readStatus(config, 800);
+    if (status.extension_connected && !connectedAt) connectedAt = Date.now();
+    if (connectedAt && Date.now() - connectedAt > 8000) break;
+    if (page.idleSeconds() > 30 * 60) break;
+  }
+  await page.close();
+  print(connectedAt ? "✓ Connected. You can close this window." : "The setup page timed out. Double-click the installer again to finish.");
 }
 
 async function uninstall(config) {
@@ -958,6 +1031,8 @@ try {
     await setRemote(config, process.argv.slice(3));
   } else if (command === "install") {
     await install(config, created);
+  } else if (command === "setup") {
+    await setup(config, created);
   } else if (command === "uninstall") {
     await uninstall(config);
   } else if (command === "agents") {
@@ -997,7 +1072,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|voice|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [setup|install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|voice|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {

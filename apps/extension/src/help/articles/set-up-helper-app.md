@@ -15,19 +15,29 @@ summary: "Install the small helper program and pair it with Chrome."
 The helper app is a small free program on your computer. You only need it to send tasks from your phone (Telegram and other chat apps), to use a Claude or ChatGPT subscription, or to let coding tools like Claude Code use your browser.
 
 ## Install it
-1. Install **Node.js** from nodejs.org if your computer doesn't have it. Choose the version marked **LTS**.
-2. Unzip the helper app download (a file named `browserharness-bridge…zip`).
-3. On Windows, double-click **install.cmd**. On a Mac or Linux, open Terminal in that folder and type `bash install.sh`.
+1. Get the helper app for your computer from the same place you got BrowserHarness. Nothing else needs installing first: it brings everything it needs.
+   - Mac with an Apple chip (M1 or newer): `browserharness-helper-mac-apple.zip`
+   - Mac with an Intel chip: `browserharness-helper-mac-intel.zip`
+   - Windows 10 or 11: `browserharness-helper-windows.zip`
+   - Linux: `browserharness-helper-linux.zip`
+2. Open the download. On Windows, unzip it first (right-click, then **Extract All**).
+3. Double-click **Install BrowserHarness Helper**. A small window opens, and a setup page opens in your browser.
+
+## If your computer says it can't check the app
+The helper app isn't signed with an Apple or Microsoft certificate yet, so your computer asks first.
+- **Mac:** close the message, open **System Settings → Privacy & Security**, scroll down and press **Open Anyway**.
+- **Windows:** press **More info**, then **Run anyway**.
+- **Linux:** right-click the file and choose **Run as a program**.
 
 ## Pair it with Chrome
 1. In BrowserHarness, open **Settings → Helper app** and press **Pair**.
-2. Six numbers appear. Type them into the installer window and press Enter.
-3. A green tick and **Connected** appear.
+2. Six numbers appear. Type them on the setup page in your browser and press **Connect**.
+3. The page and BrowserHarness both show a green tick and **Connected**. You can close the page and the small window, and delete the download.
 
-To pair again later, type `browserharness-bridge pair` in a terminal and press Pair in BrowserHarness.
+The helper app starts by itself when you turn on your computer. To pair again later, double-click **Install BrowserHarness Helper** again.
 
-## Check it is running
-Type `browserharness-bridge status` in a terminal. It says whether the helper app is running and whether Chrome is connected.
+## For people who use a terminal
+If you already have Node.js 20 or newer, the small download (`browserharness-bridge…zip`) installs with `bash install.sh`. `browserharness-bridge setup` opens the setup page again, and `browserharness-bridge status` says whether it is running and whether Chrome is connected.
 
 ## Related
 - [[knowledge/help/helper-not-running]]
