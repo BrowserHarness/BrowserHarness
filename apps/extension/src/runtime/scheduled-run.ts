@@ -7,7 +7,8 @@ import { approvalQuestionFor, extensionMessage, runAgentTask } from "./agent-tas
 import { classifyTaskIntent } from "./intent";
 import { directChatWithFallback } from "./model-router";
 import { loadSkills, recordSkillRun, skillTask } from "./skills";
-import { parseSlashCommand } from "./slash-commands";
+import { applyLearningPlan, matchSkill, planLearning, skillHint } from "./skill-learning";
+import { BUILT_IN_COMMANDS, parseSlashCommand } from "./slash-commands";
 import type { ScheduledTask } from "./schedules";
 import { loadPreferences } from "../settings/preferences";
 import {
@@ -43,7 +44,8 @@ export async function runUnattendedTask(
   }
   const fallback = await loadFallbackConnection();
 
-  const command = parseSlashCommand(taskText, await loadSkills());
+  const skills = await loadSkills();
+  const command = parseSlashCommand(taskText, skills);
   if (command.kind === "builtin" || command.kind === "unknown") {
     return {
       status: "failed",
@@ -61,7 +63,9 @@ export async function runUnattendedTask(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RUN_LIMIT_MS);
   try {
-    if (!skill && classifyTaskIntent(task) === "chat") {
+    // A saved Skill like this task guides it, and the run teaches that Skill.
+    const hinted = !skill && preferences.autoSkills ? matchSkill(taskText, skills)?.skill ?? null : null;
+    if (!skill && !hinted && classifyTaskIntent(task) === "chat") {
       log("Asking the model");
       const routed = await directChatWithFallback(
         primary,
@@ -100,8 +104,11 @@ export async function runUnattendedTask(
       return { status: "failed", message: opened.error?.message || "Couldn't open a tab for the task." };
     }
 
+    if (hinted) log(`Following your Skill /${hinted.slug}`);
+
     let needsYou = "";
-    const result = await runAgentTask(task + aboutMe, {
+    const result = await runAgentTask(task, {
+      context: aboutMe + (hinted ? skillHint(hinted) : ""),
       agentPrimary,
       agentFallback,
       session,
@@ -132,8 +139,21 @@ export async function runUnattendedTask(
     });
 
     const url = result.session_evidence.actions.at(-1)?.after?.url || result.session_evidence.start?.url;
+    const learning = (status: "completed" | "stopped") =>
+      applyLearningPlan(
+        planLearning({
+          task: taskText,
+          status,
+          message: result.message,
+          evidence: result.session_evidence,
+          used: skill ?? hinted,
+          autoSkills: preferences.autoSkills
+        }),
+        BUILT_IN_COMMANDS.map((item) => item.name)
+      ).catch(() => null);
     if (result.status === "completed") {
-      if (skill) await recordSkillRun(skill.id, "worked").catch(() => null);
+      const saved = await learning("completed");
+      if (saved && !skill && !hinted) log(`Learned this as /${saved.slug}`);
       return { status: "worked", message: result.message, url };
     }
     if (needsYou || result.status === "approval-cancelled") {
@@ -143,7 +163,7 @@ export async function runUnattendedTask(
         url
       };
     }
-    if (skill) await recordSkillRun(skill.id, "failed", result.message).catch(() => null);
+    if (!controller.signal.aborted && result.status === "stopped") await learning("stopped");
     return {
       status: "failed",
       message: controller.signal.aborted ? "Stopped: the task ran for more than 10 minutes." : result.message,

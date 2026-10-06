@@ -9,7 +9,8 @@ describe("classifyTaskIntent", () => {
     "brainstorm five startup names",
     "what should I search for when learning python",
     "give me a recipe for dal",
-    "make a table comparing cats and dogs"
+    "make a table comparing cats and dogs",
+    "how do I add a column to my spreadsheet"
   ])("routes direct chat: %s", (prompt) => {
     expect(classifyTaskIntent(prompt)).toBe("chat");
   });
@@ -28,6 +29,9 @@ describe("classifyTaskIntent", () => {
     "check my inbox on gmail",
     "visit amazon.in and find a kettle under 2000",
     "extract the prices table",
+    "search the tea shop for green tea and add it to the cart",
+    "sign me up for the webinar",
+    "subscribe me to their newsletter",
     "save these results to a csv"
   ])("routes browser work: %s", (prompt) => {
     expect(classifyTaskIntent(prompt)).toBe("browser");

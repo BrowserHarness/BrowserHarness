@@ -102,11 +102,16 @@ export interface AgentTaskOptions {
   session: { id: string; title: string };
   signal: AbortSignal;
   hooks: AgentTaskHooks;
+  /**
+   * Extra guidance for the model only (About me, a matching Skill). It is
+   * not part of the task, so memory, history and learned Skills stay clean.
+   */
+  context?: string;
 }
 
 export async function runAgentTask(
   task: string,
-  { agentPrimary, agentFallback, session, signal, hooks }: AgentTaskOptions
+  { agentPrimary, agentFallback, session, signal, hooks, context = "" }: AgentTaskOptions
 ): Promise<BrowserEngineResult> {
   let usedFallback = false;
   const result = await runBrowserTask(
@@ -130,7 +135,7 @@ export async function runAgentTask(
         const routed = await agentDecisionWithFallback(
           agentPrimary,
           agentFallback,
-          browserTask,
+          browserTask + context,
           observation,
           trail,
           signal,

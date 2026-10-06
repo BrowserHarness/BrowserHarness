@@ -4,9 +4,11 @@ import {
   Box,
   Button,
   Chip,
+  FormControlLabel,
   IconButton,
   Paper,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography
@@ -23,6 +25,7 @@ import {
   type UserSkill
 } from "../runtime/skills";
 import { BUILT_IN_COMMANDS } from "../runtime/slash-commands";
+import { loadPreferences, updatePreferences } from "../settings/preferences";
 import { loadSiteCommands, renameSiteCommand, usage, type SiteCommand } from "../runtime/site-commands";
 import { deleteWorkflow, loadWorkflows, type SavedWorkflow } from "../runtime/workflows";
 import {
@@ -68,6 +71,7 @@ export function SkillsView({
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const [notice, setNotice] = useState<{ severity: "success" | "error"; text: string } | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const [autoSkills, setAutoSkills] = useState(true);
 
   const refresh = async () => {
     setSkills(await loadSkills());
@@ -85,6 +89,7 @@ export function SkillsView({
 
   useEffect(() => {
     void refresh();
+    void loadPreferences().then((preferences) => setAutoSkills(preferences.autoSkills));
   }, []);
 
   const importFiles = async (files: FileList | null) => {
@@ -135,8 +140,23 @@ export function SkillsView({
       </Stack>
       <Typography variant="body2" color="text.secondary" mb={2}>
         A Skill is a task BrowserHarness has learned. Run one here or type <code>/</code> and its name in the chat.
-        Each run that goes wrong teaches it a lesson for next time.
+        When you ask for something similar, it follows the Skill on its own. A shorter way updates the Skill, and a run
+        that goes wrong teaches it a lesson.
       </Typography>
+
+      <FormControlLabel
+        sx={{ mb: 1 }}
+        control={
+          <Switch
+            checked={autoSkills}
+            onChange={async (event) => {
+              setAutoSkills(event.target.checked);
+              await updatePreferences({ autoSkills: event.target.checked });
+            }}
+          />
+        }
+        label="Learn Skills on my own: keep finished multi-step tasks, and follow a matching Skill next time"
+      />
 
       {notice && (
         <Alert severity={notice.severity} onClose={() => setNotice(null)} sx={{ mb: 2 }}>
@@ -174,6 +194,7 @@ export function SkillsView({
                 )}
                 <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
                   <Chip size="small" label={`/${skill.slug}`} variant="outlined" />
+                  {skill.source === "auto" && <Chip size="small" color="info" label="Learned on its own" />}
                   <Typography variant="caption" color="text.secondary">
                     {runSummary(skill)}
                     {skill.lessons.length ? ` · ${skill.lessons.length} lesson${skill.lessons.length === 1 ? "" : "s"} learned` : ""}
@@ -188,6 +209,17 @@ export function SkillsView({
                   <Button size="small" variant="contained" startIcon={<RunIcon fontSize="small" />} onClick={() => onRun(skill)}>
                     Run
                   </Button>
+                  {skill.source === "auto" && (
+                    <Button
+                      size="small"
+                      onClick={async () => {
+                        await saveSkill({ ...skill, source: "chat" }, RESERVED);
+                        await refresh();
+                      }}
+                    >
+                      Keep
+                    </Button>
+                  )}
                   <Tooltip title="Rename">
                     <IconButton size="small" aria-label={`Rename ${skill.name}`} onClick={() => setEditing({ id: skill.id, name: skill.name })}>
                       <EditIcon fontSize="small" />

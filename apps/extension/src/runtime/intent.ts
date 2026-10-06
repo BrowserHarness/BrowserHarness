@@ -18,6 +18,9 @@ const BROWSER_CONTEXT_PATTERNS: RegExp[] = [
   /\bsearch\s+(on|the web|online)\b/i,
   /\b(extract|scrape|export)\b.+\b(table|tables|list|rows|data|prices)\b/i,
   /\b(to|as|into)\s+(a\s+)?(csv|spreadsheet)\b/i,
+  /\badd\b.+\bto\s+(the\s+|my\s+)?(cart|basket|bag|wishlist)\b/i,
+  /\b(sign|log)\s+me\s+(up|in|out)\b/i,
+  /\bsubscribe\s+me\b/i,
   new RegExp(`\\b(on|in|at|from|open|launch|use)\\s+(${KNOWN_SITES})\\b`, "i"),
   /\b[a-z0-9-]+\.(com|org|net|io|ai|dev|app|co|in|edu|gov|uk)\b/i
 ];
