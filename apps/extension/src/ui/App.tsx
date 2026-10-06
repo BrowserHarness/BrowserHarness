@@ -89,18 +89,23 @@ import {
 import {
   aboutMeFor,
   factExtractionPrompt,
-  factScopeIn,
   forgetCommand,
-  isStorableFact,
   loadAboutMe,
   loadGlobalAboutMe,
   mightStateFacts,
-  parseExtractedFacts,
-  rememberFacts,
-  saidForThisSpace,
-  scopedFactsInMessage,
-  withoutScopeWords
+  parseExtractedFacts
 } from "../runtime/about-me";
+import {
+  acceptOffer,
+  learnFromExtraction,
+  learnFromMessage,
+  localMemoryWriter,
+  rememberCommand,
+  wasKept,
+  type MemoryWriteResult,
+  type WriteContext
+} from "../runtime/memory-write";
+import { resolveSpace } from "../runtime/memory-scope";
 import { loadTaskHistory } from "../runtime/history";
 import { contextFor, localMemorySource } from "../runtime/context";
 import { agentRoute, chatRoute } from "../runtime/route";
@@ -210,6 +215,12 @@ type Message = {
   autoSkill?: { id: string; slug: string };
   /** Why a task couldn't finish, with the fix and a guide. */
   problem?: { problem: Problem; retry?: string; openAi?: boolean };
+  /**
+   * Something from the person's message BrowserHarness can keep with one tap
+   * (a standing wish, a decision, an update), or a decision it kept on its
+   * own that can be undone. Where it was said is kept with it.
+   */
+  memory?: { result: MemoryWriteResult; spaceId: string; chatId?: string; kind: "offer" | "undo"; done?: string };
 };
 
 /** Thrown when the chosen AI failed the browser check, so the card can say so plainly. */
@@ -517,6 +528,49 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     }
   };
 
+  /** Shows what can be kept with one tap, or a decision kept on its own with an undo. */
+  const offerMemories = (results: MemoryWriteResult[], context: WriteContext) => {
+    for (const result of results) {
+      if (result.action === "candidate" || result.action === "needs_confirmation") {
+        const note =
+          result.type === "decision"
+            ? `Save as a decision? ${result.decision?.subject}: ${result.decision?.value}`
+            : result.type === "instruction"
+              ? `Keep this as a standing wish${result.scope === "global" ? " for every Space" : ""}? “${result.text}”`
+              : `Update what I know about you? “${result.text}”`;
+        addMemoryMessage(note, { result, spaceId: context.spaceId, chatId: context.chatId, kind: "offer" });
+      } else if (result.type === "decision" && wasKept(result)) {
+        addMemoryMessage(`Remembered decision: ${result.decision?.subject} → ${result.decision?.value}`, { result, spaceId: context.spaceId, chatId: context.chatId, kind: "undo" });
+      }
+    }
+  };
+
+  const addMemoryMessage = (text: string, memory: NonNullable<Message["memory"]>) => {
+    setMessages((items) => [...items, { id: crypto.randomUUID(), role: "assistant", text, memory, at: now() }]);
+  };
+
+  const answerMemory = async (message: Message) => {
+    const memory = message.memory;
+    if (!memory || memory.done) return;
+    const context = { spaceId: memory.spaceId, chatId: memory.chatId, writer: localMemoryWriter };
+    let done = "";
+    if (memory.kind === "undo") {
+      done = (await localMemoryWriter.undoDecision(memory.result.memory_id ?? "", memory.spaceId)) ? "Taken back." : "Already gone.";
+    } else {
+      const kept = await acceptOffer(memory.result, context);
+      done = wasKept(kept)
+        ? kept.type === "instruction"
+          ? "Kept as a standing wish."
+          : kept.type === "decision"
+            ? "Saved as a decision."
+            : "Updated."
+        : kept.action === "duplicate"
+          ? "Already saved."
+          : `Not saved: ${kept.reason}.`;
+    }
+    setMessages((items) => items.map((item) => (item.id === message.id && item.memory ? { ...item, memory: { ...item.memory, done } } : item)));
+  };
+
   const undoAutoSkill = async (message: Message) => {
     if (!message.autoSkill) return;
     await deleteSkill(message.autoSkill.id);
@@ -599,21 +653,9 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           addAssistantMessage("Tell me what to remember, like `/remember I prefer aisle seats`.");
           return;
         }
-        if (!isStorableFact(command.args)) {
-          addAssistantMessage("That looks like a password, card or ID number, so I won't save it.");
-          return;
-        }
-        const added = await rememberFacts(
-          [{ text: withoutScopeWords(command.args), scope: factScopeIn(command.args), explicit: saidForThisSpace(command.args) }],
-          "you",
-          undefined,
-          chatId
-        );
-        addAssistantMessage(
-          added.length
-            ? `Got it. I'll remember: ${added[0].text}${added[0].scope === "global" ? " (in every Space)" : ""}`
-            : "I already know that."
-        );
+        // Through the one write pipeline: safety, kind (fact, preference, standing wish, decision), level and duplicates.
+        const { message } = await rememberCommand(command.args, { spaceId: await resolveSpace(), chatId, writer: localMemoryWriter });
+        addAssistantMessage(message);
         return;
       }
       case "forget": {
@@ -1137,6 +1179,12 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     pausedRef.current = false;
     cancelled.current = false;
 
+    // One memory configuration for the whole task, fixed now: the Space, where memory is
+    // read from and where it is written to. Switching settings mid-task changes neither.
+    const memorySource = localMemorySource;
+    const memoryWriter = localMemoryWriter;
+    const writeContext: WriteContext = { spaceId, chatId, writer: memoryWriter };
+
     // About me: pick up plain facts from the request first, so they count right away.
     let autoSkills = true;
     let learnAboutMe = false;
@@ -1145,14 +1193,17 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       autoSkills = preferences.autoSkills;
       learnAboutMe = preferences.learnAboutMe && !skillRun;
       if (preferences.learnAboutMe && !skillRun) {
-        // Each fact at its own level: this Space unless it's who you are or said for every Space.
-        const learned = await rememberFacts(scopedFactsInMessage(typed), "learned", spaceId, chatId);
+        // Through the one write pipeline: clear, lasting facts are kept at their level; maybes and
+        // short stays are not; standing wishes and loose decisions are offered with one tap.
+        const results = await learnFromMessage(typed, writeContext);
+        const learned = results.filter((result) => wasKept(result) && (result.type === "fact" || result.type === "preference"));
         if (learned.length) {
           addActivity(
-            `Remembered about you: ${learned.map((fact) => fact.text).join("; ")}`,
+            `Remembered about you: ${learned.map((result) => result.text).join("; ")}`,
             "done"
           );
         }
+        offerMemories(results, writeContext);
       }
     } catch {
       // Learning never holds up the request.
@@ -1160,8 +1211,6 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
 
     // What goes with the request (this chat, wishes, facts, decisions, past
     // conversations, a matching Skill): compiled for this Space and model.
-    // One memory source for the whole task: its context, the agent and its helpers.
-    const memorySource = localMemorySource;
     const compiledContext = await contextFor({
       request: typed,
       spaceId,
@@ -1192,19 +1241,13 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       void (async () => {
         const known = aboutMeFor(await loadGlobalAboutMe(), await loadAboutMe(spaceId));
         const reply = await directChatWithFallback(model, null, factExtractionPrompt(typed, known));
-        const added = await rememberFacts(
-          parseExtractedFacts(reply.result).map((fact) => ({
-            text: fact,
-            scope: factScopeIn(fact, typed),
-            explicit: saidForThisSpace(fact, typed)
-          })),
-          "learned",
-          spaceId,
-          chatId
-        );
+        // The AI's reading is checked against your own words before anything is kept.
+        const results = await learnFromExtraction(parseExtractedFacts(reply.result), typed, writeContext);
+        const added = results.filter(wasKept);
         if (added.length) {
-          addActivity(`Remembered about you: ${added.map((fact) => fact.text).join("; ")}`, "done");
+          addActivity(`Remembered about you: ${added.map((result) => result.text).join("; ")}`, "done");
         }
+        offerMemories(results.filter((result) => result.action === "needs_confirmation"), writeContext);
       })().catch(() => undefined);
     };
 
@@ -1270,6 +1313,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         session: { id: taskSessionId, title: taskSessionTitle },
         spaceId,
         memorySource,
+        memoryWriter,
         signal: controller.signal,
         hooks: {
           addActivity,
@@ -1798,6 +1842,19 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
                             </Button>
                           </Tooltip>
                         )
+                      )}
+                      {message.memory && (
+                        <Box sx={{ mt: 0.5 }} data-testid="memory-offer">
+                          {message.memory.done ? (
+                            <Typography variant="caption" color="text.secondary">
+                              {message.memory.done}
+                            </Typography>
+                          ) : (
+                            <Button size="small" onClick={() => void answerMemory(message)}>
+                              {message.memory.kind === "undo" ? "Undo" : "Keep it"}
+                            </Button>
+                          )}
+                        </Box>
                       )}
                       {message.skillNote && (
                         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>

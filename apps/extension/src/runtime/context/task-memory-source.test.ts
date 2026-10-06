@@ -38,6 +38,7 @@ vi.mock("../subagent-runner", async (importOriginal) => {
 
 import { runAgentTask } from "../agent-task";
 import { compileContext, localMemorySource, type MemorySource } from ".";
+import { learnFromExtraction, learnFromMessage, localMemoryWriter, type MemoryWriter } from "../memory-write";
 
 let local: Record<string, unknown>;
 function area(store: () => Record<string, unknown>) {
@@ -94,12 +95,43 @@ function fakeSource(calls: Array<{ read: string; spaceId: string; request?: stri
   };
 }
 
+function fakeWriter(writes: Array<{ write: string; spaceId: string }>): MemoryWriter {
+  const facts: Array<{ id: string; text: string; source: "you" | "learned"; created_at: string; status: "current" }> = [];
+  return {
+    id: "fake-writer",
+    currentFacts: async () => ({ space: [...facts], global: [] }),
+    writeFact: async (text, by, spaceId) => {
+      writes.push({ write: "writeFact", spaceId });
+      const fact = { id: crypto.randomUUID(), text, source: by, created_at: "2026-10-06T00:00:00.000Z", status: "current" as const };
+      facts.push(fact);
+      return fact;
+    },
+    instructions: async () => ({ space: "", global: "" }),
+    saveInstructions: async (_text, _scope, spaceId) => {
+      writes.push({ write: "saveInstructions", spaceId });
+      return { ok: true };
+    },
+    currentDecisions: async () => [],
+    writeDecision: async (input, spaceId) => {
+      writes.push({ write: "writeDecision", spaceId });
+      return { ok: true, decision: { id: "d1", type: "decision", subject: input.subject, value: input.value, scope: "space", status: "current", created_at: "", provenance: { by: "learned", space_id: spaceId, at: "" } } };
+    },
+    undoDecision: async () => true,
+    recordTaskEpisode: async (evidence, spaceId) => {
+      writes.push({ write: "recordTaskEpisode", spaceId });
+      return { id: "episode", space_id: spaceId } as never;
+    }
+  };
+}
+
 describe("a task-fixed memory source", () => {
   it("is used for the compiled context, the agent's recall and every helper's recall, never the device store", async () => {
     const local = vi.spyOn(localMemorySource, "relevantEpisodes");
     const localState = vi.spyOn(localMemorySource, "currentState");
     const calls: Array<{ read: string; spaceId: string; request?: string }> = [];
     const source = fakeSource(calls);
+    const writes: Array<{ write: string; spaceId: string }> = [];
+    const localEpisode = vi.spyOn(localMemoryWriter, "recordTaskEpisode");
 
     const compiled = await compileContext({ request: "which steel kettle is best?", spaceId: "space-work", source, intent: "browser" });
     expect(compiled.sections.facts?.map((item) => item.text)).toEqual(["I prefer steel kettles"]);
@@ -112,6 +144,7 @@ describe("a task-fixed memory source", () => {
       session: { id: "task-1", title: "kettles" },
       spaceId: "space-work",
       memorySource: source,
+      memoryWriter: fakeWriter(writes),
       signal: new AbortController().signal,
       hooks: {
         addActivity: () => "a",
@@ -138,5 +171,21 @@ describe("a task-fixed memory source", () => {
     // The device's own store was never asked.
     expect(local).not.toHaveBeenCalled();
     expect(localState).not.toHaveBeenCalled();
+    // What the task (and its helpers' findings, inside its record) observed went to the task's writer, in its Space.
+    expect(writes).toEqual([{ write: "recordTaskEpisode", spaceId: "space-work" }]);
+    expect(localEpisode).not.toHaveBeenCalled();
+  });
+
+  it("learning from the person's message, before and after the answer, writes through the one writer fixed for the chat", async () => {
+    const writes: Array<{ write: string; spaceId: string }> = [];
+    const writer = fakeWriter(writes);
+    const spies = (["writeFact", "saveInstructions", "writeDecision", "currentFacts"] as const).map((name) => vi.spyOn(localMemoryWriter, name));
+    const context = { spaceId: "space-work", chatId: "c1", writer };
+    await learnFromMessage("I live in Mumbai. Let's use GitHub for this project from now on.", context);
+    await learnFromExtraction(["I prefer steel kettles"], "I prefer steel kettles, find one", context);
+    expect(writes.map((item) => item.write)).toEqual(["writeFact", "writeDecision", "writeFact"]);
+    expect(new Set(writes.map((item) => item.spaceId))).toEqual(new Set(["space-work"]));
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    expect(local).toEqual({});
   });
 });

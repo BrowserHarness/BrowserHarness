@@ -3,6 +3,7 @@
 // person), and a short result for history and the notification.
 import { contextFor, localMemorySource } from "./context";
 import { agentRoute, chatRoute } from "./route";
+import { localMemoryWriter } from "./memory-write/writer";
 import { autoApproves } from "./approval-mode";
 import { approvalQuestionFor, extensionMessage, runAgentTask } from "./agent-task";
 import { directChatWithFallback } from "./model-router";
@@ -63,8 +64,9 @@ export async function runUnattendedTask(
   const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
   const preferences = await loadPreferences();
   // What goes with the task: compiled for this Space and model, like a chat request.
-  // One memory source for the whole task: its context, the agent and its helpers.
+  // One memory source and writer for the whole task: its context, the agent and its helpers.
   const memorySource = localMemorySource;
+  const memoryWriter = localMemoryWriter;
   const { compiled, text: context } = await contextFor({
     request: taskText,
     spaceId,
@@ -123,6 +125,7 @@ export async function runUnattendedTask(
       session,
       spaceId,
       memorySource,
+      memoryWriter,
       signal: controller.signal,
       hooks: {
         addActivity: (text) => {

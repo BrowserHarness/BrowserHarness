@@ -16,9 +16,8 @@ import {
   readOnlyWorkerDecisionWithFallback
 } from "./model-router";
 import type { PageObservation, ToolName, ToolResult } from "./protocol";
-import { saveTaskEpisodeMemory } from "./task-memory";
-import { indexTaskEpisodeMemory } from "./semantic-memory";
 import type { MemorySource } from "./context/memory-source";
+import type { MemoryWriter } from "./memory-write/writer";
 import { searchProceduralMemory } from "./procedural-memory";
 import { discoverMcpCatalog as buildMcpCatalog } from "./mcp-catalog";
 import { getMcpServerTrustMode } from "../settings/mcp-trust-store";
@@ -116,6 +115,12 @@ export interface AgentTaskOptions {
    */
   memorySource: MemorySource;
   /**
+   * Where the task's own memory is written (what it saw and did), fixed when
+   * it starts, like the source. Helpers' findings reach memory only through
+   * the parent task's record, so they use it too.
+   */
+  memoryWriter: MemoryWriter;
+  /**
    * Extra guidance for the model only (About me, a matching Skill). It is
    * not part of the task, so memory, history and learned Skills stay clean.
    */
@@ -124,7 +129,7 @@ export interface AgentTaskOptions {
 
 export async function runAgentTask(
   task: string,
-  { agentPrimary, agentFallback, session, spaceId, memorySource, signal, hooks, context = "" }: AgentTaskOptions
+  { agentPrimary, agentFallback, session, spaceId, memorySource, memoryWriter, signal, hooks, context = "" }: AgentTaskOptions
 ): Promise<BrowserEngineResult> {
   let usedFallback = false;
   // Helpers run side by side, but the person answers one approval at a time.
@@ -452,16 +457,10 @@ export async function runAgentTask(
     signal
   );
 
-  await saveTaskEpisodeMemory(
-    result.session_evidence,
-    spaceId
-  )
-    .then(async (episode) => {
-      await indexTaskEpisodeMemory(episode).catch(
-        () => null
-      );
-      await clearBrowserWorkingMemory(session.id);
-    })
+  // Kept as what the task observed, never as facts about the person.
+  await memoryWriter
+    .recordTaskEpisode(result.session_evidence, spaceId)
+    .then(() => clearBrowserWorkingMemory(session.id))
     .catch(() => undefined);
   // Real evidence for the model menu's "Browser-ready" label.
   if (

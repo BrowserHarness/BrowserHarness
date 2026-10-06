@@ -184,6 +184,10 @@ try {
   if (shots) await side.screenshot({ path: path.join(shots, "panel-new-space.png") });
   await ask(side, "/remember I work at Infosys");
   await waitText(side, "I'll remember", 5000);
+  // A wish said for every Space, from inside Work, goes everywhere.
+  await ask(side, "/remember Across all Spaces, keep answers concise");
+  await waitText(side, "I'll follow this from now on: Keep answers concise (in every Space)", 5000);
+  check("/remember keeps a wish for every Space as a standing wish", (await storage("browserharness.instructions.global")) === "Keep answers concise");
   const spaces = await storage("browserharness.spaces");
   const work = spaces.spaces.find((space) => space.name === "Work");
   const workFacts = (await storage(`browserharness.aboutMe@${work.id}`)) || [];
@@ -209,6 +213,7 @@ try {
   await ask(side, "suggest a dinner place");
   for (let i = 0; i < 100 && prompts.length === beforeHome; i++) await side.waitForTimeout(100);
   check("requests in Personal don't carry Work's notes", prompts.length > beforeHome && !prompts.slice(beforeHome).some((text) => text.includes("Infosys")));
+  check("a wish for every Space goes with requests in the other Space too", prompts.slice(beforeHome).some((text) => text.includes("Keep answers concise")));
 
   // 5b. Something said for all Spaces is known in every Space; Work's own notes still stay in Work.
   await ask(side, "/remember Across all Spaces, keep answers concise");

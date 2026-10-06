@@ -6,7 +6,8 @@
 // Decisions belong to the Space they were made in and stay behind its wall
 // (memory-scope.ts). One for every Space is only made when the person says so.
 import { resolveSpace, visibleInSpace, type SpaceTagged } from "./memory-scope";
-import { asksAboutThePast, isStorableFact, relevance, type Provenance } from "./about-me";
+import { asksAboutThePast, relevance, type Provenance } from "./about-me";
+import { checkSensitive, refusalMessage, type SensitiveReason } from "./memory-write/sensitivity";
 import { SPACE_TAGGED_KEYS } from "./spaces";
 
 export type DecisionStatus = "current" | "superseded" | "reversed" | "historical";
@@ -78,14 +79,14 @@ export interface DecisionInput {
 export async function recordDecision(
   input: DecisionInput,
   spaceId?: string
-): Promise<{ ok: true; decision: Decision; replaced?: Decision } | { ok: false; error: string }> {
+): Promise<{ ok: true; decision: Decision; replaced?: Decision } | { ok: false; error: string; sensitive?: SensitiveReason }> {
   const subject = clean(input.subject).replace(/^./, (first) => first.toUpperCase());
   const value = clean(input.value);
   const rationale = input.rationale ? clean(input.rationale) : "";
   if (subject.length < 2 || !value) return { ok: false, error: "Say what it's about and what you chose, like “code home: GitHub”." };
-  if (![subject, value, rationale].every((text) => !text || isStorableFact(text) || text.length < 3)) {
-    return { ok: false, error: "That looks like a password, card or ID number, so I won't save it." };
-  }
+  // One shared check, on the decision as it reads ("Admin password: hunter22").
+  const safety = checkSensitive(`${subject}: ${value}${rationale ? ` because ${rationale}` : ""}`);
+  if (!safety.allowed) return { ok: false, error: refusalMessage(safety.reason), sensitive: safety.reason };
   const space = await resolveSpace(spaceId);
   const scope = input.scope ?? "space";
   const decisions = await loadAll();
@@ -123,6 +124,27 @@ export async function reverseDecision(id: string, spaceId?: string): Promise<boo
   if (!found) return false;
   const now = new Date().toISOString();
   await storeAll(decisions.map((item) => (item === found ? { ...item, status: "reversed" as const, valid_until: now } : item)));
+  return true;
+}
+
+/**
+ * Takes back a decision that was just remembered on its own: it is removed,
+ * and the one it replaced (if any) is in force again, as if it never happened.
+ */
+export async function undoDecision(id: string, spaceId?: string): Promise<boolean> {
+  const space = await resolveSpace(spaceId);
+  const decisions = await loadAll();
+  const found = decisions.find((item) => item.id === id && visibleInSpace(item, space));
+  if (!found) return false;
+  await storeAll(
+    decisions
+      .filter((item) => item.id !== id)
+      .map((item) => {
+        if (item.id !== found.supersedes || item.superseded_by !== id) return item;
+        const { valid_until: _until, superseded_by: _by, ...rest } = item;
+        return { ...rest, status: "current" as const };
+      })
+  );
   return true;
 }
 

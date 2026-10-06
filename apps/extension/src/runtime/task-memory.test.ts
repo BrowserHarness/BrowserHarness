@@ -221,9 +221,13 @@ describe("task episode memory", () => {
             title: "Independent Report"
           }
         ],
-        tools_used: ["open_tab", "read_page"]
+        tools_used: ["open_tab", "read_page"],
+        // Whose work it was, and that it is what a website showed, not the person's words.
+        parent_session_id: session.session_id,
+        trust: "observed"
       }
     ]);
+    expect(saved).toMatchObject({ trust: "observed", provenance: { origin: "task", space_id: expect.any(String) } });
     expect(saved.sites).toContain(
       "https://research.example"
     );
