@@ -27,6 +27,8 @@ import { BridgeNotRunningError, requestPairing, waitForPairing } from "../../set
 import { ensureEndpointAccess } from "../../settings/browser-access";
 import { getMcpServerTrustMode, setMcpServerTrustMode, type McpServerTrustMode } from "../../settings/mcp-trust-store";
 import type { SectionProps } from "./SettingsShell";
+import { ProblemCard, SuccessBanner, useSaved } from "../feedback";
+import { diagnoseAi, diagnoseHelper } from "../../help/problems";
 
 type PairStep =
   | { kind: "idle" }
@@ -108,14 +110,16 @@ export function PairHelper({ helper }: { helper: ReturnType<typeof useHelperApp>
     return (
       <Stack spacing={1.5}>
         {dialog}
-        <Note kind="success" title="Connected">
+        <SuccessBanner
+          title="Connected"
+          action={
+            <Button color="error" variant="outlined" size="small" onClick={() => void disconnect()}>
+              Disconnect
+            </Button>
+          }
+        >
           The helper app is running and paired with this Chrome.
-        </Note>
-        <Box>
-          <Button color="error" variant="outlined" onClick={() => void disconnect()}>
-            Disconnect
-          </Button>
-        </Box>
+        </SuccessBanner>
       </Stack>
     );
   }
@@ -170,18 +174,13 @@ export function PairHelper({ helper }: { helper: ReturnType<typeof useHelperApp>
         </Box>
       )}
       {step.kind === "not-running" && (
-        <Note kind="warning" title="The helper app isn't running yet">
-          Do steps 1 to 3 first, then press Pair again. If you installed it before, open a terminal and type{" "}
-          <code>browserharness-bridge start</code>.
-        </Note>
+        <ProblemCard problem={diagnoseHelper("not-running")} heading="Couldn't pair" onRetry={() => void pair()} retryLabel="Pair again" />
       )}
-      {step.kind === "error" && <Note kind="danger">{step.message}</Note>}
+      {step.kind === "error" && (
+        <ProblemCard problem={diagnoseHelper("pairing-failed", step.message)} heading="Couldn't pair" onRetry={() => void pair()} retryLabel="Get a new code" />
+      )}
       {helper.paired && !helper.connected && step.kind === "idle" && (
-        <Note kind="info">
-          Paired, but the helper app isn't reachable right now
-          {helper.status?.message ? ` (${helper.status.message})` : ""}. It reconnects by itself when it runs again. To
-          start it, type <code>browserharness-bridge start</code> in a terminal.
-        </Note>
+        <ProblemCard problem={diagnoseHelper("not-connected", helper.status?.message)} severity="warning" />
       )}
     </Stack>
   );
@@ -219,6 +218,7 @@ const TOOL_POLICY: Choice<McpServerTrustMode>[] = [
 
 /** Other programs the helper app is set up to talk to (MCP servers). */
 function OtherAppTools() {
+  const saved = useSaved();
   const [servers, setServers] = useState<ToolServer[]>([]);
   const [policy, setPolicy] = useState<Record<string, McpServerTrustMode>>({});
   const [tools, setTools] = useState<Record<string, ServerTool[]>>({});
@@ -291,7 +291,7 @@ function OtherAppTools() {
                 value={policy[server.id] || "allow-read-only"}
                 onChange={(mode) => {
                   setPolicy((current) => ({ ...current, [server.id]: mode }));
-                  void setMcpServerTrustMode(server.id, mode);
+                  void setMcpServerTrustMode(server.id, mode).then(() => saved(`Saved for ${server.label}`));
                 }}
               />
               <MoreDetails summary="What can it do?">
@@ -345,6 +345,7 @@ function OtherAppTools() {
 function ConnectionDetails() {
   const [settings, setSettings] = useState<BridgeSettings>(DEFAULT_BRIDGE_SETTINGS);
   const [message, setMessage] = useState<{ kind: "success" | "danger"; text: string } | null>(null);
+  const saved = useSaved();
 
   useEffect(() => {
     void loadBridgeSettings().then(setSettings);
@@ -357,7 +358,8 @@ function ConnectionDetails() {
         return;
       }
       await saveBridgeSettings(settings);
-      setMessage({ kind: "success", text: settings.enabled ? "Saved. BrowserHarness connects to the helper app now." : "Saved. The helper app connection is turned off." });
+      setMessage(null);
+      saved(settings.enabled ? "Saved. Connecting to the helper app…" : "Saved. The helper app connection is off");
     } catch (error) {
       setMessage({ kind: "danger", text: error instanceof Error ? error.message : "Could not save." });
     }
@@ -397,7 +399,7 @@ function ConnectionDetails() {
         helperText="Made by the helper app when you pair. Kept only in this Chrome."
         fullWidth
       />
-      {message && <Note kind={message.kind}>{message.text}</Note>}
+      {message?.kind === "danger" && <ProblemCard problem={diagnoseAi(message.text)} heading="Not saved" onRetry={() => void save()} />}
       <Box>
         <Button variant="outlined" onClick={() => void save()}>
           Save

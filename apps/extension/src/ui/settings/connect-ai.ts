@@ -1,5 +1,7 @@
 // Test an AI before saving it, and describe the result in plain words.
 import {
+  PROVIDERS,
+  isLocalProvider,
   createConnection,
   loadRoutingConfig,
   saveConnection,
@@ -10,6 +12,7 @@ import {
 } from "../../settings/provider-store";
 import { classifyModelCapabilities } from "../../settings/model-capabilities";
 import { testAgentCapability, testChatCapability, testEmbeddingCapability } from "../../runtime/model-client";
+import { cantUseBrowser, diagnoseAi, type AiContext, type Problem } from "../../help/problems";
 
 export type TestState = "idle" | "testing" | "success" | "error";
 
@@ -17,6 +20,35 @@ export interface TestOutcome {
   connection: ProviderConnection;
   state: Exclude<TestState, "idle" | "testing">;
   message: string;
+  /** Why it failed, or (on success) why it only partly works. */
+  problem?: Problem;
+}
+
+/** What the page shows about the last connect attempt. */
+export interface ConnectFeedback {
+  state: TestState;
+  message: string;
+  problem?: Problem;
+}
+
+export const IDLE: ConnectFeedback = { state: "idle", message: "" };
+
+/** Who to name in messages: "OpenRouter", "LM Studio" and so on. */
+export function aiContext(config: Pick<ProviderConfig, "provider" | "model">): AiContext {
+  const local = isLocalProvider(config.provider);
+  const label = PROVIDERS[config.provider]?.label.replace(" (local)", "") || "the AI service";
+  return {
+    local,
+    app: config.provider === "ollama" ? "Ollama" : config.provider === "lm-studio" ? "LM Studio" : undefined,
+    service: config.provider === "openai-compatible" ? "the AI service" : label,
+    model: config.model
+  };
+}
+
+/** Plain words for a failure before any check could run. */
+export function failed(error: unknown, config?: Pick<ProviderConfig, "provider" | "model">): ConnectFeedback {
+  const problem = diagnoseAi(error, config ? aiContext(config) : {});
+  return { state: "error", message: problem.title, problem };
 }
 
 function healthFromError(error: unknown): CapabilityHealth {
@@ -30,6 +62,12 @@ function healthFromError(error: unknown): CapabilityHealth {
 
 function healthy(result: { latencyMs: number; preview?: string }): CapabilityHealth {
   return { status: "healthy", latencyMs: result.latencyMs, checkedAt: new Date().toISOString(), message: result.preview };
+}
+
+/** The error text plus the kind of failure, so the diagnosis sees both. */
+function healthText(health: CapabilityHealth): string {
+  const code = health.status === "unauthorized" ? " (401)" : health.status === "rate-limited" ? " (429)" : health.status === "timeout" ? " timed out" : "";
+  return `${health.message || health.status}${code}`;
 }
 
 function seconds(ms?: number): string {
@@ -121,13 +159,24 @@ export async function testAndSave(config: ProviderConfig): Promise<TestOutcome> 
     await saveRoutingConfig({ ...routing, primaryConnectionId: connection.id });
   }
 
+  const context = aiContext(config);
   if (embeddingOnly) {
     return embeddingHealth.status === "healthy"
       ? { connection, state: "success", message: `All set. This helper works (it answered ${seconds(embeddingHealth.latencyMs)}).` }
-      : { connection, state: "error", message: `This helper didn't work. ${plainProblem(embeddingHealth)}` };
+      : {
+          connection,
+          state: "error",
+          message: `This helper didn't work. ${plainProblem(embeddingHealth)}`,
+          problem: diagnoseAi(embeddingHealth.message || embeddingHealth.status, context)
+        };
   }
   if (chatHealth.status !== "healthy") {
-    return { connection, state: "error", message: `This AI didn't answer. ${plainProblem(chatHealth)}` };
+    return {
+      connection,
+      state: "error",
+      message: `This AI didn't answer. ${plainProblem(chatHealth)}`,
+      problem: diagnoseAi(healthText(chatHealth), context)
+    };
   }
   return agentHealth.status === "healthy"
     ? {
@@ -138,6 +187,7 @@ export async function testAndSave(config: ProviderConfig): Promise<TestOutcome> 
     : {
         connection,
         state: "success",
+        problem: cantUseBrowser(config.model, agentHealth.message),
         message: `Saved, but this AI can only chat: it could not show it knows how to use the browser. Try a bigger or newer model for tasks on websites. (${plainProblem(agentHealth)})`
       };
 }

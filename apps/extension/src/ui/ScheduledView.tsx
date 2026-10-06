@@ -14,6 +14,7 @@ import {
 } from "@mui/material";
 import { DeleteIcon, RunIcon } from "./icons";
 import { Note, PageTitle, SettingsCard, useConfirm } from "./kit";
+import { useSaved } from "./feedback";
 import { BRIDGE_STATUS_KEY, loadBridgeStatus } from "../settings/bridge-store";
 import {
   CHAT_APP_LABELS,
@@ -57,6 +58,7 @@ const STATUS_LABEL = { worked: "Worked", failed: "Didn't work", "needs you": "Ne
 
 export function ScheduledView({ embedded }: { embedded?: boolean } = {}) {
   const [dialog, confirm] = useConfirm();
+  const saved = useSaved();
   const [items, setItems] = useState<ScheduledTask[]>([]);
   const [task, setTask] = useState("");
   const [when, setWhen] = useState<When>("weekdays");
@@ -94,6 +96,7 @@ export function ScheduledView({ embedded }: { embedded?: boolean } = {}) {
     await saveScheduledTask(item);
     setTask("");
     await refresh();
+    saved("Scheduled");
   };
 
   const intro = (
@@ -223,6 +226,7 @@ export function ScheduledView({ embedded }: { embedded?: boolean } = {}) {
                     onChange={async (event) => {
                       await setScheduleEnabled(item.id, event.target.checked);
                       await refresh();
+                      saved(event.target.checked ? "Turned on" : "Turned off");
                     }}
                   />
                 </Stack>
@@ -288,6 +292,7 @@ export function ScheduledView({ embedded }: { embedded?: boolean } = {}) {
                         if (!ok) return;
                         await deleteScheduledTask(item.id);
                         await refresh();
+                        saved("Deleted");
                       }}
                     >
                       <DeleteIcon fontSize="small" />

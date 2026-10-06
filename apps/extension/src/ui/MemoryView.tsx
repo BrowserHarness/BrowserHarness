@@ -12,6 +12,7 @@ import {
 } from "@mui/material";
 import { DeleteIcon, EditIcon } from "./icons";
 import { Note, ScreenFrame, SettingsCard, ToggleSetting, useConfirm } from "./kit";
+import { useSaved } from "./feedback";
 import {
   addFacts,
   clearAboutMe,
@@ -35,6 +36,7 @@ function InstructionsCard() {
   const [text, setText] = useState("");
   const [saved, setSaved] = useState("");
   const [note, setNote] = useState<{ severity: "success" | "warning"; text: string } | null>(null);
+  const notifySaved = useSaved();
 
   useEffect(() => {
     void loadInstructions().then((value) => {
@@ -52,6 +54,7 @@ function InstructionsCard() {
     setSaved(value.trim());
     setText(value.trim());
     setNote({ severity: "success", text: "Saved. BrowserHarness follows these from your next request." });
+    notifySaved("Your wishes are saved");
   };
 
   return (
@@ -116,6 +119,7 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
   const [learn, setLearn] = useState(true);
   const [error, setError] = useState("");
   const [dialog, confirm] = useConfirm();
+  const saved = useSaved();
 
   const refresh = async () => setFacts(await loadAboutMe());
 
@@ -134,6 +138,7 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
     await addFacts([draft], "you");
     setDraft("");
     await refresh();
+    saved("Fact saved");
   };
 
   const saveEdit = async () => {
@@ -266,6 +271,7 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
             onChange={async (value) => {
               setLearn(value);
               await updatePreferences({ learnAboutMe: value });
+              saved(value ? "Saved. Turned on" : "Saved. Turned off");
             }}
           />
         </SettingsCard>

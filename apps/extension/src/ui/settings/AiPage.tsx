@@ -20,7 +20,9 @@ import {
 } from "@mui/material";
 import { DeleteIcon, RefreshIcon } from "../icons";
 import { MoreDetails, Note, PageTitle, SettingsCard, StatusPill, TechnicalName, useConfirm } from "../kit";
-import { SimpleConnect, TestResult } from "../SimpleConnect";
+import { SimpleConnect, TestResult, Waiting } from "../SimpleConnect";
+import { ProblemCard, SuccessBanner, useSaved } from "../feedback";
+import { cantUseBrowser, diagnoseAi, diagnoseHelper, noModels, subscriptionAppMissing, type Problem } from "../../help/problems";
 import {
   PROVIDERS,
   hasEditableBaseUrl,
@@ -48,7 +50,7 @@ import {
 import { discoverModels, type DiscoveredModel } from "../../settings/model-catalog";
 import { checkSubscriptionReady, type SubscriptionReadiness } from "../../runtime/subscription-client";
 import { ensureEndpointAccess, hasEndpointAccess } from "../../settings/browser-access";
-import { isEmbeddingOnly, makeMain, plainProblem, testAndSave, testingMessage, type TestState } from "./connect-ai";
+import { IDLE, aiContext, failed, isEmbeddingOnly, makeMain, testAndSave, testingMessage, type ConnectFeedback } from "./connect-ai";
 import type { SectionProps } from "./SettingsShell";
 
 const SERVICE_HELP: Partial<Record<ProviderId, string>> = {
@@ -89,9 +91,24 @@ function AbilityChips({ connection }: { connection: ProviderConnection }) {
   );
 }
 
-function readinessText(readiness: SubscriptionReadiness | null) {
-  if (!readiness) return "Checking… ";
-  return readiness.state === "ready" ? "Ready. " : "Not ready yet. ";
+/** Can BrowserHarness use the Claude or ChatGPT plan right now? */
+function Readiness({ readiness, provider, onRecheck }: { readiness: SubscriptionReadiness | null; provider: ProviderId; onRecheck: () => void }) {
+  const appName = provider === "claude-subscription" ? "Claude Code" : "Codex";
+  if (!readiness) return <Waiting>Checking for {appName} through the helper app…</Waiting>;
+  if (readiness.state === "ready") {
+    return (
+      <SuccessBanner title="Ready">
+        {readiness.message} BrowserHarness never sees your login. Choose a model and press Test and save.
+      </SuccessBanner>
+    );
+  }
+  const problem: Problem =
+    readiness.state === "cli_missing"
+      ? subscriptionAppMissing(appName)
+      : readiness.state === "bridge_offline"
+        ? diagnoseHelper("not-connected", readiness.message)
+        : { ...diagnoseAi(readiness.message), guide: "subscription-app-missing" };
+  return <ProblemCard problem={problem} heading="Not ready yet" onRetry={onRecheck} retryLabel="Check again" />;
 }
 
 /** For people with a secret key, a subscription app or their own AI server. */
@@ -102,9 +119,8 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
-  const [modelsError, setModelsError] = useState("");
-  const [state, setState] = useState<TestState>("idle");
-  const [message, setMessage] = useState("");
+  const [modelsProblem, setModelsProblem] = useState<Problem | null>(null);
+  const [feedback, setFeedback] = useState<ConnectFeedback>(IDLE);
   const [endpointAccess, setEndpointAccess] = useState(true);
   const [readiness, setReadiness] = useState<SubscriptionReadiness | null>(null);
 
@@ -118,8 +134,7 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
   const readyToDiscover = discoveryAvailable && (!needsKey || Boolean(apiKey.trim())) && Boolean(effectiveBaseUrl);
 
   const reset = () => {
-    setState("idle");
-    setMessage("");
+    setFeedback(IDLE);
   };
 
   useEffect(() => {
@@ -146,23 +161,21 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
     if (!readyToDiscover) return;
     if (editableBaseUrl && !(await hasEndpointAccess(effectiveBaseUrl))) {
       setEndpointAccess(false);
-      setModelsError("Press “Allow BrowserHarness to reach this address” first, so it can list the models there.");
+      setModelsProblem(diagnoseAi("Chrome did not allow BrowserHarness to reach this address", aiContext({ provider, model })));
       return;
     }
     setModelsLoading(true);
-    setModelsError("");
+    setModelsProblem(null);
     try {
       const discovered = await discoverModels({ provider, apiKey, baseUrl: effectiveBaseUrl }, signal);
       setModels(discovered);
       if (discovered.length === 0) {
-        setModelsError("Connected, but it listed no models. You can still type the model name yourself.");
+        setModelsProblem(noModels(aiContext({ provider, model })));
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setModels([]);
-      setModelsError(
-        error instanceof Error ? `Could not list the models: ${error.message}` : "Could not list the models from this service."
-      );
+      setModelsProblem(diagnoseAi(error, aiContext({ provider, model })));
     } finally {
       if (!signal?.aborted) setModelsLoading(false);
     }
@@ -171,7 +184,7 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
   useEffect(() => {
     if (!readyToDiscover) {
       setModels([]);
-      setModelsError("");
+      setModelsProblem(null);
       return;
     }
     const controller = new AbortController();
@@ -187,7 +200,7 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
     setApiKey("");
     setModel(isSubscriptionProvider(next) ? "default" : "");
     setModels([]);
-    setModelsError("");
+    setModelsProblem(null);
     setBaseUrl(PROVIDERS[next].defaultBaseUrl || "");
     reset();
   };
@@ -197,8 +210,7 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
       const granted = await ensureEndpointAccess(effectiveBaseUrl);
       setEndpointAccess(granted);
       if (!granted) {
-        setState("error");
-        setMessage("Chrome did not allow BrowserHarness to reach this address, so nothing was saved.");
+        setFeedback(failed("Chrome did not allow BrowserHarness to reach this address", { provider, model }));
         return;
       }
     }
@@ -208,16 +220,13 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
       model: model.trim(),
       baseUrl: editableBaseUrl || provider === "nvidia" ? effectiveBaseUrl : undefined
     };
-    setState("testing");
-    setMessage(testingMessage(config.model));
+    setFeedback({ state: "testing", message: testingMessage(config.model) });
     try {
       const outcome = await testAndSave(config);
       if (outcome.state === "success" && needsKey) await saveAccount(makeAccount(provider, config.apiKey, config.baseUrl));
-      setState(outcome.state);
-      setMessage(outcome.message);
+      setFeedback(outcome);
     } catch (error) {
-      setState("error");
-      setMessage(error instanceof Error ? error.message : "Something went wrong. Please try again.");
+      setFeedback(failed(error, config));
     }
     await onSaved();
   };
@@ -283,7 +292,7 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
               const granted = await ensureEndpointAccess(effectiveBaseUrl);
               setEndpointAccess(granted);
               if (granted) {
-                setModelsError("");
+                setModelsProblem(null);
                 void loadModels();
               }
             }}
@@ -295,19 +304,7 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
       )}
 
       {subscription && (
-        <Note kind={readiness?.state === "ready" ? "success" : readiness ? "warning" : "info"}>
-          <strong>{readinessText(readiness)}</strong>
-          {readiness?.message}
-          <Box mt={0.75}>
-            {provider === "claude-subscription"
-              ? "The Claude Code app must be installed and signed in on the computer running the helper app. "
-              : "The Codex app must be installed and signed in on the computer running the helper app. "}
-            BrowserHarness never sees your login.
-          </Box>
-          <Button size="small" sx={{ mt: 0.75 }} onClick={() => void recheck()}>
-            Check again
-          </Button>
-        </Note>
+        <Readiness readiness={readiness} provider={provider} onRecheck={() => void recheck()} />
       )}
 
       {needsKey && (
@@ -346,10 +343,10 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
               {...params}
               label="Model name"
               placeholder={discoveryAvailable ? "The list fills in by itself" : "Type the model name"}
-              error={Boolean(modelsError)}
               helperText={
-                modelsError ||
-                (models.length > 0
+                modelsProblem
+                  ? "Couldn't load the list. You can still type the model name. See below."
+                  : (models.length > 0
                   ? `${models.length} models found. Choose one from the list.`
                   : discoveryAvailable
                     ? local
@@ -384,16 +381,20 @@ function MoreWaysToConnect({ onSaved }: { onSaved: () => Promise<void> }) {
         )}
       </Stack>
 
-      <TestResult state={state} message={message} />
+      {modelsProblem && feedback.state !== "error" && (
+        <ProblemCard problem={modelsProblem} severity="warning" heading="Couldn't load the list of models" onRetry={() => void loadModels()} />
+      )}
+
+      <TestResult feedback={feedback} onRetry={() => void save()} />
 
       <Box>
         <Button
           variant="contained"
           size="large"
           onClick={() => void save()}
-          disabled={state === "testing" || (needsKey && !apiKey.trim()) || !model.trim() || (editableBaseUrl && !effectiveBaseUrl)}
+          disabled={feedback.state === "testing" || (needsKey && !apiKey.trim()) || !model.trim() || (editableBaseUrl && !effectiveBaseUrl)}
         >
-          {state === "testing" ? "Checking…" : isEmbeddingOnly(model) ? "Test and save as memory helper" : "Test and save"}
+          {feedback.state === "testing" ? "Checking…" : isEmbeddingOnly(model) ? "Test and save as memory helper" : "Test and save"}
         </Button>
       </Box>
     </Stack>
@@ -440,9 +441,9 @@ export function AiPage(_props: SectionProps) {
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
   const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
   const [routing, setRouting] = useState<RuntimeRoutingConfig>({});
-  const [state, setState] = useState<TestState>("idle");
-  const [message, setMessage] = useState("");
+  const [feedback, setFeedback] = useState<ConnectFeedback>(IDLE);
   const [dialog, confirm] = useConfirm();
+  const saved = useSaved();
 
   const refresh = async () => {
     const [saved, currentRouting, services] = await Promise.all([loadConnections(), loadRoutingConfig(), loadAccounts()]);
@@ -458,19 +459,20 @@ export function AiPage(_props: SectionProps) {
   const connectFromSimple = async (config: ProviderConfig) => {
     if (hasEditableBaseUrl(config.provider) && config.baseUrl) {
       if (!(await ensureEndpointAccess(config.baseUrl))) {
-        setState("error");
-        setMessage("Chrome did not allow BrowserHarness to reach this AI, so nothing was saved.");
+        setFeedback(failed("Chrome did not allow BrowserHarness to reach this AI", config));
         return;
       }
     }
     await saveAccount(makeAccount(config.provider, config.apiKey, config.baseUrl));
-    setState("testing");
-    setMessage(testingMessage(config.model));
-    const outcome = await testAndSave(config);
-    // The model the person just picked is the one the chat should use.
-    if (outcome.connection.chatHealth.status === "healthy") await makeMain(outcome.connection);
-    setState(outcome.state);
-    setMessage(outcome.message);
+    setFeedback({ state: "testing", message: testingMessage(config.model) });
+    try {
+      const outcome = await testAndSave(config);
+      // The model the person just picked is the one the chat should use.
+      if (outcome.connection.chatHealth.status === "healthy") await makeMain(outcome.connection);
+      setFeedback(outcome);
+    } catch (error) {
+      setFeedback(failed(error, config));
+    }
     await refresh();
   };
 
@@ -479,6 +481,10 @@ export function AiPage(_props: SectionProps) {
     if (next.fallbackConnectionId && next.fallbackConnectionId === next.primaryConnectionId) next.fallbackConnectionId = undefined;
     await saveRoutingConfig(next);
     setRouting(next);
+    const name = (id?: string) => connections.find((connection) => connection.id === id)?.model || "it";
+    if ("primaryConnectionId" in patch) saved(`Saved. ${name(next.primaryConnectionId)} is now your main AI`);
+    else if ("fallbackConnectionId" in patch) saved(next.fallbackConnectionId ? `Saved. ${name(next.fallbackConnectionId)} is your backup` : "Saved. No backup AI");
+    else saved("Saved");
   };
 
   const forgetConnection = async (connection: ProviderConnection) => {
@@ -491,6 +497,7 @@ export function AiPage(_props: SectionProps) {
     if (!ok) return;
     await removeConnection(connection.id);
     await refresh();
+    saved("Removed");
   };
 
   const disconnectAccount = async (account: ProviderAccount) => {
@@ -503,6 +510,7 @@ export function AiPage(_props: SectionProps) {
     if (!ok) return;
     await removeAccount(account.id);
     await refresh();
+    saved(`Disconnected ${accountLabel(account)}`);
   };
 
   const main = connections.find((connection) => connection.id === routing.primaryConnectionId);
@@ -530,10 +538,7 @@ export function AiPage(_props: SectionProps) {
               </Typography>
               <AbilityChips connection={main} />
               {main.agentHealth.status !== "healthy" && main.agentHealth.status !== "unknown" && (
-                <Note kind="warning">
-                  This AI could not show it knows how to use the browser, so tasks on websites may fail. Pick a bigger or
-                  newer model below. ({plainProblem(main.agentHealth)})
-                </Note>
+                <ProblemCard problem={cantUseBrowser(main.model, main.agentHealth.message)} severity="warning" />
               )}
               <Typography variant="body2" color="text.secondary">
                 You can switch to another AI any time from the model button at the top of the chat.
@@ -546,7 +551,7 @@ export function AiPage(_props: SectionProps) {
           )}
         </SettingsCard>
 
-        <SimpleConnect onConnect={connectFromSimple} state={state} message={message} />
+        <SimpleConnect onConnect={connectFromSimple} feedback={feedback} />
 
         <SettingsCard title="More ways to connect" intro="For people with a secret key (API key), a Claude or ChatGPT subscription, or their own AI server.">
           <MoreDetails summary="Show more ways to connect">

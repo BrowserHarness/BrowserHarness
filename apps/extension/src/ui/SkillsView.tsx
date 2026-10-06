@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import { DeleteIcon, DownloadIcon, EditIcon, ReplayIcon, RunIcon, UploadIcon } from "./icons";
 import { ScreenFrame, SettingsCard, ToggleSetting } from "./kit";
+import { useSaved } from "./feedback";
 import {
   deleteSkill,
   loadSkills,
@@ -76,6 +77,7 @@ export function SkillsView({
   const [link, setLink] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [autoSkills, setAutoSkills] = useState(true);
+  const saved = useSaved();
 
   const refresh = async () => {
     setSkills(await loadSkills());
@@ -198,6 +200,7 @@ export function SkillsView({
             onChange={async (value) => {
               setAutoSkills(value);
               await updatePreferences({ autoSkills: value });
+              saved(value ? "Saved. Turned on" : "Saved. Turned off");
             }}
           />
         </SettingsCard>

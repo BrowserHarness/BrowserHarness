@@ -105,6 +105,9 @@ try {
   await shot(page, "settings-look-dark-large");
   const prefs = await stored(page, "browserharness.preferences");
   check("both choices are saved", prefs?.textSize === "larger" && prefs?.appearance === "dark");
+  const note = await page.getByTestId("saved-note").innerText().catch(() => "");
+  check("a Saved note confirms the change", note.startsWith("Saved"), note);
+  await shot(page, "saved-note", false);
   await page.getByRole("radio", { name: "Normal" }).click();
   await page.getByRole("radio", { name: "Same as my computer" }).click();
 
@@ -181,6 +184,50 @@ try {
   await side.waitForFunction(() => document.querySelector("textarea")?.value.includes("cheapest flight"), null, { timeout: 5000 }).catch(() => {});
   const box = await side.locator("textarea").first().inputValue();
   check("an example in the big tab lands in the side panel's chat box", box.includes("Find the cheapest flight from Delhi to Goa"), box);
+
+  // 9. A failed connection says why, how to fix it, and links its guide.
+  await page.goto(`chrome-extension://${extId}/settings.html#ai`);
+  await page.getByRole("button", { name: "Show more ways to connect" }).click();
+  await page.getByRole("combobox", { name: "Service" }).click();
+  await page.getByRole("option", { name: "LM Studio (on this computer)" }).click();
+  await page.getByLabel("Server address", { exact: true }).fill("http://localhost:9/v1");
+  await page.getByText("Couldn't load the list of models").waitFor({ timeout: 15000 }).catch(() => {});
+  check("a server that can't be reached explains why the model list is empty", await page.getByText("Couldn't load the list of models").isVisible());
+  await page.getByRole("combobox", { name: "Model name", exact: true }).fill("qwen2.5-7b-instruct");
+  await page.getByRole("button", { name: "Test and save", exact: true }).click();
+  const failure = page.getByRole("alert").filter({ hasText: /couldn't connect/i });
+  await failure.waitFor({ timeout: 30000 }).catch(() => {});
+  const failureText = await failure.innerText().catch(() => "");
+  check("Test and save shows the reason and the fix", failureText.includes("LM Studio isn't answering") && failureText.includes("Why:") && failureText.includes("How to fix it:"), failureText.split("\n")[1]);
+  const guideLink = failure.locator('[data-guide="local-ai-not-running"]');
+  const href = (await guideLink.getAttribute("href").catch(() => null)) || "";
+  check("its Read the guide button links the matching guide", href.endsWith("settings.html#help/local-ai-not-running"), href);
+  await failure.scrollIntoViewIfNeeded().catch(() => {});
+  await shot(page, "connect-failed", false);
+  const [guideTab] = await Promise.all([ctx.waitForEvent("page", { timeout: 5000 }).catch(() => null), guideLink.click()]);
+  const guidePage = guideTab || page;
+  await guidePage.setViewportSize({ width: 1280, height: 900 });
+  await guidePage.locator('[data-guide-view="local-ai-not-running"]').waitFor({ timeout: 5000 }).catch(() => {});
+  const guideText = await guidePage.locator("main").innerText().catch(() => "");
+  check("the guide opens with its steps", guideText.includes("How to fix it") && guideText.includes("All help"), guidePage.url());
+  await shot(guidePage, "guide-local-ai");
+  if (guideTab) await guideTab.close();
+
+  // 10. Help lists every guide, and none uses technical jargon.
+  await page.goto(`chrome-extension://${extId}/settings.html#help`);
+  await page.locator("[data-guide-link]").first().waitFor({ timeout: 5000 }).catch(() => {});
+  const links = await page.locator("[data-guide-link]").evaluateAll((items) => items.map((item) => item.getAttribute("data-guide-link")));
+  await shot(page, "help-list");
+  const guideProblems = [];
+  for (const slug of links) {
+    await page.locator(`[data-guide-link="${slug}"]`).first().click();
+    await page.locator(`[data-guide-view="${slug}"]`).waitFor({ timeout: 3000 }).catch(() => guideProblems.push(`${slug}: did not open`));
+    const text = await page.locator("main").innerText();
+    for (const word of FORBIDDEN) if (word.test(text)) guideProblems.push(`${slug}: ${word}`);
+    await page.getByRole("button", { name: "All help", exact: true }).click();
+    await page.locator("[data-guide-link]").first().waitFor({ timeout: 3000 });
+  }
+  check(`Help lists ${links.length} guides; each opens and back works, in plain words`, links.length >= 19 && guideProblems.length === 0, guideProblems.join("; "));
 
   check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 } finally {

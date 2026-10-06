@@ -139,9 +139,12 @@ try {
   );
 
   await side.getByRole("option", { name: "Claude subscription" }).click();
-  await side.getByText("Not ready yet.").waitFor({ timeout: 10000 }).catch(() => {});
+  await side.getByText("The helper app isn't connected").waitFor({ timeout: 10000 }).catch(() => {});
   const subText = await side.locator("body").innerText();
-  check("subscription shows a plain readiness message when the Bridge is off", subText.includes("Not ready yet.") && subText.includes("The helper app is not connected"));
+  check(
+    "subscription explains why it isn't ready, with a fix and a guide, when the helper app is off",
+    /not ready yet/i.test(subText) && subText.includes("The helper app isn't connected") && subText.includes("How to fix it") && (await side.locator('[data-guide="helper-not-connected"]').count()) === 1
+  );
 
   await providerBox.click();
   await side.getByRole("option", { name: "LM Studio (on this computer)" }).click();
@@ -155,6 +158,7 @@ try {
   await side.getByText(/All set\./).last().waitFor({ timeout: 30000 }).catch(() => {});
   const saved = await side.locator("body").innerText();
   check("local model passes the Chat and Agent checks and is saved", /All set\. This AI can chat with you and use your browser/.test(saved), saved.match(/(All set|Saved|This AI)[^\n]*/)?.[0] || "");
+  check("a success tick and Connected banner appear", (await side.getByRole("status").filter({ hasText: "Connected" }).count()) > 0);
   check("the tested AI is listed with plain abilities", saved.includes("AIs you've tested") && saved.includes("Can use the browser"));
   check("no Authorization header was sent to the local server", seenAuth.length > 0 && seenAuth.every((a) => a === ""));
 } finally {
