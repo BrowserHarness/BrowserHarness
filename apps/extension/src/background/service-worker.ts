@@ -21,6 +21,7 @@ import {
 } from "../runtime/site-commands";
 import {
   ALARM_PREFIX,
+  CHAT_APP_LABELS,
   SCHEDULES_STORAGE_KEY,
   describeSchedule,
   isChatApp,
@@ -29,8 +30,17 @@ import {
   newScheduledTask,
   parseScheduleText,
   plannedAlarms,
-  saveScheduledTask
+  saveScheduledTask,
+  setScheduleEnabled
 } from "../runtime/schedules";
+import {
+  RUNNING_CHAT_TASKS_KEY,
+  parseChatCommand,
+  scheduleToTurnOff,
+  schedulesText,
+  statusText,
+  type RunningChatTask
+} from "../runtime/chat-commands";
 import {
   QUICK_EXPLAIN_MENU_ID,
   QUICK_EXPLAIN_STORAGE_KEY,
@@ -3036,6 +3046,50 @@ async function scheduleFromChat(words: string, from: string): Promise<ToolResult
   };
 }
 
+async function runningChatTasks(): Promise<Record<string, RunningChatTask>> {
+  const stored = ((await chrome.storage.session.get(RUNNING_CHAT_TASKS_KEY))[RUNNING_CHAT_TASKS_KEY] || {}) as Record<string, RunningChatTask>;
+  // A runner tab someone closed is no longer running.
+  const alive: Record<string, RunningChatTask> = {};
+  for (const [id, task] of Object.entries(stored)) {
+    if (await chrome.tabs.get(task.tab_id).then(() => true, () => false)) alive[id] = task;
+  }
+  if (Object.keys(alive).length !== Object.keys(stored).length) await chrome.storage.session.set({ [RUNNING_CHAT_TASKS_KEY]: alive });
+  return alive;
+}
+
+async function forgetRunningChatTask(id: string): Promise<void> {
+  const stored = ((await chrome.storage.session.get(RUNNING_CHAT_TASKS_KEY))[RUNNING_CHAT_TASKS_KEY] || {}) as Record<string, RunningChatTask>;
+  if (!(id in stored)) return;
+  const { [id]: _done, ...rest } = stored;
+  await chrome.storage.session.set({ [RUNNING_CHAT_TASKS_KEY]: rest });
+}
+
+/** /status, /stop, /schedules and /unschedule from a chat app, answered at once. */
+async function chatCommandReply(text: string, from: string): Promise<string | null> {
+  const command = parseChatCommand(text);
+  if (!command) return null;
+  if (command.kind === "status") {
+    return statusText(Object.values(await runningChatTasks()), await loadSchedules());
+  }
+  if (command.kind === "stop") {
+    const mine = Object.values(await runningChatTasks()).filter((task) => task.from === from);
+    if (!mine.length) return "Nothing you started here is running.";
+    const label = isChatApp(from) ? CHAT_APP_LABELS[from] : "your phone";
+    for (const task of mine) {
+      await chrome.tabs.remove(task.tab_id).catch(() => undefined);
+      await forgetRunningChatTask(task.id);
+      sendBridgeEvent({ type: "remote_task_result", id: task.id, status: "failed", message: `You stopped it from ${label}.` });
+    }
+    return `Stopped: ${mine.map((task) => task.text).join("; ")}`;
+  }
+  if (command.kind === "schedules") return schedulesText(await loadSchedules());
+  const choice = scheduleToTurnOff(await loadSchedules(), command.number);
+  if ("reply" in choice) return choice.reply;
+  await setScheduleEnabled(choice.item.id, false);
+  return `Turned off: ${choice.item.task}
+Turn it back on under History → Scheduled.`;
+}
+
 /** A task sent from a chat app (Telegram, Discord, Slack or Signal, via the Bridge). */
 async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResult> {
   const text = typeof args.text === "string" ? args.text.trim().slice(0, 4000) : "";
@@ -3043,7 +3097,9 @@ async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResul
     return { ok: false, error: { code: "EMPTY_TASK", message: "The message had no task in it." } };
   }
   const from = typeof args.from === "string" ? args.from : "phone";
-  if (/^\/schedules?\b/i.test(text)) return scheduleFromChat(text.replace(/^\/schedules?\s*/i, ""), from);
+  if (/^\/schedule\b/i.test(text)) return scheduleFromChat(text.replace(/^\/schedule\s*/i, ""), from);
+  const reply = await chatCommandReply(text, from);
+  if (reply !== null) return { ok: true, data: { id: crypto.randomUUID(), reply } };
   const id = crypto.randomUUID();
   const stored = (await chrome.storage.session.get(REMOTE_TASKS_KEY))[REMOTE_TASKS_KEY] || {};
   await chrome.storage.session.set({
@@ -3052,10 +3108,16 @@ async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResul
       [id]: { text, from: typeof args.from === "string" ? args.from : "phone", created_at: new Date().toISOString() }
     }
   });
-  await chrome.tabs.create({
+  const tab = await chrome.tabs.create({
     url: chrome.runtime.getURL(`runner.html?remote=${encodeURIComponent(id)}`),
     active: false
   });
+  if (tab.id !== undefined) {
+    const running = ((await chrome.storage.session.get(RUNNING_CHAT_TASKS_KEY))[RUNNING_CHAT_TASKS_KEY] || {}) as Record<string, RunningChatTask>;
+    await chrome.storage.session.set({
+      [RUNNING_CHAT_TASKS_KEY]: { ...running, [id]: { id, text, from, tab_id: tab.id, started_at: new Date().toISOString() } }
+    });
+  }
   return { ok: true, data: { id } };
 }
 
@@ -3202,6 +3264,7 @@ chrome.runtime.onMessage.addListener(
             sendResponse({ ok: false });
             return;
           }
+          await forgetRunningChatTask(String(request.id));
           sendResponse({
             ok: sendBridgeEvent({
               type: "remote_task_result",

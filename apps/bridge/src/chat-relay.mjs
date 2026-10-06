@@ -19,7 +19,7 @@ export const VOICE_OFF =
   "I got your voice note, but voice notes aren't turned on for this bot. Type the task instead, or turn them on at your computer: browserharness-bridge voice setup --url <speech-to-text service> --model <its model>";
 
 export const CHAT_HELP =
-  "Send me a task, like “check my inbox for invoices” or “/your-skill size 9”, and I'll do it in Chrome on your computer and reply with the result. Anything that needs your approval waits for you there.";
+  "Send me a task, like “check my inbox for invoices” or “/your-skill size 9”, and I'll do it in Chrome on your computer and reply with the result. Anything that needs your approval waits for you there.\n\n/status: what's running and coming up\n/stop: stop what you started here\n/schedule every weekday at 8am …: a scheduled task\n/schedules: your scheduled tasks (/unschedule 2 turns one off)";
 
 /** Cuts a reply to what the app accepts. */
 export function clipMessage(text, max) {

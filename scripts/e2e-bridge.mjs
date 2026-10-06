@@ -88,7 +88,11 @@ const mockModel = (body, res) => {
     ? { kind: "tool", tool: "navigate", input: { url: pageUrl }, note: "Opening the page" }
     : { kind: "final", message: `TG_DONE ${/button "(\w+)"/.exec(user)?.[1] || "no button"}` };
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: JSON.stringify(decision) } }] }));
+  // A slow task stays running long enough to be stopped from the chat.
+  setTimeout(
+    () => res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: JSON.stringify(decision) } }] })),
+    user.includes("TG_SLOW") ? 25_000 : 0
+  );
 };
 // Like bridge(), without blocking this process (its stand-in servers must keep answering).
 const bridgeAsync = (file, ...args) =>
@@ -585,6 +589,28 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   const offeredInForm = await side.getByLabel("Also send results to").isVisible().catch(() => false);
   check("the Scheduled screen shows where results go and offers the chat apps", cardText.includes("results also go to Telegram") && offeredInForm, cardText.slice(0, 200));
   if (process.env.SHOT_DIR) await side.screenshot({ path: path.join(process.env.SHOT_DIR, "scheduled-chat.png"), fullPage: true });
+
+  // Chat commands: what's running, stopping it, and the scheduled tasks.
+  mark = telegram.sent.length;
+  tgMessage(42, "/schedules");
+  const scheduleList = await sentAfter(mark, /^Your scheduled tasks:/, 15_000);
+  check("/schedules lists the scheduled tasks, numbered", /1\. TG_TASK open[\s\S]*results to Telegram/.test(scheduleList?.text || ""), scheduleList?.text);
+  mark = telegram.sent.length;
+  tgMessage(42, "TG_SLOW wait a while");
+  await sentAfter(mark, /^On it: TG_SLOW/, 15_000);
+  tgMessage(42, "/status");
+  const statusReply = await sentAfter(mark, /^Running now:/, 15_000);
+  check("/status shows the running task and what's coming up", /TG_SLOW wait a while \(from Telegram/.test(statusReply?.text || "") && /Coming up:[\s\S]*TG_TASK/.test(statusReply?.text || ""), statusReply?.text);
+  tgMessage(42, "/stop");
+  const stopped = await sentAfter(mark, /^Stopped: TG_SLOW/, 15_000);
+  const stoppedResult = await sentAfter(mark, /^Didn't finish\n\nYou stopped it from Telegram\./, 15_000);
+  const runnerTabs = await side.evaluate(async () => (await chrome.tabs.query({})).filter((tab) => (tab.title || "").includes("TG_SLOW")).length);
+  check("/stop stops the task and the chat hears it ended", Boolean(stopped && stoppedResult) && runnerTabs === 0, JSON.stringify(telegram.sent.slice(mark)));
+  mark = telegram.sent.length;
+  tgMessage(42, "/unschedule 1");
+  const turnedOff = await sentAfter(mark, /^Turned off: TG_TASK/, 15_000);
+  const afterOff = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.schedules"))["browserharness.schedules"] || []);
+  check("/unschedule turns a scheduled task off", Boolean(turnedOff) && afterOff.find((item) => item.task.startsWith("TG_TASK"))?.enabled === false, turnedOff?.text);
 
   // 4. Uninstall removes what install added.
   const removed = bridge(installed, "uninstall");

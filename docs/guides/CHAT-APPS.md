@@ -29,6 +29,15 @@ Discord, Slack, Signal) to a `/schedule` request, or pick **Also send results
 to** under History → Scheduled. The task still runs in Chrome on your computer,
 so Chrome and the Bridge need to be running at that time.
 
+## Commands in the chat
+Besides tasks, the bot answers these at once:
+- `/status`: what's running now and the next scheduled tasks
+- `/stop`: stop the tasks you started from this app
+- `/schedules`: your scheduled tasks, numbered
+- `/unschedule 2`: turn off the second one (turn it back on, or delete it,
+  under History → Scheduled)
+- `/help`: what the bot can do
+
 ## Voice notes
 Send your bot a voice note instead of typing. The Bridge turns it into words
 with a speech-to-text service you choose, runs the words as the task, and the
