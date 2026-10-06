@@ -62,6 +62,8 @@ import { saveInstructions } from "./instructions";
 import { loadTaskHistory, saveTaskHistoryEntry } from "./history";
 import { loadSkills, saveSkill, type UserSkill } from "./skills";
 import { listTaskEpisodeMemory } from "./task-memory";
+import { compileContext, renderContext } from "./context";
+import { loadActiveConnection } from "../settings/provider-store";
 
 let local: Record<string, unknown>;
 let session: Record<string, unknown>;
@@ -117,9 +119,9 @@ describe("tasks from chat apps", () => {
     const A = a.space.id;
     const B = b.space.id;
 
-    // Each Space knows different things, worded alike so a leak would show.
-    await addFacts(["I prefer casual writing"], "you", A);
-    await addFacts(["I prefer formal reports"], "you", B);
+    // Each Space knows different things, worded alike (and relevant to the task) so a leak would show.
+    await addFacts(["I prefer casual product descriptions"], "you", A);
+    await addFacts(["I prefer formal product reports"], "you", B);
     await switchSpace(A);
     await saveInstructions("Prices in rupees");
     await switchSpace(B);
@@ -134,6 +136,11 @@ describe("tasks from chat apps", () => {
     const id = await enqueueRemoteTask("publish kettle product like last time", "telegram");
     expect((session[REMOTE_TASKS_KEY] as Record<string, { space_id?: string }>)[id].space_id).toBe(A);
 
+    // What the side panel would send for the same words in a new chat in Space A.
+    const sidePanel = renderContext(
+      await compileContext({ request: "publish kettle product like last time", spaceId: A, conversation: [], connection: await loadActiveConnection(), autoSkills: true, recall: true })
+    );
+
     // 3. The person switches to Space B. 4. The runner starts.
     await switchSpace(B);
     const request = await takeRemoteTask(id);
@@ -145,14 +152,16 @@ describe("tasks from chat apps", () => {
     expect(agentCalls).toHaveLength(1);
     const call = agentCalls[0];
     expect(call.spaceId).toBe(A);
-    expect(call.context).toContain("I prefer casual writing");
+    expect(call.context).toContain("I prefer casual product descriptions");
     expect(call.context).toContain("Prices in rupees");
     expect(call.context).toContain("₹1,499");
     expect(call.context).toContain("(/publish-kettle-product)");
-    expect(call.context).not.toContain("formal reports");
+    expect(call.context).not.toContain("formal product reports");
     expect(call.context).not.toContain("dollars");
     expect(call.context).not.toContain("Work kettle report");
     expect(call.context).not.toContain("/publish-kettle-product-report");
+    // Same request, same Space: the same memory as from the side panel.
+    expect(call.context).toBe(sidePanel);
 
     // …and everything it wrote went to Space A.
     expect((await listTaskEpisodeMemory(50, A)).map((episode) => episode.session_id)).toEqual(["remote-session"]);

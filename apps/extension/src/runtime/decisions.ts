@@ -236,4 +236,10 @@ export async function decideCommand(args: string, spaceId?: string, chatId?: str
     : `Noted${where}: ${result.decision.subject} is ${result.decision.value}.`;
 }
 
+/** How many stored decisions sit behind the wall for this Space (counted by tag only). */
+export async function countDecisionsOutsideSpace(spaceId?: string): Promise<number> {
+  const space = await resolveSpace(spaceId);
+  return (await loadAll()).filter((item) => !visibleInSpace(item, space)).length;
+}
+
 export const DECISIONS_STORAGE_KEY = KEY;

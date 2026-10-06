@@ -17,7 +17,8 @@ import {
 } from "./model-router";
 import type { PageObservation, ToolName, ToolResult } from "./protocol";
 import { saveTaskEpisodeMemory } from "./task-memory";
-import { indexTaskEpisodeMemory, searchTaskMemoryHybrid } from "./semantic-memory";
+import { indexTaskEpisodeMemory } from "./semantic-memory";
+import { localMemorySource } from "./context/memory-source";
 import { searchProceduralMemory } from "./procedural-memory";
 import { discoverMcpCatalog as buildMcpCatalog } from "./mcp-catalog";
 import { getMcpServerTrustMode } from "../settings/mcp-trust-store";
@@ -256,16 +257,8 @@ export async function runAgentTask(
                       subtask,
                       observation
                     ) =>
-                      (
-                        // Helpers recall from the parent task's Space only.
-                        await searchTaskMemoryHybrid(
-                          `${subtask} ${safeHostname(observation.url)}`,
-                          3,
-                          spaceId
-                        )
-                      ).map(
-                        (hit) => hit.episode
-                      ),
+                      // Helpers recall from the parent task's Space only, through the same memory source.
+                      (await localMemorySource.relevantEpisodes(`${subtask} ${safeHostname(observation.url)}`, spaceId, 3)).episodes,
                     recallProcedures: (
                       subtask,
                       observation
@@ -396,13 +389,7 @@ export async function runAgentTask(
         browserTask,
         observation
       ) =>
-        (
-          await searchTaskMemoryHybrid(
-            `${browserTask} ${safeHostname(observation.url)}`,
-            3,
-            spaceId
-          )
-        ).map((hit) => hit.episode),
+        (await localMemorySource.relevantEpisodes(`${browserTask} ${safeHostname(observation.url)}`, spaceId, 3)).episodes,
       recallProcedures: (
         browserTask,
         observation

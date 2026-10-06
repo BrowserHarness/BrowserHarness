@@ -122,6 +122,14 @@ try {
     await side.getByRole("button", { name: "Send" }).click();
   };
   const sideText = () => side.locator("body").innerText();
+  // The menu button's tooltip can cover "New chat" while the pointer rests on it, so move away first.
+  const startNewChat = async () => {
+    await side.getByRole("button", { name: "Open the menu" }).click();
+    await side.mouse.move(5, 600);
+    await side.getByRole("tooltip").waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+    await side.getByRole("button", { name: "New chat" }).first().click();
+    await side.waitForTimeout(400);
+  };
   const waitText = (text, timeout = 20000) =>
     side.waitForFunction((text) => document.body.innerText.includes(text), text, { timeout }).catch(() => {});
   // Facts about this Space and facts for every Space (name and city go to every Space).
@@ -154,6 +162,8 @@ try {
   check("/recall lists matching conversations without a model", (await sideText()).includes("The Philips HD9306 at ₹1,599") && prompts.length === beforeRecall);
 
   // 4. Browser tasks get past conversations as context, and memory stays clean.
+  // (A new chat, so it can only come from past conversations, not this chat.)
+  await startNewChat();
   await ask("open this page and check the kettle I picked last time");
   await waitText("AGENT_", 30000);
   check("browser tasks get the past conversation too", (await sideText()).includes("AGENT_RECALL_OK"));
@@ -201,7 +211,7 @@ try {
   await side.reload();
   await side.waitForTimeout(800);
   const beforeRules = prompts.length;
-  await ask("which kettle brand lasts longest?");
+  await ask("which kettle shop near me is best?");
   for (let i = 0; i < 100 && prompts.length === beforeRules; i++) await side.waitForTimeout(100);
   check(
     "standing instructions go with the next request",
@@ -229,6 +239,8 @@ try {
   await waitText("Noted: Code home is Forgejo", 5000);
   await ask("/decide code home: GitHub because the team works there");
   await waitText("I'll keep “Forgejo” as what you used before", 5000);
+  // A new chat, so the decision comes from memory rather than from this chat.
+  await startNewChat();
   const beforeDecision = prompts.length;
   await ask("draft the release notes");
   for (let i = 0; i < 100 && prompts.length === beforeDecision; i++) await side.waitForTimeout(100);
@@ -239,6 +251,10 @@ try {
       // (The chat's own earlier turns still mention it; the memory blocks must not.)
       !decisionPrompts.some((text) => /(DECISIONS|ABOUT ME)[^]*?\n\n/.exec(text)?.[0].includes("Forgejo"))
   );
+  const beforeRecipe = prompts.length;
+  await ask("suggest a dinner recipe");
+  for (let i = 0; i < 100 && prompts.length === beforeRecipe; i++) await side.waitForTimeout(100);
+  check("an unrelated request carries no decisions", !prompts.slice(beforeRecipe).some((text) => text.includes("Code home")));
   await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "About me" }).click();
   await side.getByTestId("decision").first().waitFor({ timeout: 5000 });

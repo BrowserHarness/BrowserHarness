@@ -246,6 +246,12 @@ async function loadAllEpisodes(): Promise<TaskEpisodeMemory[]> {
 }
 
 /** Only the episodes of one Space: the wall is applied before anything is searched. */
+/** How many stored episodes sit behind the wall for this Space (counted by tag only, never read or scored). */
+export async function countEpisodesOutsideSpace(spaceId: string): Promise<number> {
+  const all = await loadAllEpisodes();
+  return all.length - withinSpace(all, spaceId).length;
+}
+
 async function loadEpisodes(spaceId?: string): Promise<TaskEpisodeMemory[]> {
   return withinSpace(await loadAllEpisodes(), await resolveSpace(spaceId));
 }
