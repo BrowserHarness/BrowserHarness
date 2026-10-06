@@ -4,7 +4,6 @@ import { HEADING } from "./theme";
 import { SpaceBadge, saveTextFile, useSpaces } from "./spaces-ui";
 import { activeSpaceId, SPACES_STORAGE_KEY } from "../runtime/spaces";
 import {
-  chatContextPrompt,
   chatFileName,
   chatTitle,
   chatToMarkdown,
@@ -66,7 +65,7 @@ import {
 } from "../runtime/site-commands";
 import { SITE_SKILL_LIBRARY_KEY } from "../runtime/site-skill-store";
 import { siteCommandAnswer } from "./site-command-answer";
-import { applyLearningPlan, matchSkill, planLearning, skillHint } from "../runtime/skill-learning";
+import { applyLearningPlan, matchSkill, planLearning } from "../runtime/skill-learning";
 import { MemoryView } from "./MemoryView";
 import {
   deleteSkill,
@@ -103,9 +102,10 @@ import {
   withoutScopeWords
 } from "../runtime/about-me";
 import { loadTaskHistory } from "../runtime/history";
-import { userMemoryPrompt } from "../runtime/user-memory";
+import { contextFor, localMemorySource } from "../runtime/context";
+import { agentRoute, chatRoute } from "../runtime/route";
 import { decideCommand } from "../runtime/decisions";
-import { recallAnswer, recallFor, recallPrompt } from "../runtime/recall";
+import { recallAnswer } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
   CHAT_APP_LABELS,
@@ -1137,8 +1137,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     pausedRef.current = false;
     cancelled.current = false;
 
-    // About me: pick up plain facts from the request, then share what is known.
-    let aboutMe = "";
+    // About me: pick up plain facts from the request first, so they count right away.
     let autoSkills = true;
     let learnAboutMe = false;
     try {
@@ -1155,17 +1154,33 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           );
         }
       }
-      aboutMe = await userMemoryPrompt(spaceId, typed);
     } catch {
-      aboutMe = "";
+      // Learning never holds up the request.
     }
 
-    // Past conversations the request refers back to (or closely repeats).
-    const recalledEntries = skillRun ? [] : recallFor(await loadTaskHistory(spaceId).catch(() => []), typed);
-    const recalled = recallPrompt(recalledEntries);
-    if (recalledEntries.length) {
+    // What goes with the request (this chat, wishes, facts, decisions, past
+    // conversations, a matching Skill): compiled for this Space and model.
+    // One memory source for the whole task: its context, the agent and its helpers.
+    const memorySource = localMemorySource;
+    const compiledContext = await contextFor({
+      request: typed,
+      spaceId,
+      chatId,
+      conversation: skillRun
+        ? []
+        : messages.filter((item) => !item.problem).map((item) => ({ role: item.role, text: item.text })),
+      connection: primary,
+      fallback,
+      source: memorySource,
+      skill: skillRun,
+      autoSkills,
+      recall: !skillRun
+    }).catch(() => null);
+    const context = compiledContext?.text ?? "";
+    const recalledCount = compiledContext?.compiled.sections.history?.length ?? 0;
+    if (recalledCount) {
       addActivity(
-        `Remembering ${recalledEntries.length} past conversation${recalledEntries.length === 1 ? "" : "s"}`,
+        `Remembering ${recalledCount} past conversation${recalledCount === 1 ? "" : "s"}`,
         "done"
       );
     }
@@ -1194,11 +1209,9 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     };
 
     // A saved Skill that looks like this request guides the agent.
-    const hinted = !skillRun && autoSkills ? matchSkill(typed, savedSkills)?.skill ?? null : null;
+    const hinted = skillRun ? null : compiledContext?.compiled.skill ?? null;
     const usedSkill = skillRun ?? hinted;
-    const intent = usedSkill ? "browser" : classifyTaskIntent(task);
-    // Earlier turns of this chat, so follow-ups like "make it shorter" make sense.
-    const earlier = skillRun ? "" : chatContextPrompt(messages.filter((item) => !item.problem));
+    const intent = compiledContext?.compiled.intent ?? (usedSkill ? "browser" : classifyTaskIntent(task));
 
     try {
       if (intent === "chat") {
@@ -1207,12 +1220,11 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         requestAbort.current = controller;
 
         try {
+          const route = chatRoute(primary, fallback);
           const routed = await directChatWithFallback(
-            primary,
-            fallback?.chatHealth.status === "healthy"
-              ? fallback
-              : null,
-            task + earlier + aboutMe + recalled,
+            route.primary,
+            route.fallback,
+            task + context,
             controller.signal
           );
 
@@ -1237,22 +1249,11 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         }
       }
 
-      const agentPrimary =
-        primary.agentHealth.status !== "failed"
-          ? primary
-          : fallback?.agentHealth.status === "healthy"
-            ? fallback
-            : null;
+      const { primary: agentPrimary, fallback: agentFallback } = agentRoute(primary, fallback);
 
       if (!agentPrimary) {
         throw new CantUseBrowserError(primary.model);
       }
-
-      const agentFallback =
-        agentPrimary.id === primary.id &&
-        fallback?.agentHealth.status === "healthy"
-          ? fallback
-          : null;
 
       const controller = new AbortController();
       requestAbort.current = controller;
@@ -1263,11 +1264,12 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       if (hinted) addActivity(`Following your Skill /${hinted.slug}`, "done");
 
       const result = await runAgentTask(task + attachmentNote, {
-        context: earlier + aboutMe + recalled + (hinted ? skillHint(hinted) : ""),
+        context,
         agentPrimary,
         agentFallback,
         session: { id: taskSessionId, title: taskSessionTitle },
         spaceId,
+        memorySource,
         signal: controller.signal,
         hooks: {
           addActivity,

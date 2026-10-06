@@ -1,51 +1,35 @@
-// What the person told BrowserHarness, for a request in one Space: the
-// standing instructions, facts and decisions for every Space plus that
-// Space's own. The Space's own win where the two disagree. Only what is true
-// now is sent; things that were replaced are added only when the request
-// asks about the past, and are labelled as no longer true.
-import {
-  aboutMeFor,
-  aboutMePrompt,
-  earlierFactsFor,
-  earlierFactsPrompt,
-  loadAboutMe,
-  loadGlobalAboutMe,
-  type AboutMeFact
-} from "./about-me";
-import { currentDecisions, decisionsPrompt, earlierDecisionsFor, earlierDecisionsPrompt, type Decision } from "./decisions";
-import { loadGlobalInstructions, loadInstructions, scopedInstructionsPrompt } from "./instructions";
+// What the person told BrowserHarness, read through the Context Compiler.
+// Tasks compile their own context (context/index.ts contextFor); these are
+// for overviews and checks: what is true now in a Space, and what used to be.
+import type { AboutMeFact } from "./about-me";
+import { aboutMeFor } from "./about-me";
+import { compileContext, localMemorySource, renderContext } from "./context";
+import type { Decision } from "./decisions";
 
 /** What is true now in a Space: its own facts and decisions first, then those for every Space. */
 export async function currentState(spaceId: string): Promise<{ facts: AboutMeFact[]; decisions: Decision[] }> {
-  const [everySpaceFacts, spaceFacts, decisions] = await Promise.all([
-    loadGlobalAboutMe().catch(() => []),
-    loadAboutMe(spaceId).catch(() => []),
-    currentDecisions(spaceId).catch(() => [])
-  ]);
-  return { facts: aboutMeFor(everySpaceFacts, spaceFacts), decisions };
+  const current = await localMemorySource.currentState(spaceId);
+  return { facts: aboutMeFor(current.facts.global, current.facts.space), decisions: current.decisions };
 }
 
 /** What used to be true and matches a question about the past (empty for an ordinary request). */
 export async function earlierState(question: string, spaceId: string): Promise<{ facts: AboutMeFact[]; decisions: Decision[] }> {
-  const [facts, decisions] = await Promise.all([
-    earlierFactsFor(question, spaceId).catch(() => []),
-    earlierDecisionsFor(question, spaceId).catch(() => [])
-  ]);
+  const { facts, decisions } = await localMemorySource.earlierState(question, spaceId);
   return { facts, decisions };
 }
 
+/**
+ * The memory part of the context for a request in a Space (instructions,
+ * facts, decisions, and history only for questions about the past), compiled
+ * like a task's. With no request, every current fact and decision: an overview.
+ */
 export async function userMemoryPrompt(spaceId: string, request = ""): Promise<string> {
-  const [everySpaceRules, spaceRules, now, before] = await Promise.all([
-    loadGlobalInstructions().catch(() => ""),
-    loadInstructions(spaceId).catch(() => ""),
-    currentState(spaceId),
-    request ? earlierState(request, spaceId) : Promise.resolve({ facts: [], decisions: [] })
-  ]);
-  return (
-    scopedInstructionsPrompt(everySpaceRules, spaceRules) +
-    aboutMePrompt(now.facts) +
-    decisionsPrompt(now.decisions) +
-    earlierFactsPrompt(before.facts) +
-    earlierDecisionsPrompt(before.decisions)
-  );
+  const compiled = await compileContext({
+    request,
+    spaceId,
+    intent: "chat",
+    only: ["instructions", "facts", "decisions", "earlier"],
+    budgetTarget: 4000
+  });
+  return renderContext(compiled, ["instructions", "facts", "decisions", "earlier"]);
 }

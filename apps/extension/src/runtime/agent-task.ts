@@ -17,7 +17,8 @@ import {
 } from "./model-router";
 import type { PageObservation, ToolName, ToolResult } from "./protocol";
 import { saveTaskEpisodeMemory } from "./task-memory";
-import { indexTaskEpisodeMemory, searchTaskMemoryHybrid } from "./semantic-memory";
+import { indexTaskEpisodeMemory } from "./semantic-memory";
+import type { MemorySource } from "./context/memory-source";
 import { searchProceduralMemory } from "./procedural-memory";
 import { discoverMcpCatalog as buildMcpCatalog } from "./mcp-catalog";
 import { getMcpServerTrustMode } from "../settings/mcp-trust-store";
@@ -109,6 +110,12 @@ export interface AgentTaskOptions {
    */
   spaceId: string;
   /**
+   * The memory this task reads, fixed when it starts: the same source its
+   * context was compiled from. The task and every helper recall past tasks
+   * through it, never through another store behind its back.
+   */
+  memorySource: MemorySource;
+  /**
    * Extra guidance for the model only (About me, a matching Skill). It is
    * not part of the task, so memory, history and learned Skills stay clean.
    */
@@ -117,7 +124,7 @@ export interface AgentTaskOptions {
 
 export async function runAgentTask(
   task: string,
-  { agentPrimary, agentFallback, session, spaceId, signal, hooks, context = "" }: AgentTaskOptions
+  { agentPrimary, agentFallback, session, spaceId, memorySource, signal, hooks, context = "" }: AgentTaskOptions
 ): Promise<BrowserEngineResult> {
   let usedFallback = false;
   // Helpers run side by side, but the person answers one approval at a time.
@@ -256,16 +263,8 @@ export async function runAgentTask(
                       subtask,
                       observation
                     ) =>
-                      (
-                        // Helpers recall from the parent task's Space only.
-                        await searchTaskMemoryHybrid(
-                          `${subtask} ${safeHostname(observation.url)}`,
-                          3,
-                          spaceId
-                        )
-                      ).map(
-                        (hit) => hit.episode
-                      ),
+                      // Helpers recall from the parent task's Space only, through the same memory source.
+                      (await memorySource.relevantEpisodes(`${subtask} ${safeHostname(observation.url)}`, spaceId, 3)).episodes,
                     recallProcedures: (
                       subtask,
                       observation
@@ -396,13 +395,7 @@ export async function runAgentTask(
         browserTask,
         observation
       ) =>
-        (
-          await searchTaskMemoryHybrid(
-            `${browserTask} ${safeHostname(observation.url)}`,
-            3,
-            spaceId
-          )
-        ).map((hit) => hit.episode),
+        (await memorySource.relevantEpisodes(`${browserTask} ${safeHostname(observation.url)}`, spaceId, 3)).episodes,
       recallProcedures: (
         browserTask,
         observation

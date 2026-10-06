@@ -83,7 +83,7 @@ function stableHash(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function cosineSimilarity(
+export function cosineSimilarity(
   left: number[],
   right: number[]
 ): number | null {

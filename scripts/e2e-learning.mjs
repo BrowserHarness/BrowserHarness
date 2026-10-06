@@ -123,6 +123,14 @@ try {
     await side.getByRole("button", { name: "Send" }).click();
   };
   const sideText = () => side.locator("body").innerText();
+  // The menu button's tooltip can cover "New chat" while the pointer rests on it, so move away first.
+  const startNewChat = async () => {
+    await side.getByRole("button", { name: "Open the menu" }).click();
+    await side.mouse.move(5, 600);
+    await side.getByRole("tooltip").waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+    await side.getByRole("button", { name: "New chat" }).first().click();
+    await side.waitForTimeout(400);
+  };
   const waitText = (text, timeout = 20000) =>
     side.waitForFunction((text) => document.body.innerText.includes(text), text, { timeout }).catch(() => {});
   const count = async (text) => (await sideText()).split(text).length - 1;
@@ -210,15 +218,28 @@ try {
   await ask("/remember my password is hunter2");
   await waitText("won't save it");
   check("/remember refuses a password", (await sideText()).includes("won't save it"));
+  // A new chat, so the facts come from memory rather than from this chat (which would say them already).
+  await startNewChat();
   const beforeMemory = prompts.length;
   await ask("Summarize this page for me");
-  await side.waitForFunction(() => document.body.innerText.split("TASK_OK").length > 2, null, { timeout: 20000 }).catch(() => {});
+  await side.waitForFunction(() => document.body.innerText.includes("TASK_OK"), null, { timeout: 20000 }).catch(() => {});
   const memoryPrompt = prompts.slice(beforeMemory).join("\n");
-  check("browser tasks get the About me facts", memoryPrompt.includes("ABOUT ME") && memoryPrompt.includes("I live in Pune") && memoryPrompt.includes("My name is Priya"));
+  check(
+    "a page summary gets no facts it doesn't need, not even your name",
+    memoryPrompt.length > 0 && !memoryPrompt.includes("My name is Priya") && !memoryPrompt.includes("I live in Pune"),
+    memoryPrompt.slice(0, 200)
+  );
   const beforeChat = prompts.length;
-  await ask("hi how are you");
+  await ask("any tips for getting good seats on a long flight?");
   await side.waitForFunction(() => document.body.innerText.includes("CHAT_OK"), null, { timeout: 20000 }).catch(() => {});
-  check("chat answers get them too", prompts.slice(beforeChat).some((text) => text.includes("ABOUT ME") && text.includes("I prefer window seats")));
+  check("chat answers get the facts that help them", prompts.slice(beforeChat).some((text) => text.includes("ABOUT ME") && text.includes("I prefer window seats")));
+  // Speaking as you: your name goes along.
+  const beforeIntro = prompts.length;
+  const answersBefore = await count("CHAT_OK");
+  await ask("draft an introduction for me");
+  for (let wait = 0; wait < 100 && (await count("CHAT_OK")) === answersBefore; wait += 1) await side.waitForTimeout(200);
+  const introPrompt = prompts.slice(beforeIntro).join("\n");
+  check("an introduction from you gets your name", introPrompt.includes("ABOUT ME") && introPrompt.includes("My name is Priya"), introPrompt.slice(0, 200));
   // Where you live is kept for every Space, so a plain /forget leaves it and says how.
   await ask("/forget pune");
   await waitText("remembered in every Space");
