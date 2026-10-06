@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   addFacts,
   factScopeIn,
-  forgetMatching,
+  forgetCommand,
+  parseForget,
+  removeFact,
   loadAboutMe,
   loadGlobalAboutMe,
   moveFact,
@@ -135,13 +137,60 @@ describe("facts for every Space", () => {
     expect(await userMemoryPrompt(DEFAULT_SPACE_ID)).not.toContain("aisle");
   });
 
-  it("forgets matching facts in this Space and for every Space, never another Space's", async () => {
+  it("a normal /forget never removes a fact used in every Space, and says how to", async () => {
+    const w = await work();
+    await addFacts(["I visit Pune often"], "you", undefined, "global");
+    const answer = await forgetCommand("pune", w);
+    expect(answer).toContain("remembered in every Space");
+    expect(answer).toContain("/forget everywhere pune");
+    expect((await loadGlobalAboutMe()).map((item) => item.text)).toEqual(["I visit Pune often"]);
+  });
+
+  it("a normal /forget never changes another Space", async () => {
     const w = await work();
     await addFacts(["I like Pune cafes"], "you", w);
-    await addFacts(["I visit Pune often"], "you", undefined, "global");
     await addFacts(["Pune office address is on file"], "you", DEFAULT_SPACE_ID);
-    expect(await forgetMatching("pune", w)).toBe(2);
+    expect(await forgetCommand("pune", w)).toBe("Forgot 1 fact about “pune”.");
+    expect(await loadAboutMe(w)).toEqual([]);
     expect((await loadAboutMe(DEFAULT_SPACE_ID)).map((item) => item.text)).toEqual(["Pune office address is on file"]);
+  });
+
+  it("/forget everywhere removes the fact used in every Space, and nothing in any Space", async () => {
+    const w = await work();
+    await addFacts(["I visit Pune often"], "you", undefined, "global");
+    await addFacts(["I like Pune cafes"], "you", w);
+    expect(await forgetCommand("everywhere pune", w)).toBe("Forgot 1 fact about “pune” in every Space.");
+    expect(await loadGlobalAboutMe()).toEqual([]);
+    expect((await loadAboutMe(w)).map((item) => item.text)).toEqual(["I like Pune cafes"]);
+    await addFacts(["I visit Pune often"], "you", undefined, "global");
+    expect(await forgetCommand("across all Spaces pune", w)).toContain("in every Space");
+    expect(await loadGlobalAboutMe()).toEqual([]);
+    expect(parseForget("from all my spaces: tea")).toEqual({ words: "tea", scope: "global" });
+    expect(parseForget("tea everywhere")).toEqual({ words: "tea everywhere", scope: "space" });
+  });
+
+  it("with the same topic here and in every Space, a normal /forget removes only this Space's", async () => {
+    const w = await work();
+    await addFacts(["My currency is USD"], "you", undefined, "global");
+    await addFacts(["My currency is INR"], "you", w);
+    expect(await forgetCommand("currency", w)).toBe("Forgot 1 fact about “currency”.");
+    expect(await loadAboutMe(w)).toEqual([]);
+    expect((await loadGlobalAboutMe()).map((item) => item.text)).toEqual(["My currency is USD"]);
+    expect(await userMemoryPrompt(w)).toContain("My currency is USD");
+  });
+
+  it("the About you screen's delete buttons remove one fact at the level it is shown", async () => {
+    const w = await work();
+    pinSpace(w);
+    const [local] = await addFacts(["I prefer aisle seats"], "you", w);
+    const [shared] = await addFacts(["I prefer aisle seats on trains"], "you", undefined, "global");
+    await removeFact(shared.id, "space"); // wrong level: nothing happens
+    expect(await loadGlobalAboutMe()).toHaveLength(1);
+    await removeFact(shared.id, "global");
+    expect(await loadGlobalAboutMe()).toEqual([]);
+    expect((await loadAboutMe(w)).map((item) => item.id)).toEqual([local.id]);
+    await removeFact(local.id, "space");
+    expect(await loadAboutMe(w)).toEqual([]);
   });
 
   it("never keeps a secret for every Space", async () => {

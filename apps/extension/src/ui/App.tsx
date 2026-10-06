@@ -90,7 +90,7 @@ import {
   aboutMeFor,
   factExtractionPrompt,
   factScopeIn,
-  forgetMatching,
+  forgetCommand,
   isStorableFact,
   loadAboutMe,
   loadGlobalAboutMe,
@@ -613,12 +613,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           addAssistantMessage("Tell me what to forget, like `/forget aisle seats`, or open /memory.");
           return;
         }
-        const removed = await forgetMatching(command.args);
-        addAssistantMessage(
-          removed
-            ? `Forgot ${removed} fact${removed === 1 ? "" : "s"} about “${command.args}”.`
-            : `I had nothing saved about “${command.args}”.`
-        );
+        // Only this Space, unless they say "everywhere".
+        addAssistantMessage(await forgetCommand(command.args));
         return;
       }
       case "memory":

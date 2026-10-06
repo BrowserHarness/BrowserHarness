@@ -219,9 +219,13 @@ try {
   await ask("hi how are you");
   await side.waitForFunction(() => document.body.innerText.includes("CHAT_OK"), null, { timeout: 20000 }).catch(() => {});
   check("chat answers get them too", prompts.slice(beforeChat).some((text) => text.includes("ABOUT ME") && text.includes("I prefer window seats")));
+  // Where you live is kept for every Space, so a plain /forget leaves it and says how.
   await ask("/forget pune");
+  await waitText("remembered in every Space");
+  check("/forget in one Space never removes a fact used in every Space", (await sideText()).includes("/forget everywhere pune"));
+  await ask("/forget everywhere pune");
   await waitText("Forgot 1 fact");
-  check("/forget removes matching facts", (await sideText()).includes("Forgot 1 fact about “pune”"));
+  check("/forget everywhere removes matching facts", (await sideText()).includes("Forgot 1 fact about “pune” in every Space"));
 
   await side.getByRole("button", { name: "Open the menu" }).click();
 

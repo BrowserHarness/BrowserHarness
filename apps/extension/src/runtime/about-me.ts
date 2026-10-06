@@ -161,20 +161,43 @@ export async function removeFact(id: string, scope: FactScope = "space"): Promis
 }
 
 /**
- * Removes every fact that mentions the words, in this Space and in the facts
- * for every Space (both are what this Space knows); returns how many.
+ * Removes the facts that mention the words at one level: this Space (the
+ * default, so a normal /forget never changes what other Spaces know) or every
+ * Space. Returns how many went.
  */
-export async function forgetMatching(words: string, spaceId?: string): Promise<number> {
+export async function forgetMatching(words: string, spaceId?: string, scope: FactScope = "space"): Promise<number> {
   const needle = words.trim().toLowerCase();
   if (!needle) return 0;
-  let removed = 0;
-  for (const scope of ["space", "global"] as const) {
-    const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
-    const kept = facts.filter((fact) => !fact.text.toLowerCase().includes(needle));
-    if (kept.length !== facts.length) await store(kept, spaceId, scope);
-    removed += facts.length - kept.length;
+  const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
+  const kept = facts.filter((fact) => !fact.text.toLowerCase().includes(needle));
+  if (kept.length !== facts.length) await store(kept, spaceId, scope);
+  return facts.length - kept.length;
+}
+
+/** "/forget everywhere tea" or "/forget across all Spaces tea": the words, and whether it means every Space. */
+export function parseForget(args: string): { words: string; scope: FactScope } {
+  const match = /^\s*(everywhere|(?:across|in|from) (?:all|every) (?:of )?(?:my )?spaces?)\b[\s,:]*/i.exec(args);
+  return match ? { words: args.slice(match[0].length).trim(), scope: "global" } : { words: args.trim(), scope: "space" };
+}
+
+/** Carries out /forget and says what happened, in plain words. */
+export async function forgetCommand(args: string, spaceId?: string): Promise<string> {
+  const { words, scope } = parseForget(args);
+  if (!words) return "Tell me what to forget, like `/forget aisle seats`, or `/forget everywhere aisle seats` for every Space.";
+  const removed = await forgetMatching(words, spaceId, scope);
+  const plural = removed === 1 ? "" : "s";
+  if (scope === "global") {
+    return removed
+      ? `Forgot ${removed} fact${plural} about “${words}” in every Space.`
+      : `Nothing about “${words}” is remembered in every Space.`;
   }
-  return removed;
+  if (removed) return `Forgot ${removed} fact${plural} about “${words}”.`;
+  const needle = words.toLowerCase();
+  const shared = (await loadGlobalAboutMe()).filter((fact) => fact.text.toLowerCase().includes(needle));
+  if (shared.length) {
+    return `I didn't forget it: “${shared[0].text}” is remembered in every Space, not just this one. To forget it everywhere, type \`/forget everywhere ${words}\`, or remove it on the About you screen.`;
+  }
+  return `I had nothing saved about “${words}”.`;
 }
 
 /** Forgets this Space's own facts; the facts for every Space stay. */
