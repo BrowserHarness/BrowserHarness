@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { BrowserTaskSessionEvidence } from "./session-evidence";
 import {
   loadSkills,
+  fetchSkillMd,
   parseSkillMd,
+  skillFileUrl,
   recordSkillRun,
   refreshSkillSteps,
   renameSkill,
@@ -128,5 +130,26 @@ describe("skills", () => {
     expect(plain.ok && plain.skill).toMatchObject({ name: "weekly-report", slug: "weekly-report", description: "Pull the weekly numbers" });
     expect(parseSkillMd("just text").ok).toBe(false);
     expect(parseSkillMd("").ok).toBe(false);
+  });
+});
+
+describe("importing a Skill from a link", () => {
+  it("finds the raw SKILL.md behind GitHub links", () => {
+    expect(skillFileUrl("https://github.com/acme/skills/blob/main/tea/SKILL.md")).toBe("https://raw.githubusercontent.com/acme/skills/main/tea/SKILL.md");
+    expect(skillFileUrl("https://github.com/acme/skills/tree/main/tea")).toBe("https://raw.githubusercontent.com/acme/skills/main/tea/SKILL.md");
+    expect(skillFileUrl("https://github.com/acme/tea-skill")).toBe("https://raw.githubusercontent.com/acme/tea-skill/HEAD/SKILL.md");
+    expect(skillFileUrl("https://example.com/skills/tea.md")).toBe("https://example.com/skills/tea.md");
+    expect(skillFileUrl("http://example.com/tea.md")).toBeNull();
+    expect(skillFileUrl("not a link")).toBeNull();
+  });
+
+  it("downloads and reads it, and refuses web pages", async () => {
+    const ok = await fetchSkillMd("https://example.com/tea.md", (async () =>
+      new Response("---\nname: Order tea\n---\n1. Open the shop\n2. Add tea", { headers: { "content-type": "text/plain" } })) as typeof fetch);
+    expect(ok.ok && ok.skill.name).toBe("Order tea");
+    const page = await fetchSkillMd("https://example.com/tea", (async () => new Response("<html></html>", { headers: { "content-type": "text/html" } })) as typeof fetch);
+    expect(page).toMatchObject({ ok: false });
+    const missing = await fetchSkillMd("https://example.com/none.md", (async () => new Response("no", { status: 404 })) as typeof fetch);
+    expect(missing).toEqual({ ok: false, error: "Couldn't download that link (404)." });
   });
 });
