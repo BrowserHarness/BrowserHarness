@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Button, Paper, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { Note, ScreenFrame, useConfirm } from "./kit";
 import { ScheduledView } from "./ScheduledView";
+import { SpaceNote } from "./spaces-ui";
 import { clearTaskHistory, loadTaskHistory, searchTaskHistory, type TaskHistoryEntry } from "../runtime/history";
 
 export function HistoryView({
@@ -111,7 +112,12 @@ export function HistoryView({
           <Tab value="scheduled" label="Scheduled" sx={{ minHeight: 36 }} />
         </Tabs>
       )}
-      {tab === "scheduled" ? <ScheduledView /> : past}
+      {tab === "scheduled" ? <ScheduledView /> : (
+        <>
+          <SpaceNote what="These are your past tasks" />
+          {past}
+        </>
+      )}
     </ScreenFrame>
   );
 }

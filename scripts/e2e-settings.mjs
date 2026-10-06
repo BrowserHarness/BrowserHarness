@@ -32,6 +32,7 @@ const PAGES = [
   ["Start here", "Welcome to BrowserHarness"],
   ["Your AI", "Your AI"],
   ["Safety & approvals", "Safety & approvals"],
+  ["Spaces", "Spaces"],
   ["About you", "About you"],
   ["Saved Skills", "Saved Skills"],
   ["Scheduled tasks", "Scheduled tasks"],

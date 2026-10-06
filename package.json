@@ -34,6 +34,7 @@
     "sync:help": "node scripts/sync-help.mjs",
     "package:helper": "node scripts/package-helper.mjs",
     "smoke:setup": "node scripts/e2e-setup.mjs",
+    "smoke:spaces": "node scripts/e2e-spaces.mjs",
     "smoke:phone": "node scripts/e2e-phone.mjs"
   }
 }

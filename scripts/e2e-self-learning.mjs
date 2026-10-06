@@ -42,7 +42,7 @@ const server = http
         const body = JSON.parse(raw);
         const user = String(body.messages.at(-1).content?.[0]?.text ?? body.messages.at(-1).content ?? "");
         prompts.push(body.messages.map((m) => String(typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n"));
-        const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1];
+        const goal = (/USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1])?.split("\n\nEARLIER IN THIS CHAT")[0];
         if (!goal) return reply(res, "CHAT_OK");
         const ref = (pattern) => new RegExp(`(@e\\d+) ${pattern}`).exec(user)?.[1];
         const request = goal.split("\n")[0];
@@ -193,6 +193,7 @@ try {
   check("Undo forgets it", !(await skills()).some((skill) => skill.id === news?.id) && (await sideText()).includes(`Forgot /${news?.slug}`));
 
   // 6. The Skills screen marks it, Keep makes it the person's own, and learning can be turned off.
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "Skills" }).click();
   const learnedBadge = side.locator(".MuiChip-label", { hasText: "Learned on its own" });
   await learnedBadge.first().waitFor({ timeout: 5000 });

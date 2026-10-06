@@ -167,6 +167,7 @@ try {
   await side.waitForTimeout(1500);
   known = await facts();
   check("a changed fact replaces the old one", known.includes("I live in Mumbai") && !known.includes("I live in Pune") && known.includes("My name is Priya"), known.join("; "));
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "About me" }).click();
   await side.getByTestId("about-me-fact").first().waitFor({ timeout: 5000 });
   check("the About me screen explains past conversations and /recall", (await sideText()).includes("remembers your past tasks") && (await sideText()).includes("/recall"));
@@ -197,6 +198,7 @@ try {
     route.fulfill({ status: 200, contentType: "text/markdown", body: "---\nname: Order masala tea\n---\n1. Open the shop\n2. Add masala tea to the cart" })
   );
   const beforeImport = prompts.length;
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "Skills" }).click();
   await side.getByRole("button", { name: "From a link" }).click();
   await side.getByLabel("Link to a SKILL.md").fill("https://skills.example.test/tea/SKILL.md");

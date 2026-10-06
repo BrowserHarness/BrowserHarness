@@ -79,7 +79,7 @@ const server = http
           const refused = which === "A" && refusalSeen ? " (current tab refused)" : "";
           return reply(res, { kind: "final", message: `ADDED green tea at Shop ${which}${refused}` });
         }
-        const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "";
+        const goal = (/USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "")?.split("\n\nEARLIER IN THIS CHAT")[0];
         if (goal.includes("HELPERS_TASK")) {
           // Only this run's evidence counts, not past conversations recalled into the goal.
           const evidence = user.slice(user.indexOf("CURRENT PAGE OBSERVATION:"));

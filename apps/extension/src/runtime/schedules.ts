@@ -3,6 +3,8 @@
 // in its own background tab and leaves the result in history and a
 // notification.
 
+import { activeSpaceId } from "./spaces";
+
 export type Schedule =
   | { kind: "once"; at: string }
   | { kind: "daily"; time: string; days: number[] }
@@ -37,6 +39,8 @@ export interface ScheduledTask {
   last_result?: string;
   /** Also send each result to this chat app. */
   deliver_to?: ChatApp;
+  /** The Space it was made in: its runs use that Space's notes and history. */
+  space_id?: string;
 }
 
 const KEY = "browserharness.schedules";
@@ -230,6 +234,7 @@ export function newScheduledTask(task: string, schedule: Schedule, now = new Dat
 export async function saveScheduledTask(item: ScheduledTask): Promise<void> {
   const items = await loadSchedules();
   const exists = items.some((current) => current.id === item.id);
+  if (!exists && !item.space_id) item = { ...item, space_id: await activeSpaceId() };
   await store(exists ? items.map((current) => (current.id === item.id ? item : current)) : [item, ...items]);
 }
 

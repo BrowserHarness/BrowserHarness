@@ -13,6 +13,7 @@ import {
 import { DeleteIcon, EditIcon } from "./icons";
 import { Note, ScreenFrame, SettingsCard, ToggleSetting, useConfirm } from "./kit";
 import { useSaved } from "./feedback";
+import { SpaceNote } from "./spaces-ui";
 import {
   addFacts,
   clearAboutMe,
@@ -172,6 +173,7 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
       intro="BrowserHarness keeps these in mind for every task, so you don't have to repeat yourself. They stay on this computer."
     >
       {dialog}
+      <SpaceNote what="These notes and wishes are" />
       <Stack spacing={2.5}>
         <SettingsCard
           title="Facts about you"

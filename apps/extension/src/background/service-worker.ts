@@ -435,6 +435,21 @@ async function activeTab() {
   return tab;
 }
 
+/**
+ * The tab a request is about. The full-page chat is a tab of its own, so when
+ * it is in front, tasks work in the web page the person used last (or a new
+ * tab), never in the chat itself.
+ */
+async function activeWebTab(openIfNone: boolean): Promise<chrome.tabs.Tab | null> {
+  const tab = await activeTab();
+  if (!tab.url?.startsWith(chrome.runtime.getURL(""))) return tab;
+  const [recent] = (await chrome.tabs.query({ currentWindow: true }))
+    .filter((item) => item.id !== tab.id && isInjectableUrl(item.url))
+    .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
+  if (recent?.id) return recent;
+  return openIfNone ? chrome.tabs.create({ active: false }) : null;
+}
+
 async function requestSession(
   sessionId?: string,
   sessionTitle?: string
@@ -472,7 +487,7 @@ async function targetTab(
     );
   }
 
-  const tab = await activeTab();
+  const tab = (await activeWebTab(true))!;
   if (session && tab.id) {
     session = await borrowTab(session, tab.id);
   }
@@ -3337,7 +3352,7 @@ chrome.runtime.onMessage.addListener(
         }
 
         if (request.type === "GET_CURRENT_TAB") {
-          const tab = await activeTab();
+          const tab = (await activeWebTab(false)) ?? (await activeTab());
           sendResponse({
             ok: true,
             data: {

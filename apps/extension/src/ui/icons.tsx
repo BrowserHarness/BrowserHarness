@@ -41,6 +41,17 @@ import {
   Info,
   ChevronRight,
   X,
+  PanelLeft,
+  Maximize2,
+  MessageSquare,
+  SquarePen,
+  Pin,
+  PinOff,
+  Ellipsis,
+  Search,
+  Layers,
+  FileDown,
+  ArchiveRestore,
   type LucideProps
 } from "lucide-react";
 
@@ -110,3 +121,14 @@ export const NoIcon = makeIcon(CircleX);
 export const InfoIcon = makeIcon(Info);
 export const NextIcon = makeIcon(ChevronRight);
 export const CloseIcon = makeIcon(X);
+export const MenuIcon = makeIcon(PanelLeft);
+export const FullPageIcon = makeIcon(Maximize2);
+export const ChatIcon = makeIcon(MessageSquare);
+export const NewChatIcon = makeIcon(SquarePen);
+export const PinIcon = makeIcon(Pin);
+export const UnpinIcon = makeIcon(PinOff);
+export const MoreIcon = makeIcon(Ellipsis);
+export const SearchIcon = makeIcon(Search);
+export const SpacesIcon = makeIcon(Layers);
+export const SaveFileIcon = makeIcon(FileDown);
+export const RestoreIcon = makeIcon(ArchiveRestore);
