@@ -199,6 +199,7 @@ try {
       ),
     [`http://localhost:${port}/shop`]
   );
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "Task history" }).click();
   await side.getByRole("tab", { name: "Scheduled" }).click();
   const riskyCard = side.getByTestId("scheduled-task").filter({ hasText: "GOAL_RISKY" });

@@ -2,13 +2,17 @@
 // them ("answer briefly", "prices in rupees", "never buy anything over ₹5,000
 // without asking"). They go with every chat, task and scheduled run, and can
 // be saved to or loaded from a file (INSTRUCTIONS.md).
-const KEY = "browserharness.instructions";
+import { spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+
+// Each Space has its own instructions (see spaces.ts).
+const KEY = SPACE_SCOPED_KEYS.instructions;
 /** A secret written out ("my password is …", a card or account number), not a rule about secrets. */
 const SECRET_VALUE = /\b(password|passcode|passwd|pin|otp|cvv|api key|token|secret)\s*(is|:|=)\s*\S+|\d[\d -]{10,}\d|\b\d{6,}\b/i;
 export const MAX_INSTRUCTIONS = 2000;
 
 export async function loadInstructions(): Promise<string> {
-  const value = (await chrome.storage.local.get(KEY))[KEY];
+  const key = await spaceKey(KEY);
+  const value = (await chrome.storage.local.get(key))[key];
   return typeof value === "string" ? value : "";
 }
 
@@ -16,7 +20,7 @@ export async function loadInstructions(): Promise<string> {
 export async function saveInstructions(text: string): Promise<{ ok: boolean; error?: string }> {
   const value = text.trim().slice(0, MAX_INSTRUCTIONS);
   if (SECRET_VALUE.test(value)) return { ok: false, error: "A line looks like a password, card or ID number, so nothing was saved." };
-  await chrome.storage.local.set({ [KEY]: value });
+  await chrome.storage.local.set({ [await spaceKey(KEY)]: value });
   return { ok: true };
 }
 

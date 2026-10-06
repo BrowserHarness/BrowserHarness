@@ -34,6 +34,7 @@ import {
   ScheduleIcon,
   SkillsIcon,
   SparklesIcon,
+  SpacesIcon,
   type IconProps
 } from "../icons";
 import type { SavedWorkflow } from "../../runtime/workflows";
@@ -46,6 +47,7 @@ import { HelperAppPage } from "./HelperAppPage";
 import { LookPage } from "./LookPage";
 import { PrivacyPage } from "./PrivacyPage";
 import { HelpPage } from "./HelpPage";
+import { SpacesPage } from "./SpacesPage";
 import { MemoryView } from "../MemoryView";
 import { SkillsView } from "../SkillsView";
 import { ScheduledView } from "../ScheduledView";
@@ -56,6 +58,7 @@ export type SectionId =
   | "home"
   | "ai"
   | "safety"
+  | "spaces"
   | "about"
   | "skills"
   | "scheduled"
@@ -80,6 +83,7 @@ export const SECTIONS: SectionInfo[] = [
   { id: "home", label: "Start here", hint: "What's set up, and what to do next", icon: HomeIcon, group: "Getting started" },
   { id: "ai", label: "Your AI", hint: "The AI that reads pages and does your tasks", icon: SparklesIcon, group: "Getting started" },
   { id: "safety", label: "Safety & approvals", hint: "When it must ask you before acting", icon: SafetyIcon, group: "Getting started" },
+  { id: "spaces", label: "Spaces", hint: "Keep work, home and other parts of life apart", icon: SpacesIcon, group: "Your things" },
   { id: "about", label: "About you", hint: "Facts and wishes it keeps in mind", icon: PersonIcon, group: "Your things" },
   { id: "skills", label: "Saved Skills", hint: "Tasks it learned and can repeat", icon: SkillsIcon, group: "Your things" },
   { id: "scheduled", label: "Scheduled tasks", hint: "Tasks that run by themselves", icon: ScheduleIcon, group: "Your things" },
@@ -127,6 +131,8 @@ function SectionPage({ id, props }: { id: SectionId; props: SectionProps }) {
       return <AiPage {...props} />;
     case "safety":
       return <SafetyPage {...props} />;
+    case "spaces":
+      return <SpacesPage {...props} />;
     case "about":
       return <MemoryView embedded onBack={() => go("home")} />;
     case "skills":

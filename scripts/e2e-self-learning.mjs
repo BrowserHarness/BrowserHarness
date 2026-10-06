@@ -193,6 +193,7 @@ try {
   check("Undo forgets it", !(await skills()).some((skill) => skill.id === news?.id) && (await sideText()).includes(`Forgot /${news?.slug}`));
 
   // 6. The Skills screen marks it, Keep makes it the person's own, and learning can be turned off.
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "Skills" }).click();
   const learnedBadge = side.locator(".MuiChip-label", { hasText: "Learned on its own" });
   await learnedBadge.first().waitFor({ timeout: 5000 });

@@ -1,4 +1,5 @@
 import { loadPreferences } from "../settings/preferences";
+import { spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
 export interface TaskHistoryEntry {
   id: string;
@@ -8,12 +9,14 @@ export interface TaskHistoryEntry {
   url?: string;
 }
 
-const HISTORY_KEY = "browserharness.taskHistory";
+// Each Space keeps its own past conversations (see spaces.ts).
+const HISTORY_KEY = SPACE_SCOPED_KEYS.history;
 const MAX_HISTORY = 500;
 
 export async function loadTaskHistory(): Promise<TaskHistoryEntry[]> {
-  const stored = await chrome.storage.local.get(HISTORY_KEY);
-  const value = stored[HISTORY_KEY];
+  const key = await spaceKey(HISTORY_KEY);
+  const stored = await chrome.storage.local.get(key);
+  const value = stored[key];
   return Array.isArray(value) ? (value as TaskHistoryEntry[]) : [];
 }
 
@@ -30,12 +33,12 @@ export async function saveTaskHistoryEntry(
     timestamp: new Date().toISOString()
   };
   await chrome.storage.local.set({
-    [HISTORY_KEY]: [next, ...previous].slice(0, MAX_HISTORY)
+    [await spaceKey(HISTORY_KEY)]: [next, ...previous].slice(0, MAX_HISTORY)
   });
 }
 
 export async function clearTaskHistory(): Promise<void> {
-  await chrome.storage.local.remove(HISTORY_KEY);
+  await chrome.storage.local.remove(await spaceKey(HISTORY_KEY));
 }
 
 /**

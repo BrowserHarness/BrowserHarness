@@ -1,6 +1,7 @@
 // The page a scheduled task runs in. The service worker opens it in a
 // background tab when the task's alarm fires; it closes itself when done.
 import { saveTaskHistoryEntry } from "./runtime/history";
+import { pinSpace } from "./runtime/spaces";
 import { runScheduledTask, runUnattendedTask } from "./runtime/scheduled-run";
 import { deliveryText, describeSchedule, loadSchedules, recordScheduledRun } from "./runtime/schedules";
 
@@ -66,6 +67,8 @@ async function main() {
     title.textContent = "This scheduled task no longer exists.";
     return;
   }
+  // It works with the notes and history of the Space it was made in.
+  pinSpace(item.space_id);
   document.title = `Running: ${item.task}`;
   title.textContent = `Running your scheduled task: ${item.task}`;
   log(describeSchedule(item.schedule));

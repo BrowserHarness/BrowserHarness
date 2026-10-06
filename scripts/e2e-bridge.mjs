@@ -582,6 +582,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   check("a scheduled run sends its result to the chat app", Boolean(delivered), JSON.stringify(telegram.sent.slice(sentBefore)));
   // The panel is still on Settings from pairing; start from the chat.
   await side.reload();
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "Task history" }).click();
   await side.getByRole("tab", { name: "Scheduled" }).click();
   const card = side.getByTestId("scheduled-task").filter({ hasText: "TG_TASK" });

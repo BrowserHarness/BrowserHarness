@@ -1,4 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Sidebar, type SidebarScreen } from "./Sidebar";
+import { SpaceBadge, saveTextFile, useSpaces } from "./spaces-ui";
+import {
+  chatContextPrompt,
+  chatFileName,
+  chatTitle,
+  chatToMarkdown,
+  chatToText,
+  getChat,
+  saveChatMessages,
+  type ChatMessage,
+  type SavedChat
+} from "../runtime/chats";
 import { autoApproves } from "../runtime/approval-mode";
 import {
   APPROVAL_WORDS,
@@ -17,8 +30,12 @@ import {
 } from "../settings/preferences";
 import {
   AddIcon,
-  HistoryIcon,
+  CopyIcon,
   DownloadIcon,
+  FullPageIcon,
+  MenuIcon,
+  NewChatIcon,
+  SaveFileIcon,
   MicIcon,
   SpeakIcon,
   PauseIcon,
@@ -26,7 +43,6 @@ import {
   RecordIcon,
   ReplayIcon,
   SendIcon,
-  MemoryIcon,
   SettingsIcon,
   SkillsIcon,
   StopIcon,
@@ -130,7 +146,12 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  Drawer,
   IconButton,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
   Paper,
   InputBase,
   Stack,
@@ -172,6 +193,8 @@ type Message = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  /** When it was said, shown in saved files. */
+  at?: string;
   /** What the agent did, so the task can be saved as (or improve) a Skill. */
   learned?: { evidence: BrowserTaskSessionEvidence; task: string; skillId?: string };
   /** Set once the person saved or updated a Skill from this answer. */
@@ -202,7 +225,35 @@ type Handoff = {
   resolve: (status: "continue" | "cancelled") => void;
 };
 
-export function App() {
+/** What is kept of a message in the saved chat. */
+function toStored(message: Message): ChatMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    ...(message.at ? { at: message.at } : {}),
+    ...(message.problem ? { problem: message.problem } : {})
+  };
+}
+
+function fromStored(message: ChatMessage): Message {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    at: message.at,
+    ...(message.problem ? { problem: message.problem as Message["problem"] } : {})
+  };
+}
+
+const now = () => new Date().toISOString();
+
+/**
+ * The chat. In the side panel the menu of chats and Spaces slides in from the
+ * left; as a full page (chat.html) it stays open on the left, like Claude and
+ * ChatGPT.
+ */
+export function App({ fullPage = false }: { fullPage?: boolean }) {
   const [view, setView] = useState<
     "chat" | "settings" | "history" | "skills" | "memory"
   >(() => {
@@ -240,6 +291,71 @@ export function App() {
   const cancelled = useRef(false);
   const pausedRef = useRef(false);
   const requestAbort = useRef<AbortController | null>(null);
+
+  // Spaces and saved chats. Every chat is saved as it happens, in the Space
+  // it was started in.
+  const spaces = useSpaces();
+  const [chatId, setChatId] = useState<string>(() => crypto.randomUUID());
+  const chatSpace = useRef<string | null>(null);
+  const skipNextSave = useRef(false);
+  const [sidebarOpen, setSidebarOpen] = useState(fullPage);
+  const [saveMenu, setSaveMenu] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (skipNextSave.current) {
+      // Just opened from the list: nothing new to save.
+      skipNextSave.current = false;
+      return;
+    }
+    if (!messages.length) return;
+    if (!chatSpace.current && spaces.ready) chatSpace.current = spaces.active.id;
+    void saveChatMessages(chatId, messages.map(toStored), chatSpace.current ?? undefined).catch(() => undefined);
+  }, [messages]);
+
+  const startNewChat = (closeMenu = true) => {
+    if (running) return;
+    setMessages([]);
+    setActivities([]);
+    setLastWorkflow(null);
+    setChatId(crypto.randomUUID());
+    chatSpace.current = null;
+    setView("chat");
+    if (closeMenu && !fullPage) setSidebarOpen(false);
+  };
+
+  const openChat = (chat: SavedChat) => {
+    if (running) return;
+    if (chat.id !== chatId) {
+      skipNextSave.current = true;
+      setMessages(chat.messages.map(fromStored));
+      setActivities([]);
+      setLastWorkflow(null);
+      setChatId(chat.id);
+      chatSpace.current = spaces.active.id;
+    }
+    setView("chat");
+    if (!fullPage) setSidebarOpen(false);
+  };
+
+  // Moving to another Space starts a fresh chat there.
+  useEffect(() => {
+    if (!spaces.ready) return;
+    // The menu stays open, so a chat in the new Space can be picked right away.
+    if (chatSpace.current && chatSpace.current !== spaces.active.id) startNewChat(false);
+  }, [spaces.active.id, spaces.ready]);
+
+  const openFullPage = () => {
+    void chrome.tabs.create({ url: chrome.runtime.getURL("chat.html") });
+    setSidebarOpen(false);
+  };
+
+  const currentChat = (): SavedChat => ({
+    id: chatId,
+    title: chatTitle(messages),
+    created_at: messages[0]?.at ?? now(),
+    updated_at: messages.at(-1)?.at ?? now(),
+    messages: messages.map(toStored)
+  });
 
   const refreshContext = async () => {
     const [
@@ -307,7 +423,7 @@ export function App() {
     const id = crypto.randomUUID();
     setMessages((items) => [
       ...items,
-      { id, role: "assistant", text, learned }
+      { id, role: "assistant", text, learned, at: now() }
     ]);
     return id;
   };
@@ -315,7 +431,7 @@ export function App() {
   const addProblemMessage = (problem: Problem, options: { retry?: string; openAi?: boolean } = {}) => {
     setMessages((items) => [
       ...items,
-      { id: crypto.randomUUID(), role: "assistant", text: `${problem.title}. ${problem.reason}`, problem: { problem, ...options } }
+      { id: crypto.randomUUID(), role: "assistant", text: `${problem.title}. ${problem.reason}`, problem: { problem, ...options }, at: now() }
     ]);
   };
 
@@ -456,7 +572,7 @@ export function App() {
   const runCommand = async (command: SlashCommand, typed: string) => {
     setMessages((items) => [
       ...items,
-      { id: crypto.randomUUID(), role: "user", text: typed }
+      { id: crypto.randomUUID(), role: "user", text: typed, at: now() }
     ]);
     if (command.kind === "unknown") {
       addAssistantMessage(
@@ -996,7 +1112,7 @@ export function App() {
     setPrompt("");
     setMessages((items) => [
       ...items,
-      { id: crypto.randomUUID(), role: "user", text: typed }
+      { id: crypto.randomUUID(), role: "user", text: typed, at: now() }
     ]);
     setActivities([]);
     setRunning(true);
@@ -1053,6 +1169,8 @@ export function App() {
     const hinted = !skillRun && autoSkills ? matchSkill(typed, savedSkills)?.skill ?? null : null;
     const usedSkill = skillRun ?? hinted;
     const intent = usedSkill ? "browser" : classifyTaskIntent(task);
+    // Earlier turns of this chat, so follow-ups like "make it shorter" make sense.
+    const earlier = skillRun ? "" : chatContextPrompt(messages.filter((item) => !item.problem));
 
     try {
       if (intent === "chat") {
@@ -1066,7 +1184,7 @@ export function App() {
             fallback?.chatHealth.status === "healthy"
               ? fallback
               : null,
-            task + aboutMe + recalled,
+            task + earlier + aboutMe + recalled,
             controller.signal
           );
 
@@ -1117,7 +1235,7 @@ export function App() {
       if (hinted) addActivity(`Following your Skill /${hinted.slug}`, "done");
 
       const result = await runAgentTask(task + attachmentNote, {
-        context: aboutMe + recalled + (hinted ? skillHint(hinted) : ""),
+        context: earlier + aboutMe + recalled + (hinted ? skillHint(hinted) : ""),
         agentPrimary,
         agentFallback,
         session: { id: taskSessionId, title: taskSessionTitle },
@@ -1242,8 +1360,83 @@ export function App() {
     void runTask(text);
   }, [queuedRun, contextReady, running]);
 
-  if (view === "settings") {
+  const commandSuggestions = slashSuggestions(prompt, skills, siteCommands);
+
+  const goTo = (screen: SidebarScreen) => {
+    if (screen === "settings") openSettings();
+    else setView(screen);
+    if (!fullPage) setSidebarOpen(false);
+  };
+
+  const exportChat = async (kind: "md" | "txt" | "copy") => {
+    setSaveMenu(null);
+    // The saved copy has the name the person may have given it.
+    const chat = (await getChat(chatId, chatSpace.current ?? undefined).catch(() => null)) ?? currentChat();
+    if (kind === "copy") {
+      await navigator.clipboard.writeText(chatToText(chat, spaces.active.name)).catch(() => undefined);
+      saved("Whole chat copied");
+      return;
+    }
+    saveTextFile(
+      kind === "md" ? chatToMarkdown(chat, spaces.active.name) : chatToText(chat, spaces.active.name),
+      chatFileName(chat.title, kind),
+      kind === "md" ? "text/markdown" : "text/plain"
+    );
+    saved("Chat saved to your Downloads folder");
+  };
+
+  const sidebar = (
+    <Sidebar
+      spaces={spaces.spaces}
+      active={spaces.active}
+      currentChatId={chatId}
+      busy={running}
+      fullPage={fullPage}
+      onNewChat={() => startNewChat()}
+      onOpenChat={openChat}
+      onChatDeleted={(id) => {
+        if (id === chatId) startNewChat();
+      }}
+      onScreen={goTo}
+      onManageSpaces={() => {
+        openSettings("spaces");
+        if (!fullPage) setSidebarOpen(false);
+      }}
+      onOpenFullPage={fullPage ? undefined : openFullPage}
+      onClose={fullPage ? undefined : () => setSidebarOpen(false)}
+    />
+  );
+
+  /** In the full page the menu stays on the left and the screen sits beside it. */
+  const frame = (content: ReactNode, wide = false) => {
+    // A new Space shows its own notes and history straight away.
+    const screen = <Fragment key={spaces.active.id}>{content}</Fragment>;
+    if (!fullPage) {
+      return (
+        <>
+          {screen}
+          <Drawer open={sidebarOpen} onClose={() => setSidebarOpen(false)} slotProps={{ paper: { sx: { width: 300, maxWidth: "88vw" } } }}>
+            {sidebar}
+          </Drawer>
+        </>
+      );
+    }
     return (
+      <Box sx={{ display: "flex", height: "100vh", bgcolor: "background.default" }}>
+        {sidebarOpen && (
+          <Box component="aside" sx={{ width: 290, flexShrink: 0, borderRight: 1, borderColor: "divider", height: "100vh" }}>
+            {sidebar}
+          </Box>
+        )}
+        <Box component="main" sx={{ flex: 1, minWidth: 0, height: "100vh", overflowY: "auto" }}>
+          {wide ? screen : <Box sx={{ maxWidth: 900, mx: "auto" }}>{screen}</Box>}
+        </Box>
+      </Box>
+    );
+  };
+
+  if (view === "settings") {
+    return frame(
       <SettingsShell
         mode="panel"
         initialSection={settingsSection}
@@ -1266,10 +1459,8 @@ export function App() {
     );
   }
 
-  const commandSuggestions = slashSuggestions(prompt, skills, siteCommands);
-
   if (view === "skills") {
-    return (
+    return frame(
       <SkillsView
         onBack={() => setView("chat")}
         onRun={(skill) => {
@@ -1289,11 +1480,11 @@ export function App() {
   }
 
   if (view === "memory") {
-    return <MemoryView onBack={() => setView("chat")} />;
+    return frame(<MemoryView onBack={() => setView("chat")} />);
   }
 
   if (view === "history") {
-    return (
+    return frame(
       <HistoryView
         initialTab={historyTab}
         onBack={() => {
@@ -1308,7 +1499,9 @@ export function App() {
     );
   }
 
-  return (
+  const column = fullPage ? { maxWidth: 820, width: "100%", mx: "auto" } : {};
+
+  return frame(
     <Box
       sx={{
         minHeight: "100vh",
@@ -1327,51 +1520,88 @@ export function App() {
           backdropFilter: "blur(12px)"
         }}
       >
-        <Toolbar variant="dense" sx={{ minHeight: 56, gap: 1 }}>
-          <Box sx={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center" }}>
-            <Box component="img" src="/icons/icon48.png" alt="BrowserHarness" title="BrowserHarness" sx={{ width: 28, height: 28, borderRadius: 1.25 }} />
+        <Toolbar variant="dense" sx={{ minHeight: 56, gap: 0.5, px: { xs: 1, sm: 1.5 } }}>
+          <Tooltip title={fullPage ? (sidebarOpen ? "Hide the menu" : "Show the menu") : "Menu: your chats, Spaces and settings"}>
+            <IconButton
+              onClick={() => setSidebarOpen((open) => !open)}
+              aria-label={fullPage && sidebarOpen ? "Hide the menu" : "Open the menu"}
+            >
+              <MenuIcon />
+            </IconButton>
+          </Tooltip>
+          <Box sx={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 1 }}>
+            {fullPage ? (
+              <Typography variant="subtitle1" noWrap sx={{ minWidth: 0 }} data-testid="chat-title">
+                {messages.length ? chatTitle(messages) : "New chat"}
+              </Typography>
+            ) : (
+              <>
+                <Box component="img" src="/icons/icon48.png" alt="BrowserHarness" title="BrowserHarness" sx={{ width: 26, height: 26, borderRadius: 1.25 }} />
+                <Tooltip title="The Space you're in. Click to switch">
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setSidebarOpen(true)}
+                    avatar={<Box sx={{ display: "inline-flex", bgcolor: "transparent !important" }}><SpaceBadge space={spaces.active} size={18} /></Box>}
+                    label={spaces.active.name}
+                    data-testid="space-chip"
+                    sx={{ maxWidth: 160, fontWeight: 600 }}
+                  />
+                </Tooltip>
+              </>
+            )}
           </Box>
 
-          <Tooltip title="Skills">
-            <IconButton
-              size="small"
-              onClick={() => setView("skills")}
-              aria-label="Skills"
-            >
-              <SkillsIcon />
-            </IconButton>
+          {messages.length > 0 && (
+            <Tooltip title="Save or copy this chat">
+              <IconButton size="small" onClick={(event) => setSaveMenu(event.currentTarget)} aria-label="Save this chat">
+                <SaveFileIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+          <Tooltip title={running ? "Wait for the task to finish, or press Stop" : "New chat"}>
+            <span>
+              <IconButton size="small" onClick={() => startNewChat()} disabled={running} aria-label="New chat">
+                <NewChatIcon />
+              </IconButton>
+            </span>
           </Tooltip>
-          <Tooltip title="About me">
-            <IconButton
-              size="small"
-              onClick={() => setView("memory")}
-              aria-label="About me"
-            >
-              <MemoryIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Task history">
-            <IconButton
-              size="small"
-              onClick={() => setView("history")}
-              aria-label="Task history"
-            >
-              <HistoryIcon />
-            </IconButton>
-          </Tooltip>
+          {!fullPage && (
+            <Tooltip title="Open the chat as a full page, with more room">
+              <IconButton size="small" onClick={openFullPage} aria-label="Open as a full page">
+                <FullPageIcon />
+              </IconButton>
+            </Tooltip>
+          )}
           <Tooltip title="Settings">
-            <IconButton
-              size="small"
-              onClick={() => openSettings()}
-              aria-label="Settings"
-            >
+            <IconButton size="small" onClick={() => openSettings()} aria-label="Settings">
               <SettingsIcon />
             </IconButton>
           </Tooltip>
+          <Menu anchorEl={saveMenu} open={Boolean(saveMenu)} onClose={() => setSaveMenu(null)}>
+            <MenuItem onClick={() => void exportChat("md")}>
+              <ListItemIcon>
+                <SaveFileIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText primary="Save as a document" secondary="Keeps headings and lists; opens in notes apps and Google Docs" />
+            </MenuItem>
+            <MenuItem onClick={() => void exportChat("txt")}>
+              <ListItemIcon>
+                <SaveFileIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText primary="Save as plain text" secondary="Opens anywhere" />
+            </MenuItem>
+            <MenuItem onClick={() => void exportChat("copy")}>
+              <ListItemIcon>
+                <CopyIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText primary="Copy the whole chat" secondary="Then paste it into an email or a document" />
+            </MenuItem>
+          </Menu>
         </Toolbar>
       </AppBar>
 
-      <Box sx={{ px: 2, pt: 1.5 }}>
+      <Box sx={{ px: 2, pt: 1.5, ...column }}>
         <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }}>
           {/^https?:/.test(tab?.url || "") && <Tooltip title="BrowserHarness works on the tab you are looking at">
             <Chip
@@ -1392,15 +1622,23 @@ export function App() {
         </Stack>
       </Box>
 
-      <Box sx={{ flex: 1, p: 2, overflowY: "auto" }}>
+      <Box sx={{ flex: 1, p: 2, overflowY: "auto", ...column }}>
         {messages.length === 0 ? (
           <Stack
             alignItems="center"
             justifyContent="center"
             spacing={2}
-            sx={{ minHeight: 300, textAlign: "center" }}
+            sx={{ minHeight: fullPage ? "55vh" : 300, textAlign: "center" }}
           >
             <Typography variant="h5">Give your browser a task.</Typography>
+            {spaces.spaces.length > 1 && (
+              <Stack direction="row" spacing={0.75} alignItems="center" data-testid="space-note">
+                <SpaceBadge space={spaces.active} size={18} />
+                <Typography variant="body2" color="text.secondary">
+                  You're in {spaces.active.name}. This chat stays in this Space.
+                </Typography>
+              </Stack>
+            )}
             <Typography color="text.secondary" sx={{ maxWidth: 320 }}>
               Type what you want, the way you would ask a person. BrowserHarness reads pages, clicks and types for
               you, and asks before anything important.
@@ -1416,7 +1654,10 @@ export function App() {
               </Stack>
             )}
             <Stack direction="row" flexWrap="wrap" gap={1} justifyContent="center">
-              {["Summarize this page", "Find the cheapest option here", "Help me fill in this form"].map(
+              {(fullPage
+                ? ["Compare prices for an electric kettle", "Find a quick dinner recipe", "Plan a weekend trip to Goa"]
+                : ["Summarize this page", "Find the cheapest option here", "Help me fill in this form"]
+              ).map(
                 (suggestion) => (
                   <Chip
                     key={suggestion}
@@ -1476,6 +1717,21 @@ export function App() {
                           {all.length > 1 ? `Download table ${index + 1} (CSV)` : "Download CSV"}
                         </Button>
                       ))}
+                      <Tooltip title="Copy this answer">
+                        <IconButton
+                          size="small"
+                          aria-label="Copy this answer"
+                          onClick={() =>
+                            void navigator.clipboard
+                              .writeText(message.text)
+                              .then(() => saved("Answer copied"))
+                              .catch(() => undefined)
+                          }
+                          sx={{ mt: 0.5, opacity: 0.6 }}
+                        >
+                          <CopyIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       <Tooltip title="Read aloud">
                         <IconButton
                           size="small"
@@ -1656,7 +1912,7 @@ export function App() {
         )}
       </Box>
 
-      <Box sx={{ px: 1.5, pb: 1.5, pt: 0.5, position: "sticky", bottom: 0, bgcolor: "background.default" }}>
+      <Box sx={{ px: 1.5, pb: 1.5, pt: 0.5, position: "sticky", bottom: 0, bgcolor: "background.default", ...column }}>
         {running && (
           <Stack direction="row" alignItems="center" spacing={1} mb={1} px={0.5}>
             <CircularProgress size={14} />
@@ -1853,6 +2109,7 @@ export function App() {
           }}
         />
       </Box>
-    </Box>
+    </Box>,
+    true
   );
 }

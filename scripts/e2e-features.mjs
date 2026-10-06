@@ -209,6 +209,7 @@ try {
   );
 
   // History search and Run again.
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "Task history" }).click();
   const search = side.getByLabel("Search past tasks");
   await search.waitFor({ timeout: 5000 }).catch(() => {});

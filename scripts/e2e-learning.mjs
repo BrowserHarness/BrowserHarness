@@ -177,6 +177,7 @@ try {
   check("the next run is told the lesson", prompts.slice(beforeLesson).some((text) => text.includes("Lessons from earlier runs")));
 
   // Skills screen.
+  await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "Skills" }).click();
   await side.getByText("Your Skills").waitFor({ timeout: 5000 }).catch(() => {});
   const card = side.getByTestId("skill-card").first();
@@ -221,6 +222,8 @@ try {
   await ask("/forget pune");
   await waitText("Forgot 1 fact");
   check("/forget removes matching facts", (await sideText()).includes("Forgot 1 fact about “pune”"));
+
+  await side.getByRole("button", { name: "Open the menu" }).click();
 
   await side.getByRole("button", { name: "About me" }).click();
   await side.getByTestId("about-me-fact").first().waitFor({ timeout: 5000 }).catch(() => {});

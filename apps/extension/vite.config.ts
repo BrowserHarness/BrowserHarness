@@ -14,6 +14,7 @@ export default defineConfig({
       input: {
         sidepanel: resolve(root, "sidepanel.html"),
         settings: resolve(root, "settings.html"),
+        chat: resolve(root, "chat.html"),
         mic: resolve(root, "mic.html"),
         runner: resolve(root, "runner.html"),
         "service-worker": resolve(root, "src/background/service-worker.ts"),

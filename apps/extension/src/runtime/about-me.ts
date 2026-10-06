@@ -3,6 +3,8 @@
 // up plain statements from their requests ("my name is…", "I prefer…").
 // Everything stays on this device and can be edited or deleted.
 
+import { spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+
 export interface AboutMeFact {
   id: string;
   text: string;
@@ -12,7 +14,8 @@ export interface AboutMeFact {
   topic?: string;
 }
 
-const KEY = "browserharness.aboutMe";
+// Each Space keeps its own facts (see spaces.ts).
+const KEY = SPACE_SCOPED_KEYS.aboutMe;
 const MAX_FACTS = 60;
 const MAX_FACT = 200;
 
@@ -30,13 +33,14 @@ export function isStorableFact(text: string): boolean {
 }
 
 export async function loadAboutMe(): Promise<AboutMeFact[]> {
-  const stored = await chrome.storage.local.get(KEY);
-  const value = stored[KEY];
+  const key = await spaceKey(KEY);
+  const stored = await chrome.storage.local.get(key);
+  const value = stored[key];
   return Array.isArray(value) ? (value as AboutMeFact[]) : [];
 }
 
 async function store(facts: AboutMeFact[]): Promise<void> {
-  await chrome.storage.local.set({ [KEY]: facts.slice(0, MAX_FACTS) });
+  await chrome.storage.local.set({ [await spaceKey(KEY)]: facts.slice(0, MAX_FACTS) });
 }
 
 /**
@@ -105,7 +109,7 @@ export async function forgetMatching(words: string): Promise<number> {
 }
 
 export async function clearAboutMe(): Promise<void> {
-  await chrome.storage.local.remove(KEY);
+  await chrome.storage.local.remove(await spaceKey(KEY));
 }
 
 const PATTERNS: Array<[RegExp, (match: RegExpExecArray) => string]> = [
