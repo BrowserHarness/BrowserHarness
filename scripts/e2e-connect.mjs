@@ -21,11 +21,16 @@ if (!fs.existsSync(path.join(dist, "manifest.json"))) {
 
 const seenAuth = [];
 const seenModels = [];
+let failChat = false;
 const handler = (req, res) => {
     seenAuth.push(req.headers.authorization || "");
     res.setHeader("content-type", "application/json");
     if (req.url.startsWith("/v1/models")) {
       return res.end(JSON.stringify({ data: [{ id: "deepseek-v4-flash-0731" }, { id: "qwen2.5-7b-instruct" }, { id: "text-embedding-nomic" }] }));
+    }
+    if (req.url.startsWith("/v1/chat/completions") && failChat) {
+      res.statusCode = 401;
+      return res.end(JSON.stringify({ error: { message: "invalid api key" } }));
     }
     if (req.url.startsWith("/v1/chat/completions")) {
       let raw = "";
@@ -118,6 +123,22 @@ try {
     await composer.press("Enter");
     await side.getByText("Reply from qwen2.5-7b-instruct").waitFor({ timeout: 30000 }).catch(() => {});
     const chat = await side.locator("body").innerText();
+    failChat = true;
+    await composer.fill("write a poem about the hills");
+    await composer.press("Enter");
+    const failure = side.getByRole("alert").filter({ hasText: /couldn't finish/i });
+    await failure.waitFor({ timeout: 30000 }).catch(() => {});
+    const failureText = await failure.innerText().catch(() => "");
+    check(
+      "a failed request in chat shows why, how to fix it and its guide",
+      failureText.includes("asked for a key") && failureText.includes("How to fix it") && (await failure.locator('[data-guide="ai-key-rejected"]').count()) === 1,
+      failureText.split("\n").slice(0, 2).join(" / ")
+    );
+    if (process.env.SHOT_DIR) { await side.waitForTimeout(600); await side.screenshot({ path: path.join(process.env.SHOT_DIR, "chat-problem.png") }); }
+    failChat = false;
+    await failure.getByRole("button", { name: "Try again" }).click();
+    await side.waitForFunction(() => document.body.innerText.split("Reply from").length > 2, null, { timeout: 30000 }).catch(() => {});
+    check("Try again sends the same request again", (await side.locator("body").innerText()).split("Reply from").length > 2);
     check("the reply comes from the model picked in the menu, thinking hidden", chat.includes("Reply from qwen2.5-7b-instruct") && !chat.includes("planning the reply"), `models called: ${[...new Set(seenModels)].join(", ")}`);
 
     await side.getByRole("button", { name: "Settings" }).first().click();
