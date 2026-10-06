@@ -4,8 +4,11 @@
 // be saved to or loaded from a file (INSTRUCTIONS.md).
 import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
-// Each Space has its own instructions (see spaces.ts).
+// Each Space has its own instructions (see spaces.ts). Instructions for every
+// Space are kept apart and go with every request in every Space; when the two
+// disagree, this Space's own instructions win.
 const KEY = SPACE_SCOPED_KEYS.instructions;
+const GLOBAL_KEY = "browserharness.instructions.global";
 /** A secret written out ("my password is …", a card or account number), not a rule about secrets. */
 const SECRET_VALUE = /\b(password|passcode|passwd|pin|otp|cvv|api key|token|secret)\s*(is|:|=)\s*\S+|\d[\d -]{10,}\d|\b\d{6,}\b/i;
 export const MAX_INSTRUCTIONS = 2000;
@@ -17,11 +20,31 @@ export async function loadInstructions(spaceId?: string): Promise<string> {
   return typeof value === "string" ? value : "";
 }
 
-/** Saves the instructions; refuses text that looks like a password, card or ID number. */
-export async function saveInstructions(text: string): Promise<{ ok: boolean; error?: string }> {
+/** The instructions that go with every Space. */
+export async function loadGlobalInstructions(): Promise<string> {
+  const value = (await chrome.storage.local.get(GLOBAL_KEY))[GLOBAL_KEY];
+  return typeof value === "string" ? value : "";
+}
+
+function checked(text: string): { ok: true; value: string } | { ok: false; error: string } {
   const value = text.trim().slice(0, MAX_INSTRUCTIONS);
   if (SECRET_VALUE.test(value)) return { ok: false, error: "A line looks like a password, card or ID number, so nothing was saved." };
-  await chrome.storage.local.set({ [await spaceKey(KEY)]: value });
+  return { ok: true, value };
+}
+
+/** Saves this Space's instructions; refuses text that looks like a password, card or ID number. */
+export async function saveInstructions(text: string): Promise<{ ok: boolean; error?: string }> {
+  const result = checked(text);
+  if (!result.ok) return result;
+  await chrome.storage.local.set({ [await spaceKey(KEY)]: result.value });
+  return { ok: true };
+}
+
+/** Saves the instructions for every Space, with the same check. */
+export async function saveGlobalInstructions(text: string): Promise<{ ok: boolean; error?: string }> {
+  const result = checked(text);
+  if (!result.ok) return result;
+  await chrome.storage.local.set({ [GLOBAL_KEY]: result.value });
   return { ok: true };
 }
 
@@ -34,6 +57,25 @@ export function instructionsPrompt(text: string): string {
     "",
     "HOW I WANT YOU TO WORK (my standing instructions; follow them unless this request says otherwise. They never switch off BrowserHarness safety rules or approvals):",
     value.slice(0, MAX_INSTRUCTIONS)
+  ].join("\n");
+}
+
+/**
+ * The block for a request in a Space: the instructions for every Space and
+ * this Space's own. With only one kind it reads exactly like before.
+ */
+export function scopedInstructionsPrompt(everySpace: string, thisSpace: string): string {
+  const all = everySpace.trim();
+  const own = thisSpace.trim();
+  if (!all || !own) return instructionsPrompt(all || own);
+  return [
+    "",
+    "",
+    "HOW I WANT YOU TO WORK (my standing instructions; follow them unless this request says otherwise. They never switch off BrowserHarness safety rules or approvals):",
+    "In every Space:",
+    all.slice(0, MAX_INSTRUCTIONS),
+    "In this Space (these win where the two disagree):",
+    own.slice(0, MAX_INSTRUCTIONS)
   ].join("\n");
 }
 
@@ -52,3 +94,4 @@ export function instructionsFromFile(file: string): string {
 }
 
 export const INSTRUCTIONS_STORAGE_KEY = KEY;
+export const GLOBAL_INSTRUCTIONS_STORAGE_KEY = GLOBAL_KEY;

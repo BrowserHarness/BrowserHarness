@@ -2,8 +2,8 @@ import { useState, type ReactNode } from "react";
 import { Box, Button, Divider, Stack, Typography } from "@mui/material";
 import { Note, PageTitle, SettingsCard, useConfirm } from "../kit";
 import { clearTaskHistory } from "../../runtime/history";
-import { clearAboutMe } from "../../runtime/about-me";
-import { saveInstructions } from "../../runtime/instructions";
+import { clearAboutMe, clearGlobalAboutMe } from "../../runtime/about-me";
+import { saveGlobalInstructions, saveInstructions } from "../../runtime/instructions";
 import { deleteAllChats } from "../../runtime/chats";
 import { useSpaces } from "../spaces-ui";
 import type { SectionProps } from "./SettingsShell";
@@ -109,6 +109,26 @@ export function PrivacyPage(_props: SectionProps) {
                   await saveInstructions("");
                 },
                 `BrowserHarness forgot everything about you${where}.`
+              )
+            }
+          />
+          <Divider />
+          <DeleteRow
+            title="What every Space knows about you"
+            detail="Facts and wishes you chose to use in all your Spaces, like your name or “answer briefly”."
+            button="Forget for every Space"
+            onClick={() =>
+              void run(
+                {
+                  title: "Forget what every Space knows about you?",
+                  body: "Facts and wishes used in all your Spaces are deleted. Each Space keeps its own. This can't be undone.",
+                  confirmLabel: "Forget for every Space"
+                },
+                async () => {
+                  await clearGlobalAboutMe();
+                  await saveGlobalInstructions("");
+                },
+                "BrowserHarness forgot what every Space knew about you."
               )
             }
           />

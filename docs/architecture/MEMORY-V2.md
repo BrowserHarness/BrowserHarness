@@ -41,7 +41,7 @@ Leaks across Spaces (fixed in Phase 2, see section 3):
 5. Deleting a Space left its episodes behind; the shared 500-episode cap let one busy Space push out another's episodes.
 
 Not yet done (later phases):
-6. No "All Spaces" level: About me and instructions are per-Space only, so "My name is Neo" must be told to each Space (Phase 3).
+6. No "All Spaces" level: About me and instructions are per-Space only, so "My name is Neo" must be told to each Space (done in Phase 3, see 3b).
 7. Supersession deletes the older fact; no `validFrom/validUntil/supersededBy`, no decisions (Phase 4).
 8. No Context Compiler: prompts are assembled by string concatenation in `App.tsx` and `scheduled-run.ts` (`instructionsPrompt + aboutMePrompt + recallPrompt + skillHint + chatContextPrompt`), with no authority ranking, token budget or diagnostics (Phase 5).
 9. No candidate/dedupe/sensitivity pipeline shared by all writers; three separate secret regexes (Phase 6).
@@ -50,7 +50,7 @@ Not yet done (later phases):
 12. Site Skills, procedural memory and recordings are still shared (deliberate for now, see 3.4).
 13. Space backup/restore covers chats, notes, instructions and history only, not that Space's Skills and episodes (Phase 9).
 
-## 3. Phase 2: hard Space scope (this PR)
+## 3. Phase 2: hard Space scope (PR #38)
 
 ### 3.1 One wall, checked in one place
 `runtime/memory-scope.ts` holds the scope model (`global | space | task | agent | skill`) and the single check, `visibleInSpace(record, spaceId)` / `withinSpace(records, spaceId)`. Records carry `space_id` and optionally `visibility: "all"`. A record with no `space_id` belongs to the first Space (Personal), matching how the first Space keeps the old storage keys.
@@ -74,11 +74,20 @@ No stored data is rewritten. New fields are optional and read-time defaults hand
 ### 3.6 Tests
 `runtime/memory-scope.test.ts` (17 tests) and `runtime/remote-tasks.test.ts` (queued in Space A, switched to B, run stays in A): same-words and perfect-embedding matches never cross Spaces; get/delete limited to the asking Space; old episodes count as Personal; helper findings keep the parent's Space and sources; per-Space episode cap; Skill isolation, hint isolation, old Skills shared, no cross-Space delete, unique slugs, Space kept on update, per-Space pruning; notes, instructions and history written with an explicit Space while another is active; recall searches the current Space only; deleting a Space removes only its records. Breaking `visibleInSpace` makes 10 of them fail.
 
-## 4. Recorded follow-ups (from review of PR #38)
+## 3b. Phase 3: facts and wishes for every Space (Phase 3 PR)
+- New stores beside each Space's own: `browserharness.aboutMe.global` (facts) and `browserharness.instructions.global` (wishes). Nothing existing is moved: facts and wishes saved before Phase 3 stay in their Space (Personal for the old keys), so nothing is silently promoted.
+- Level for a new fact (`about-me.ts` `factScopeIn`): this Space by default (the narrowest). Every Space only for who the person is (name, what to call them, where they live, language) or when they say so ("across all Spaces…", "generally…"). "For this project/Space…" always keeps it in the Space.
+- A fact for every Space on the same topic also replaces the older one in the Space where it was said (so "I live in Mumbai" is not hidden by an older Personal "I live in Pune"). In the prompt, a Space's own fact wins over the every-Space fact on the same topic (`aboutMeFor`).
+- Wishes: `scopedInstructionsPrompt` sends both, labelled "In every Space" and "In this Space (these win where the two disagree)"; with only one kind it reads exactly as before.
+- One entry point for chat, scheduled and phone runs: `runtime/user-memory.ts` `userMemoryPrompt(spaceId)`.
+- UI: About you shows "In this Space" and "In every Space" lists with an Every Space / Only this Space button on each fact, an "every Space" tick when adding, and two wish cards. Privacy has "Forget for every Space". `/remember` says "(in every Space)" when it saved there. `/forget <words>` only touches this Space; `/forget everywhere <words>` (or "across all Spaces") removes facts used in every Space. A plain `/forget` that only matches an every-Space fact deletes nothing and says how to remove it.
+- Tests: `runtime/all-spaces-memory.test.ts` (15): scenarios 1 and 2 from the brief, level rules, Space-wins-on-topic, home change, move both ways, forget, secrets refused, Space deletion keeps every-Space facts, old data unchanged and unpromoted. Smokes: spaces (said-for-all-Spaces fact reaches Work), memory (wishes for every Space saved apart and sent).
+
+## 4. Recorded follow-ups
 1. Skills saved before Memory v2 have no scope and are read as `visibility: "all"`. Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
 2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
+3. Phase 3 replaces the older same-topic fact in the speaking Space when a fact for every Space arrives; the older fact is deleted, not kept as history. Phase 4 should turn both this and the existing same-topic replacement into supersession with history.
 
 ## 5. Recommended next phases
-- Phase 3: "All Spaces" level for About me and instructions (a small global store read alongside the Space one; new statements default to the Space; explicit "across all Spaces" goes global).
 - Phase 4: keep superseded facts with `valid_until`/`superseded_by`; add decisions with `current/superseded/reversed/historical`.
 - Phase 5: Context Compiler replacing the string concatenation, with authority order, per-model budget and a diagnostics record.

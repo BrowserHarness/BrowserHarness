@@ -10,7 +10,7 @@ export interface SlashCommandInfo {
 
 export const BUILT_IN_COMMANDS: SlashCommandInfo[] = [
   { name: "remember", usage: "/remember <fact>", description: "Save a fact about you, like “I live in Pune”" },
-  { name: "forget", usage: "/forget <words>", description: "Delete saved facts that mention these words" },
+  { name: "forget", usage: "/forget <words>", description: "Delete facts in this Space that mention these words (add “everywhere” for every Space)" },
   { name: "memory", usage: "/memory", description: "See and edit what BrowserHarness knows about you" },
   { name: "recall", usage: "/recall <words>", description: "Find what we did or talked about before" },
   { name: "skills", usage: "/skills", description: "See, run, rename and share your Skills" },

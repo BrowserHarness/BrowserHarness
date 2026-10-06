@@ -210,6 +210,25 @@ try {
   for (let i = 0; i < 100 && prompts.length === beforeHome; i++) await side.waitForTimeout(100);
   check("requests in Personal don't carry Work's notes", prompts.length > beforeHome && !prompts.slice(beforeHome).some((text) => text.includes("Infosys")));
 
+  // 5b. Something said for all Spaces is known in every Space; Work's own notes still stay in Work.
+  await ask(side, "/remember Across all Spaces, keep answers concise");
+  await waitText(side, "(in every Space)", 5000);
+  check("a fact said for all Spaces is kept for every Space", ((await storage("browserharness.aboutMe.global")) || []).some((fact) => fact.text === "Keep answers concise"));
+  await openMenu();
+  await side.getByTestId("space-switcher").click();
+  await side.getByRole("menuitem", { name: "Work" }).click();
+  await waitText(side, "You're in Work", 5000);
+  await closeMenu();
+  const beforeShared = prompts.length;
+  await ask(side, "suggest a tea shop");
+  for (let i = 0; i < 100 && prompts.length === beforeShared; i++) await side.waitForTimeout(100);
+  check("Work gets what was said for all Spaces", prompts.slice(beforeShared).some((text) => text.includes("Keep answers concise") && text.includes("I work at Infosys")));
+  await openMenu();
+  await side.getByTestId("space-switcher").click();
+  await side.getByRole("menuitem", { name: "Personal" }).click();
+  await side.getByTestId("chat-list").getByText("Kettle shopping").waitFor({ timeout: 5000 });
+  await closeMenu();
+
   // 6. The full-page chat: the menu stays open, and tasks work in the web page, never in the chat tab.
   const full = await ctx.newPage();
   await full.setViewportSize({ width: 1280, height: 860 });
