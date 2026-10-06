@@ -87,7 +87,9 @@ export function createTelegramRelay({
       stopped = true;
     },
     /** Sends a finished task's result to the chat it came from. */
+    app: relay.app,
     deliver: relay.deliver,
+    notify: relay.notify,
     handle
   };
 }

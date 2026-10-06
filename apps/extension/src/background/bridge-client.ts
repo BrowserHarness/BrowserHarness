@@ -185,7 +185,8 @@ async function handleMessage(raw: MessageEvent) {
   if (value.type === "hello_ack") {
     await saveBridgeStatus({
       state: "connected",
-      message: "Local agent bridge connected"
+      message: "Local agent bridge connected",
+      chat_apps: Array.isArray(value.chat_apps) ? value.chat_apps.filter((app): app is string => typeof app === "string") : []
     });
     return;
   }

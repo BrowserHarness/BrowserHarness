@@ -99,7 +99,9 @@ export function createSignalRelay({ number, command = "signal-cli", allowedUserI
       stopped = true;
       child?.kill();
     },
+    app: relay.app,
     deliver: relay.deliver,
+    notify: relay.notify,
     handle
   };
 }

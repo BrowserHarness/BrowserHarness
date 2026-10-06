@@ -90,7 +90,8 @@ export function createBridgeServer({
   mcpManager = null,
   llmManager = null,
   allowRemote = false,
-  onExtensionEvent = null
+  onExtensionEvent = null,
+  chatApps = () => []
 } = {}) {
   if (!token) throw new Error("Bridge pairing token is required");
   if (!isLoopbackHost(host)) {
@@ -503,7 +504,9 @@ export function createBridgeServer({
           ws.send(
             JSON.stringify({
               type: "hello_ack",
-              protocol_version: BRIDGE_PROTOCOL_VERSION
+              protocol_version: BRIDGE_PROTOCOL_VERSION,
+              // Chat apps set up here, so the extension can offer them for scheduled results.
+              chat_apps: chatApps()
             })
           );
           return;
@@ -710,6 +713,11 @@ export function createBridgeServer({
               })
             );
           }
+          return;
+        }
+
+        if (message.type === "chat_notify" && typeof message.app === "string" && typeof message.text === "string") {
+          if (ws === extension) await onExtensionEvent?.(message);
           return;
         }
 

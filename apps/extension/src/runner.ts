@@ -2,7 +2,7 @@
 // background tab when the task's alarm fires; it closes itself when done.
 import { saveTaskHistoryEntry } from "./runtime/history";
 import { runScheduledTask, runUnattendedTask } from "./runtime/scheduled-run";
-import { describeSchedule, loadSchedules, recordScheduledRun } from "./runtime/schedules";
+import { deliveryText, describeSchedule, loadSchedules, recordScheduledRun } from "./runtime/schedules";
 
 const title = document.getElementById("title") as HTMLElement;
 const lines = document.getElementById("log") as HTMLElement;
@@ -20,7 +20,15 @@ const HEADINGS = {
   "needs you": "Needs you"
 } as const;
 
-const CHAT_APPS: Record<string, string> = { telegram: "Telegram", discord: "Discord", slack: "Slack", signal: "Signal" };
+const CHAT_APPS: Record<string, string> = {
+  telegram: "Telegram",
+  discord: "Discord",
+  slack: "Slack",
+  signal: "Signal",
+  mattermost: "Mattermost",
+  matrix: "Matrix",
+  email: "email"
+};
 
 /** A task sent from a chat app; the result goes back the same way. */
 async function runRemote(id: string, keep: boolean) {
@@ -65,6 +73,12 @@ async function main() {
   const outcome = await runScheduledTask(item, log);
   await recordScheduledRun(item.id, outcome.status, outcome.message);
   await saveTaskHistoryEntry({ task: `Scheduled: ${item.task}`, result: outcome.message, url: outcome.url }).catch(() => undefined);
+  if (item.deliver_to) {
+    await chrome.runtime
+      .sendMessage({ type: "CHAT_NOTIFY", app: item.deliver_to, text: deliveryText(item.task, outcome.status, outcome.message) })
+      .then((sent: { ok?: boolean } | undefined) => log(sent?.ok ? `Sent the result to ${item.deliver_to}` : "Couldn't reach the Bridge to send the result"))
+      .catch(() => undefined);
+  }
 
   title.textContent = `${HEADINGS[outcome.status]}: ${item.task}`;
   outcomeBox.textContent = outcome.message;

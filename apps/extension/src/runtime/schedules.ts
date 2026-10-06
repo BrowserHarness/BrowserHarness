@@ -8,6 +8,22 @@ export type Schedule =
   | { kind: "daily"; time: string; days: number[] }
   | { kind: "interval"; minutes: number };
 
+/** Chat apps the Bridge can send results to. */
+export type ChatApp = "telegram" | "discord" | "slack" | "signal" | "mattermost" | "matrix" | "email";
+export const CHAT_APP_LABELS: Record<ChatApp, string> = {
+  telegram: "Telegram",
+  discord: "Discord",
+  slack: "Slack",
+  signal: "Signal",
+  mattermost: "Mattermost",
+  matrix: "Matrix",
+  email: "email"
+};
+
+export function isChatApp(value: unknown): value is ChatApp {
+  return typeof value === "string" && value in CHAT_APP_LABELS;
+}
+
 export interface ScheduledTask {
   id: string;
   /** What to do, in the person's words; "/skill-name details" runs a Skill. */
@@ -19,6 +35,8 @@ export interface ScheduledTask {
   last_run_at?: string;
   last_status?: "worked" | "failed" | "needs you";
   last_result?: string;
+  /** Also send each result to this chat app. */
+  deliver_to?: ChatApp;
 }
 
 const KEY = "browserharness.schedules";
@@ -161,6 +179,31 @@ export function parseScheduleText(text: string, now = new Date()): { schedule: S
   }
 
   return null;
+}
+
+const DELIVERY = /[\s,;]*(?:and\s+)?(?:send|message|text|tell)\s+(?:me\s+)?(?:(?:it|that|the\s+results?|results?)\s+)?(?:to\s+me\s+)?(?:to|on|in|via|over)\s+(?:my\s+)?(telegram|discord|slack|signal|mattermost|matrix|e-?mail)\s*[.!]?\s*$/i;
+const EMAIL_ME = /[\s,;]*(?:and\s+)?e-?mail\s+me(?:\s+(?:it|that|the\s+results?|results?))?\s*[.!]?\s*$/i;
+
+/** "check prices and send it to Telegram" → the task, and where results go. */
+export function splitDelivery(text: string): { task: string; deliver_to?: ChatApp } {
+  const match = DELIVERY.exec(text);
+  if (match) {
+    const app = match[1].toLowerCase().replace("-", "");
+    return { task: text.slice(0, match.index).trim(), deliver_to: app as ChatApp };
+  }
+  const email = EMAIL_ME.exec(text);
+  return email ? { task: text.slice(0, email.index).trim(), deliver_to: "email" } : { task: text.trim() };
+}
+
+/** The message a chat app gets after a scheduled run. */
+export function deliveryText(task: string, status: NonNullable<ScheduledTask["last_status"]>, result: string): string {
+  const heading = status === "worked" ? "Done" : status === "failed" ? "Didn't finish" : "Needs you";
+  return `${heading}: ${task}\n\n${result.trim()}`;
+}
+
+export async function setScheduleDelivery(id: string, app: ChatApp | undefined): Promise<void> {
+  const items = await loadSchedules();
+  await store(items.map((item) => (item.id === id ? { ...item, deliver_to: app } : item)));
 }
 
 export async function loadSchedules(): Promise<ScheduledTask[]> {

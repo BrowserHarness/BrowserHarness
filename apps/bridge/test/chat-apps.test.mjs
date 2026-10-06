@@ -210,3 +210,33 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("every chat app: scheduled results reach each allowed account, and quick answers come back at once", async () => {
+  const sent = [];
+  const relay = createChatRelay({
+    app: "telegram",
+    allowedUserIds: ["42", "43"],
+    send: async (chatId, text) => sent.push({ chatId, text }),
+    runTask: async () => ({ ok: true, id: "s1", reply: "Scheduled: check prices" })
+  });
+  assert.equal(relay.app, "telegram");
+  assert.equal(await relay.notify("Done: check prices\n\nGold is up"), 2);
+  assert.deepEqual(sent.map((item) => item.chatId), ["42", "43"]);
+
+  await relay.handle({ chatId: 9, userId: "42", text: "/schedule every day at 8am check prices" });
+  assert.deepEqual(sent.at(-1), { chatId: 9, text: "Scheduled: check prices" });
+  // Nothing is waiting for a later result.
+  assert.equal(await relay.deliver("s1", { status: "worked", message: "x" }), false);
+});
+
+test("Discord: a scheduled result opens a direct message with the person first", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, body: init.body ? JSON.parse(init.body) : undefined });
+    return new Response(JSON.stringify(url.endsWith("/users/@me/channels") ? { id: "dm-42" } : { id: "m" }));
+  };
+  const relay = createDiscordRelay({ token: "t", allowedUserIds: ["42"], apiBase: "http://d.test", fetchImpl, runTask: async () => ({ ok: false }) });
+  await relay.notify("Done: check prices");
+  assert.deepEqual(calls[0], { url: "http://d.test/users/@me/channels", body: { recipient_id: "42" } });
+  assert.deepEqual(calls[1], { url: "http://d.test/channels/dm-42/messages", body: { content: "Done: check prices" } });
+});

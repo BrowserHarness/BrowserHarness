@@ -14,9 +14,14 @@ import {
   Typography
 } from "@mui/material";
 import { DeleteIcon, RunIcon } from "./icons";
+import { BRIDGE_STATUS_KEY, loadBridgeStatus } from "../settings/bridge-store";
 import {
+  CHAT_APP_LABELS,
   deleteScheduledTask,
   describeSchedule,
+  isChatApp,
+  setScheduleDelivery,
+  type ChatApp,
   loadSchedules,
   MIN_INTERVAL_MINUTES,
   newScheduledTask,
@@ -58,13 +63,18 @@ export function ScheduledView() {
   const [hours, setHours] = useState(2);
   const [at, setAt] = useState("");
   const [error, setError] = useState("");
+  const [deliverTo, setDeliverTo] = useState<ChatApp | "">("");
+  const [chatApps, setChatApps] = useState<ChatApp[]>([]);
 
   const refresh = async () => setItems(await loadSchedules());
+  const refreshChatApps = async () => setChatApps(((await loadBridgeStatus()).chat_apps || []).filter(isChatApp));
 
   useEffect(() => {
     void refresh();
+    void refreshChatApps();
     const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area === "local" && changes[SCHEDULES_STORAGE_KEY]) void refresh();
+      if (area === "session" && changes[BRIDGE_STATUS_KEY]) void refreshChatApps();
     };
     chrome.storage.onChanged.addListener(onChange);
     return () => chrome.storage.onChanged.removeListener(onChange);
@@ -73,7 +83,7 @@ export function ScheduledView() {
   const add = async () => {
     const schedule = scheduleFrom(when, time, day, hours, at);
     if (!task.trim()) return;
-    const item = schedule ? newScheduledTask(task, schedule) : null;
+    const item = schedule ? { ...newScheduledTask(task, schedule), deliver_to: deliverTo || undefined } : null;
     if (!item?.next_run_at) {
       setError("Pick a time in the future.");
       return;
@@ -151,6 +161,23 @@ export function ScheduledView() {
               />
             )}
           </Stack>
+          {chatApps.length > 0 && (
+            <TextField
+              select
+              size="small"
+              label="Also send results to"
+              value={deliverTo}
+              onChange={(event) => setDeliverTo(event.target.value as ChatApp | "")}
+              sx={{ maxWidth: 240 }}
+            >
+              <MenuItem value="">Only this computer</MenuItem>
+              {chatApps.map((app) => (
+                <MenuItem key={app} value={app}>
+                  {CHAT_APP_LABELS[app]}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
           {error && <Alert severity="warning">{error}</Alert>}
           <Box>
             <Button variant="contained" size="small" disabled={!task.trim()} onClick={() => void add()}>
@@ -186,6 +213,7 @@ export function ScheduledView() {
                   {item.enabled && item.next_run_at
                     ? ` · next ${new Date(item.next_run_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`
                     : " · off"}
+                  {item.deliver_to ? ` · results also go to ${CHAT_APP_LABELS[item.deliver_to]}` : ""}
                 </Typography>
                 {item.last_status && (
                   <Stack direction="row" spacing={1} alignItems="flex-start">
@@ -207,6 +235,27 @@ export function ScheduledView() {
                   >
                     Run now
                   </Button>
+                  {(chatApps.length > 0 || item.deliver_to) && (
+                    <TextField
+                      select
+                      size="small"
+                      variant="standard"
+                      value={item.deliver_to || ""}
+                      slotProps={{ htmlInput: { "aria-label": `Send results of ${item.task} to` } }}
+                      onChange={async (event) => {
+                        await setScheduleDelivery(item.id, isChatApp(event.target.value) ? event.target.value : undefined);
+                        await refresh();
+                      }}
+                      sx={{ minWidth: 150, mx: 1 }}
+                    >
+                      <MenuItem value="">Only this computer</MenuItem>
+                      {[...new Set([...chatApps, ...(item.deliver_to ? [item.deliver_to] : [])])].map((app) => (
+                        <MenuItem key={app} value={app}>
+                          Send to {CHAT_APP_LABELS[app]}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  )}
                   <Tooltip title="Delete">
                     <IconButton
                       size="small"

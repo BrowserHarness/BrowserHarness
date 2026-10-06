@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -462,15 +462,71 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   const signalDone = await waitFor(() => signalReplies().find((item) => item.recipient[0] === "+15550001111" && /^Done\n\nTG_DONE Greet/.test(item.message)), 60_000);
   check("a Signal message runs in Chrome and the result comes back", Boolean(signalDone), JSON.stringify(signalReplies().slice(-3)));
 
+  // Email: verified mail from an allowed address runs, and the result comes back as a reply.
+  const { fakeMailServers } = await import(pathToFileURL(path.join(root, "apps/bridge/test/fixtures/fake-mail.mjs")).href);
+  const mailbox = Object.assign([], { uidNext: 1 });
+  const mail = await fakeMailServers(mailbox);
+  try {
+    const mailConfig = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    fs.writeFileSync(configFile, JSON.stringify({ ...mailConfig, email: { secure: false, poll_seconds: 5 } }));
+    const emailSetup = await bridgeAsync(
+      installed, "email", "setup", "--address", "bot@example.net", "--password", "secret",
+      "--imap", `127.0.0.1:${mail.imap.port}`, "--smtp", `127.0.0.1:${mail.smtp.port}`
+    );
+    check("email setup checks the mailbox and the outgoing server", emailSetup.json?.email === true && mail.logins.length >= 1, emailSetup.stderr?.trim());
+    const emailAllow = await bridgeAsync(installed, "email", "allow", "Ada@Example.com");
+    check("email allow adds the address", emailAllow.json?.allowed_user_ids?.includes("ada@example.com"), emailAllow.stderr?.trim());
+    await reconnected();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const mailMessage = (from, auth, body) =>
+      [`Authentication-Results: mx.example.net; ${auth}`, `From: ${from}`, "To: bot@example.net", "Subject: a task", "Message-ID: <e2e@example.com>", "", body].join("\r\n");
+    mailbox.push({ uid: 1, raw: mailMessage("Mallory <ada@example.com>", "dmarc=fail header.from=example.com", "TG_TASK forged"), seen: false });
+    mailbox.push({ uid: 2, raw: mailMessage("Ada <ada@example.com>", "dkim=pass header.i=@example.com; dmarc=pass header.from=example.com", `TG_TASK open ${pageUrl} and tell me the button`), seen: false });
+    mailbox.uidNext = 3;
+    const decoded = () => mail.sent.map((item) => ({ to: item.to, text: Buffer.from(item.data.split("\n\n").slice(1).join("").replace(/\s+/g, ""), "base64").toString() }));
+    const emailDone = await waitFor(() => decoded().find((item) => item.to === "ada@example.com" && /^Done\n\nTG_DONE Greet/.test(item.text)), 90_000);
+    check(
+      "a verified email runs in Chrome and the result comes back; a forged one is ignored",
+      Boolean(emailDone) && !decoded().some((item) => /forged/.test(item.text)) && mail.sent.every((item) => /Subject: Re: a task/.test(item.data)),
+      JSON.stringify(decoded())
+    );
+  } finally {
+    mail.close();
+  }
+
   const chats = await bridgeAsync(installed, "chats");
   const listedChats = Object.fromEntries((chats.json?.chats || []).map((chat) => [chat.app, chat.on && chat.allowed === 1]));
-  check("chats shows all four apps set up, without tokens", Object.values(listedChats).filter(Boolean).length === 4 && !/xoxb-e2e|xapp-e2e|discord-token|123:abc/.test(JSON.stringify(chats.json)), JSON.stringify(chats.json));
+  check(
+    "chats shows the five apps set up, without tokens or passwords",
+    ["telegram", "discord", "slack", "signal", "email"].every((app) => listedChats[app]) && !/xoxb-e2e|xapp-e2e|discord-token|123:abc|secret/.test(JSON.stringify(chats.json)),
+    JSON.stringify(chats.json)
+  );
   const allHistory = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.taskHistory"))["browserharness.taskHistory"] || []);
   check(
     "each task is in history with the app it came from",
-    ["Discord", "Slack", "Signal"].every((app) => allHistory.some((entry) => entry.task.startsWith(`From ${app}: TG_TASK`))),
+    ["Discord", "Slack", "Signal", "email"].every((app) => allHistory.some((entry) => entry.task.startsWith(`From ${app}: TG_TASK`))),
     allHistory.map((entry) => entry.task.slice(0, 30)).join(" | ")
   );
+
+  // Scheduled from a chat app: the schedule is saved with results going back there.
+  const offered = await side.evaluate(async () => (await chrome.storage.session.get("browserharness.bridgeStatus"))["browserharness.bridgeStatus"]?.chat_apps || []);
+  check("the extension learns which chat apps are set up", ["telegram", "discord", "slack", "signal", "email"].every((app) => offered.includes(app)), JSON.stringify(offered));
+  tgMessage(42, `/schedule every day at 8am TG_TASK open ${pageUrl} and tell me the button`);
+  const scheduledReply = await sentTo(9042, /^Scheduled: TG_TASK/, 15_000);
+  const schedules = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.schedules"))["browserharness.schedules"] || []);
+  const fromChat = schedules.find((item) => item.task.startsWith("TG_TASK"));
+  check(
+    "/schedule from Telegram saves a schedule that reports back to Telegram",
+    Boolean(scheduledReply) && fromChat?.deliver_to === "telegram" && /I'll send each result here/.test(scheduledReply?.text || ""),
+    JSON.stringify({ reply: scheduledReply?.text, fromChat })
+  );
+  const sentBefore = telegram.sent.length;
+  await side.evaluate((id) => chrome.tabs.create({ url: chrome.runtime.getURL(`runner.html?schedule=${encodeURIComponent(id)}`), active: false }), fromChat?.id || "");
+  const delivered = await waitFor(
+    () => telegram.sent.slice(sentBefore).find((item) => String(item.chat_id) === "42" && /^Done: TG_TASK[\s\S]*\n\nTG_DONE Greet/.test(item.text)),
+    60_000
+  );
+  check("a scheduled run sends its result to the chat app", Boolean(delivered), JSON.stringify(telegram.sent.slice(sentBefore)));
 
   // 4. Uninstall removes what install added.
   const removed = bridge(installed, "uninstall");

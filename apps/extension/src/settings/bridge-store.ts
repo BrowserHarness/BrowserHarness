@@ -7,6 +7,8 @@ export interface BridgeSettings {
 export interface BridgeStatus {
   state: "disabled" | "connecting" | "connected" | "disconnected" | "error";
   message?: string;
+  /** Chat apps set up in the Bridge, which can receive scheduled results. */
+  chat_apps?: string[];
   changed_at: string;
 }
 
