@@ -123,7 +123,12 @@ try {
   const sideText = () => side.locator("body").innerText();
   const waitText = (text, timeout = 20000) =>
     side.waitForFunction((text) => document.body.innerText.includes(text), text, { timeout }).catch(() => {});
-  const facts = () => side.evaluate(async () => ((await chrome.storage.local.get("browserharness.aboutMe"))["browserharness.aboutMe"] || []).map((fact) => fact.text));
+  // Facts about this Space and facts for every Space (name and city go to every Space).
+  const facts = () =>
+    side.evaluate(async () => {
+      const stored = await chrome.storage.local.get(["browserharness.aboutMe", "browserharness.aboutMe.global"]);
+      return [...(stored["browserharness.aboutMe"] || []), ...(stored["browserharness.aboutMe.global"] || [])].map((fact) => fact.text);
+    });
 
   // 1. A question about earlier work is answered from past conversations.
   await ask("what did I find last week about kettles?");
@@ -183,6 +188,13 @@ try {
   await side.getByRole("button", { name: "Save instructions" }).click();
   await waitText("follows these from your next request", 5000);
   check("instructions are saved", (await savedInstructions()) === "Always show prices in rupees.");
+  await side.getByLabel("Wishes for every Space", { exact: true }).fill("Prefer Indian sites.");
+  await side.getByRole("button", { name: "Save for every Space" }).click();
+  await side.waitForTimeout(600);
+  check(
+    "wishes for every Space are saved apart",
+    (await side.evaluate(async () => (await chrome.storage.local.get("browserharness.instructions.global"))["browserharness.instructions.global"])) === "Prefer Indian sites."
+  );
   await side.reload();
   await side.waitForTimeout(800);
   const beforeRules = prompts.length;
@@ -190,7 +202,9 @@ try {
   for (let i = 0; i < 100 && prompts.length === beforeRules; i++) await side.waitForTimeout(100);
   check(
     "standing instructions go with the next request",
-    prompts.slice(beforeRules).some((text) => text.includes("HOW I WANT YOU TO WORK") && text.includes("Always show prices in rupees."))
+    prompts.slice(beforeRules).some(
+      (text) => text.includes("HOW I WANT YOU TO WORK") && text.includes("Always show prices in rupees.") && text.includes("In every Space:\nPrefer Indian sites.")
+    )
   );
 
   // 8. A shared Skill can be imported from a link; it is saved, not run.

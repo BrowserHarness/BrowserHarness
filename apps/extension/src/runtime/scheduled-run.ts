@@ -1,8 +1,7 @@
 // Runs one scheduled task with nobody watching: its own background tab,
 // no questions (anything that needs approval stops and waits for the
 // person), and a short result for history and the notification.
-import { aboutMePrompt, loadAboutMe } from "./about-me";
-import { instructionsPrompt, loadInstructions } from "./instructions";
+import { userMemoryPrompt } from "./user-memory";
 import { autoApproves } from "./approval-mode";
 import { approvalQuestionFor, extensionMessage, runAgentTask } from "./agent-task";
 import { classifyTaskIntent } from "./intent";
@@ -65,8 +64,7 @@ export async function runUnattendedTask(
   const skill = command.kind === "skill" ? command.skill : null;
   const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
   const aboutMe =
-    instructionsPrompt(await loadInstructions(spaceId).catch(() => "")) +
-    aboutMePrompt(await loadAboutMe(spaceId).catch(() => [])) +
+    (await userMemoryPrompt(spaceId)) +
     (skill ? "" : recallPrompt(recallFor(await loadTaskHistory(spaceId).catch(() => []), taskText)));
   const preferences = await loadPreferences();
 

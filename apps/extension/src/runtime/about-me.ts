@@ -2,6 +2,11 @@
 // mind. They add facts themselves (/remember, the Memory screen) or it picks
 // up plain statements from their requests ("my name is…", "I prefer…").
 // Everything stays on this device and can be edited or deleted.
+//
+// Facts live at one of two levels: the Space they were said in (the default,
+// and the narrowest) or every Space. Only who the person is (name, what to
+// call them, where they live, their language) or something said "across all
+// Spaces" goes to every Space; nothing else is promoted on its own.
 
 import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
@@ -14,8 +19,12 @@ export interface AboutMeFact {
   topic?: string;
 }
 
-// Each Space keeps its own facts (see spaces.ts).
+// Each Space keeps its own facts (see spaces.ts); facts for every Space live apart.
 const KEY = SPACE_SCOPED_KEYS.aboutMe;
+const GLOBAL_KEY = "browserharness.aboutMe.global";
+
+/** Where a fact applies: the Space it was said in, or every Space. */
+export type FactScope = "space" | "global";
 const MAX_FACTS = 60;
 const MAX_FACT = 200;
 
@@ -32,20 +41,29 @@ export function isStorableFact(text: string): boolean {
   return value.length >= 3 && !SENSITIVE.test(value);
 }
 
-/** The key for these facts: the given Space (a running task's), else the one in use. */
-async function factsKey(spaceId?: string): Promise<string> {
+/** The key for these facts: every Space, the given Space (a running task's), or the one in use. */
+async function factsKey(spaceId?: string, scope: FactScope = "space"): Promise<string> {
+  if (scope === "global") return GLOBAL_KEY;
   return spaceId ? keyForSpace(KEY, spaceId) : spaceKey(KEY);
 }
 
-export async function loadAboutMe(spaceId?: string): Promise<AboutMeFact[]> {
-  const key = await factsKey(spaceId);
-  const stored = await chrome.storage.local.get(key);
-  const value = stored[key];
+async function loadFrom(key: string): Promise<AboutMeFact[]> {
+  const value = (await chrome.storage.local.get(key))[key];
   return Array.isArray(value) ? (value as AboutMeFact[]) : [];
 }
 
-async function store(facts: AboutMeFact[], spaceId?: string): Promise<void> {
-  await chrome.storage.local.set({ [await factsKey(spaceId)]: facts.slice(0, MAX_FACTS) });
+/** This Space's own facts. */
+export async function loadAboutMe(spaceId?: string): Promise<AboutMeFact[]> {
+  return loadFrom(await factsKey(spaceId));
+}
+
+/** Facts that go with every Space. */
+export async function loadGlobalAboutMe(): Promise<AboutMeFact[]> {
+  return loadFrom(GLOBAL_KEY);
+}
+
+async function store(facts: AboutMeFact[], spaceId?: string, scope: FactScope = "space"): Promise<void> {
+  await chrome.storage.local.set({ [await factsKey(spaceId, scope)]: facts.slice(0, MAX_FACTS) });
 }
 
 /**
@@ -66,11 +84,18 @@ export function factTopic(text: string): string | undefined {
 }
 
 /**
- * Adds facts that are new and safe to keep; a fact on the same topic as an
- * older one replaces it. Returns the ones added.
+ * Adds facts that are new and safe to keep, to this Space (default) or to
+ * every Space; a fact on the same topic as an older one replaces it. A fact
+ * for every Space also replaces the same topic in the Space it was said in,
+ * so the older, narrower one can't hide it. Returns the ones added.
  */
-export async function addFacts(texts: string[], source: AboutMeFact["source"], spaceId?: string): Promise<AboutMeFact[]> {
-  let facts = await loadAboutMe(spaceId);
+export async function addFacts(
+  texts: string[],
+  source: AboutMeFact["source"],
+  spaceId?: string,
+  scope: FactScope = "space"
+): Promise<AboutMeFact[]> {
+  let facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
   const known = new Set(facts.map((fact) => fact.text.toLowerCase()));
   const added: AboutMeFact[] = [];
   for (const text of texts) {
@@ -87,34 +112,107 @@ export async function addFacts(texts: string[], source: AboutMeFact["source"], s
       ...(topic ? { topic } : {})
     });
   }
-  if (added.length) await store([...added, ...facts], spaceId);
+  if (added.length) await store([...added, ...facts], spaceId, scope);
+  if (added.length && scope === "global") {
+    const topics = new Set(added.map((fact) => fact.topic).filter(Boolean));
+    const local = await loadAboutMe(spaceId);
+    const kept = local.filter((fact) => !topics.has(fact.topic ?? factTopic(fact.text)));
+    if (kept.length !== local.length) await store(kept, spaceId);
+  }
   return added;
 }
 
-export async function updateFact(id: string, text: string): Promise<boolean> {
-  const value = clean(text);
-  if (!isStorableFact(value)) return false;
-  const facts = await loadAboutMe();
-  await store(facts.map((fact) => (fact.id === id ? { ...fact, text: value, source: "you" } : fact)));
+/** Adds facts each at its own level (see factScopeIn); returns the ones added, with their level. */
+export async function rememberFacts(
+  items: Array<{ text: string; scope: FactScope }>,
+  source: AboutMeFact["source"],
+  spaceId?: string
+): Promise<Array<AboutMeFact & { scope: FactScope }>> {
+  const added: Array<AboutMeFact & { scope: FactScope }> = [];
+  for (const scope of ["global", "space"] as const) {
+    const texts = items.filter((item) => item.scope === scope).map((item) => item.text);
+    if (texts.length) added.push(...(await addFacts(texts, source, spaceId, scope)).map((fact) => ({ ...fact, scope })));
+  }
+  return added;
+}
+
+/** Moves a fact between this Space and every Space. */
+export async function moveFact(id: string, to: FactScope, spaceId?: string): Promise<boolean> {
+  const from: FactScope = to === "global" ? "space" : "global";
+  const source = from === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
+  const fact = source.find((item) => item.id === id);
+  if (!fact) return false;
+  await store(source.filter((item) => item.id !== id), spaceId, from);
+  await addFacts([fact.text], fact.source, spaceId, to);
   return true;
 }
 
-export async function removeFact(id: string): Promise<void> {
-  await store((await loadAboutMe()).filter((fact) => fact.id !== id));
+export async function updateFact(id: string, text: string, scope: FactScope = "space"): Promise<boolean> {
+  const value = clean(text);
+  if (!isStorableFact(value)) return false;
+  const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe();
+  await store(facts.map((fact) => (fact.id === id ? { ...fact, text: value, source: "you" } : fact)), undefined, scope);
+  return true;
 }
 
-/** Removes every fact that mentions the words; returns how many. */
-export async function forgetMatching(words: string): Promise<number> {
+export async function removeFact(id: string, scope: FactScope = "space"): Promise<void> {
+  const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe();
+  await store(facts.filter((fact) => fact.id !== id), undefined, scope);
+}
+
+/**
+ * Removes every fact that mentions the words, in this Space and in the facts
+ * for every Space (both are what this Space knows); returns how many.
+ */
+export async function forgetMatching(words: string, spaceId?: string): Promise<number> {
   const needle = words.trim().toLowerCase();
   if (!needle) return 0;
-  const facts = await loadAboutMe();
-  const kept = facts.filter((fact) => !fact.text.toLowerCase().includes(needle));
-  await store(kept);
-  return facts.length - kept.length;
+  let removed = 0;
+  for (const scope of ["space", "global"] as const) {
+    const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
+    const kept = facts.filter((fact) => !fact.text.toLowerCase().includes(needle));
+    if (kept.length !== facts.length) await store(kept, spaceId, scope);
+    removed += facts.length - kept.length;
+  }
+  return removed;
 }
 
+/** Forgets this Space's own facts; the facts for every Space stay. */
 export async function clearAboutMe(): Promise<void> {
   await chrome.storage.local.remove(await spaceKey(KEY));
+}
+
+export async function clearGlobalAboutMe(): Promise<void> {
+  await chrome.storage.local.remove(GLOBAL_KEY);
+}
+
+/** Who the person is: true in every part of their life. */
+const IDENTITY_TOPICS = new Set(["name", "nickname", "home", "language"]);
+/** Said for every Space on purpose. */
+const EVERY_SPACE =
+  /\b(across|in|for) (all|every) (my |of my )?spaces?\b|\bin every space\b|\beverywhere\b|\bwherever i am\b|\bgenerally\b|\bin general\b|\bglobally\b|\bin all my (chats|work)\b/i;
+/** Said for this Space only. */
+const THIS_SPACE = /\b(for|in) this (space|project|work|client|shop|store|team|account)\b|\bhere only\b|\bonly here\b/i;
+
+/**
+ * The level a fact belongs at, from the fact and the words it came with.
+ * When in doubt, this Space: the narrowest level that fits.
+ */
+export function factScopeIn(fact: string, said = ""): FactScope {
+  const context = `${said} ${fact}`;
+  if (THIS_SPACE.test(context)) return "space";
+  if (EVERY_SPACE.test(context)) return "global";
+  const topic = factTopic(clean(fact));
+  return topic && IDENTITY_TOPICS.has(topic) ? "global" : "space";
+}
+
+/** Removes "across all Spaces," and the like from a fact, keeping what it says. */
+export function withoutScopeWords(text: string): string {
+  return clean(
+    text
+      .replace(/^\s*(across|in|for) (all|every) (my |of my )?spaces?,?\s*/i, "")
+      .replace(/,?\s*(across|in|for) (all|every) (my |of my )?spaces?\b/i, "")
+  ).replace(/^./, (first) => first.toUpperCase());
 }
 
 const PATTERNS: Array<[RegExp, (match: RegExpExecArray) => string]> = [
@@ -127,6 +225,7 @@ const PATTERNS: Array<[RegExp, (match: RegExpExecArray) => string]> = [
   [/\bi never ([^.;!?\n]{3,100})/iu, (m) => `I never ${m[1]}`],
   [/\bmy (?:favou?rite|preferred) ([\p{L} ]{2,30}) is ([^.;!?\n]{2,60})/iu, (m) => `My favourite ${m[1]} is ${m[2]}`],
   [/\bmy (?:currency|budget|timezone|time zone|language) is ([^.;!?\n]{2,40})/iu, (m) => m[0].replace(/^my/i, "My")],
+  [/^\s*(?:across|in|for) (?:all|every) (?:of )?(?:my )?spaces?,?\s+([^?\n]{3,160})/iu, (m) => m[1].replace(/^./, (first) => first.toUpperCase())],
   [/\bremember (?:that |: ?)([^?\n]{3,180})/iu, (m) => m[1]],
   [/\bremember (my [^?\n]{3,180})/iu, (m) => m[1].replace(/^my/, "My")]
 ];
@@ -140,6 +239,20 @@ export function factsInMessage(text: string): string[] {
       if (!match) continue;
       const fact = clean(render(match));
       if (isStorableFact(fact) && !found.includes(fact)) found.push(fact);
+    }
+  }
+  return found.slice(0, 5);
+}
+
+/** The facts in a message, each with the level it belongs at (see factScopeIn). */
+export function scopedFactsInMessage(text: string): Array<{ text: string; scope: FactScope }> {
+  const found: Array<{ text: string; scope: FactScope }> = [];
+  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
+    for (const [pattern, render] of PATTERNS) {
+      const match = pattern.exec(sentence);
+      if (!match) continue;
+      const fact = withoutScopeWords(render(match));
+      if (isStorableFact(fact) && !found.some((item) => item.text === fact)) found.push({ text: fact, scope: factScopeIn(fact, sentence) });
     }
   }
   return found.slice(0, 5);
@@ -188,6 +301,23 @@ export function parseExtractedFacts(reply: string): string[] {
   }
 }
 
+/**
+ * What the agent should know about the person in this Space: this Space's
+ * facts, then the facts for every Space. On the same topic, this Space's own
+ * fact wins (it is the narrower, more specific one).
+ */
+export function aboutMeFor(globalFacts: AboutMeFact[], spaceFacts: AboutMeFact[]): AboutMeFact[] {
+  const local = new Set(spaceFacts.map((fact) => fact.topic ?? factTopic(fact.text)).filter(Boolean));
+  const seen = new Set(spaceFacts.map((fact) => fact.text.toLowerCase()));
+  return [
+    ...spaceFacts,
+    ...globalFacts.filter((fact) => {
+      const topic = fact.topic ?? factTopic(fact.text);
+      return !(topic && local.has(topic)) && !seen.has(fact.text.toLowerCase());
+    })
+  ];
+}
+
 /** The block added to every request so the agent knows the person. */
 export function aboutMePrompt(facts: AboutMeFact[]): string {
   if (!facts.length) return "";
@@ -200,3 +330,4 @@ export function aboutMePrompt(facts: AboutMeFact[]): string {
 }
 
 export const ABOUT_ME_STORAGE_KEY = KEY;
+export const GLOBAL_ABOUT_ME_STORAGE_KEY = GLOBAL_KEY;

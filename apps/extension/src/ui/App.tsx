@@ -87,18 +87,21 @@ import {
   type SlashCommand
 } from "../runtime/slash-commands";
 import {
-  aboutMePrompt,
-  addFacts,
+  aboutMeFor,
   factExtractionPrompt,
-  factsInMessage,
+  factScopeIn,
   forgetMatching,
   isStorableFact,
   loadAboutMe,
+  loadGlobalAboutMe,
   mightStateFacts,
-  parseExtractedFacts
+  parseExtractedFacts,
+  rememberFacts,
+  scopedFactsInMessage,
+  withoutScopeWords
 } from "../runtime/about-me";
 import { loadTaskHistory } from "../runtime/history";
-import { instructionsPrompt, loadInstructions } from "../runtime/instructions";
+import { userMemoryPrompt } from "../runtime/user-memory";
 import { recallAnswer, recallFor, recallPrompt } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
@@ -597,10 +600,10 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           addAssistantMessage("That looks like a password, card or ID number, so I won't save it.");
           return;
         }
-        const added = await addFacts([command.args], "you");
+        const added = await rememberFacts([{ text: withoutScopeWords(command.args), scope: factScopeIn(command.args) }], "you");
         addAssistantMessage(
           added.length
-            ? `Got it. I'll remember: ${added[0].text}`
+            ? `Got it. I'll remember: ${added[0].text}${added[0].scope === "global" ? " (in every Space)" : ""}`
             : "I already know that."
         );
         return;
@@ -1135,7 +1138,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       autoSkills = preferences.autoSkills;
       learnAboutMe = preferences.learnAboutMe && !skillRun;
       if (preferences.learnAboutMe && !skillRun) {
-        const learned = await addFacts(factsInMessage(typed), "learned", spaceId);
+        // Each fact at its own level: this Space unless it's who you are or said for every Space.
+        const learned = await rememberFacts(scopedFactsInMessage(typed), "learned", spaceId);
         if (learned.length) {
           addActivity(
             `Remembered about you: ${learned.map((fact) => fact.text).join("; ")}`,
@@ -1143,7 +1147,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           );
         }
       }
-      aboutMe = instructionsPrompt(await loadInstructions(spaceId)) + aboutMePrompt(await loadAboutMe(spaceId));
+      aboutMe = await userMemoryPrompt(spaceId);
     } catch {
       aboutMe = "";
     }
@@ -1163,8 +1167,13 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     const learnFactsInBackground = (model: ProviderConnection) => {
       if (!learnAboutMe || !mightStateFacts(typed)) return;
       void (async () => {
-        const reply = await directChatWithFallback(model, null, factExtractionPrompt(typed, await loadAboutMe(spaceId)));
-        const added = await addFacts(parseExtractedFacts(reply.result), "learned", spaceId);
+        const known = aboutMeFor(await loadGlobalAboutMe(), await loadAboutMe(spaceId));
+        const reply = await directChatWithFallback(model, null, factExtractionPrompt(typed, known));
+        const added = await rememberFacts(
+          parseExtractedFacts(reply.result).map((fact) => ({ text: fact, scope: factScopeIn(fact, typed) })),
+          "learned",
+          spaceId
+        );
         if (added.length) {
           addActivity(`Remembered about you: ${added.map((fact) => fact.text).join("; ")}`, "done");
         }
