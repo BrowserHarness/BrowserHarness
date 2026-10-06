@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { findOnPath } from "./install.mjs";
 
 /**
  * Subscription adapters.
@@ -112,6 +114,27 @@ function resolveCommand(id, env = process.env) {
   return String(env[adapter.env] || adapter.command);
 }
 
+/**
+ * On Windows, npm installs CLIs as .cmd scripts, which Node cannot start
+ * without a shell, and a shell would mangle a multi-line system prompt. Run
+ * the JavaScript file the npm script points at with Node directly instead.
+ */
+export function windowsLaunch(command, args, env = process.env, platform = process.platform) {
+  if (platform !== "win32") return { command, args };
+  const found = /[\\/]/.test(command)
+    ? ["", ".exe", ".cmd", ".bat"].map((ext) => command + ext).find((file) => existsSync(file))
+    : findOnPath(command, env, platform);
+  if (!found || !/\.(cmd|bat)$/i.test(found)) return { command: found || command, args };
+  let script;
+  try {
+    script = readFileSync(found, "utf8").match(/"%~?dp0%?\\([^"]+\.[cm]?js)"/i)?.[1];
+  } catch {
+    // Unreadable script: try to start it as it is.
+  }
+  if (!script) return { command: found, args };
+  return { command: process.execPath, args: [path.join(path.dirname(found), script), ...args] };
+}
+
 function runProcess(
   command,
   args,
@@ -120,7 +143,8 @@ function runProcess(
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnImpl(command, args, {
+      const launch = windowsLaunch(command, args, env);
+      child = spawnImpl(launch.command, launch.args, {
         cwd,
         env,
         stdio: ["pipe", "pipe", "pipe"],
