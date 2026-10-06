@@ -40,7 +40,7 @@ const server = http
         const all = body.messages.map((m) => (Array.isArray(m.content) ? m.content.map((c) => c.text || "").join("") : String(m.content ?? ""))).join("\n");
         prompts.push(all);
         const user = String(body.messages.at(-1).content?.[0]?.text ?? body.messages.at(-1).content ?? "");
-        const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1];
+        const goal = (/USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1])?.split("\n\nEARLIER IN THIS CHAT")[0];
         if (!goal) return reply(res, "CHAT_OK");
         const done = user.split("RECENT EXECUTION EVIDENCE:").pop() || "";
         if (goal.includes("FAIL_THIS")) {

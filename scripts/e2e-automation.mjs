@@ -32,7 +32,7 @@ const server = http
       req.on("end", () => {
         const body = JSON.parse(raw);
         const user = String(body.messages.at(-1).content?.[0]?.text ?? body.messages.at(-1).content ?? "");
-        const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "";
+        const goal = (/USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "")?.split("\n\nEARLIER IN THIS CHAT")[0];
         const done = user.split("RECENT EXECUTION EVIDENCE:").pop() || "";
         if (goal.includes("GOAL_SCHED") || goal.includes("GOAL_RISKY")) {
           if (!/\bnavigate[: ]/.test(done)) {
