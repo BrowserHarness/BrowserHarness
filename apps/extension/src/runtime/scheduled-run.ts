@@ -7,6 +7,8 @@ import { approvalQuestionFor, extensionMessage, runAgentTask } from "./agent-tas
 import { classifyTaskIntent } from "./intent";
 import { directChatWithFallback } from "./model-router";
 import { loadSkills, recordSkillRun, skillTask } from "./skills";
+import { loadTaskHistory } from "./history";
+import { recallFor, recallPrompt } from "./recall";
 import { applyLearningPlan, matchSkill, planLearning, skillHint } from "./skill-learning";
 import { BUILT_IN_COMMANDS, parseSlashCommand } from "./slash-commands";
 import type { ScheduledTask } from "./schedules";
@@ -57,7 +59,9 @@ export async function runUnattendedTask(
   }
   const skill = command.kind === "skill" ? command.skill : null;
   const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
-  const aboutMe = aboutMePrompt(await loadAboutMe().catch(() => []));
+  const aboutMe =
+    aboutMePrompt(await loadAboutMe().catch(() => [])) +
+    (skill ? "" : recallPrompt(recallFor(await loadTaskHistory().catch(() => []), taskText)));
   const preferences = await loadPreferences();
 
   const controller = new AbortController();

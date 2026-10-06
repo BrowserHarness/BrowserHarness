@@ -65,11 +65,16 @@ import {
 import {
   aboutMePrompt,
   addFacts,
+  factExtractionPrompt,
   factsInMessage,
   forgetMatching,
   isStorableFact,
-  loadAboutMe
+  loadAboutMe,
+  mightStateFacts,
+  parseExtractedFacts
 } from "../runtime/about-me";
+import { loadTaskHistory } from "../runtime/history";
+import { recallAnswer, recallFor, recallPrompt } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
   describeSchedule,
@@ -463,6 +468,9 @@ export function App() {
       }
       case "memory":
         setView("memory");
+        return;
+      case "recall":
+        addAssistantMessage(recallAnswer(await loadTaskHistory().catch(() => []), command.args));
         return;
       case "skills":
         setView("skills");
@@ -936,9 +944,11 @@ export function App() {
     // About me: pick up plain facts from the request, then share what is known.
     let aboutMe = "";
     let autoSkills = true;
+    let learnAboutMe = false;
     try {
       const preferences = await loadPreferences();
       autoSkills = preferences.autoSkills;
+      learnAboutMe = preferences.learnAboutMe && !skillRun;
       if (preferences.learnAboutMe && !skillRun) {
         const learned = await addFacts(factsInMessage(typed), "learned");
         if (learned.length) {
@@ -952,6 +962,29 @@ export function App() {
     } catch {
       aboutMe = "";
     }
+
+    // Past conversations the request refers back to (or closely repeats).
+    const recalledEntries = skillRun ? [] : recallFor(await loadTaskHistory().catch(() => []), typed);
+    const recalled = recallPrompt(recalledEntries);
+    if (recalledEntries.length) {
+      addActivity(
+        `Remembering ${recalledEntries.length} past conversation${recalledEntries.length === 1 ? "" : "s"}`,
+        "done"
+      );
+    }
+
+    // Lasting facts the patterns miss ("I work at…", "my kids are…") are
+    // picked out by the model after the answer, without holding it up.
+    const learnFactsInBackground = (model: ProviderConnection) => {
+      if (!learnAboutMe || !mightStateFacts(typed)) return;
+      void (async () => {
+        const reply = await directChatWithFallback(model, null, factExtractionPrompt(typed, await loadAboutMe()));
+        const added = await addFacts(parseExtractedFacts(reply.result), "learned");
+        if (added.length) {
+          addActivity(`Remembered about you: ${added.map((fact) => fact.text).join("; ")}`, "done");
+        }
+      })().catch(() => undefined);
+    };
 
     // A saved Skill that looks like this request guides the agent.
     const hinted = !skillRun && autoSkills ? matchSkill(typed, savedSkills)?.skill ?? null : null;
@@ -970,7 +1003,7 @@ export function App() {
             fallback?.chatHealth.status === "healthy"
               ? fallback
               : null,
-            task + aboutMe,
+            task + aboutMe + recalled,
             controller.signal
           );
 
@@ -985,6 +1018,7 @@ export function App() {
 
           addAssistantMessage(routed.result);
           await saveHistory(typed, routed.result);
+          learnFactsInBackground(primary);
           return;
         } catch (error) {
           finishActivity(activity, cancelled.current ? "done" : "error");
@@ -1022,7 +1056,7 @@ export function App() {
       if (hinted) addActivity(`Following your Skill /${hinted.slug}`, "done");
 
       const result = await runAgentTask(task + attachmentNote, {
-        context: aboutMe + (hinted ? skillHint(hinted) : ""),
+        context: aboutMe + recalled + (hinted ? skillHint(hinted) : ""),
         agentPrimary,
         agentFallback,
         session: { id: taskSessionId, title: taskSessionTitle },
@@ -1080,6 +1114,7 @@ export function App() {
       if (result.status === "completed") {
         await saveHistory(typed, result.message);
       }
+      learnFactsInBackground(primary);
       return;
     } catch (error) {
       if (skillRun && !cancelled.current) {

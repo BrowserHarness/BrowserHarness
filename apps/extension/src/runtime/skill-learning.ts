@@ -42,7 +42,8 @@ export function contentWords(text: string): Set<string> {
       .replace(/[̀-ͯ]/g, "")
       .split(/[^a-z0-9]+/)
       .filter((word) => word.length > 1 && !STOP_WORDS.has(word))
-      .map((word) => (word.length > 4 ? word.replace(/(ing|ed|es|s)$/, "") : word))
+      .map((word) => (word.length > 5 ? word.replace(/(ing|ed)$/, "") : word))
+      .map((word) => (word.length > 3 && !word.endsWith("ss") ? word.replace(/s$/, "") : word))
   );
 }
 
