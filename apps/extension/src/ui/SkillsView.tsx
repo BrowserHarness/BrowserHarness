@@ -17,6 +17,7 @@ import { BackIcon, DeleteIcon, DownloadIcon, EditIcon, ReplayIcon, RunIcon, Uplo
 import {
   deleteSkill,
   loadSkills,
+  fetchSkillMd,
   parseSkillMd,
   renameSkill,
   saveSkill,
@@ -70,6 +71,7 @@ export function SkillsView({
   const [editingCommand, setEditingCommand] = useState<{ key: string; name: string } | null>(null);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const [notice, setNotice] = useState<{ severity: "success" | "error"; text: string } | null>(null);
+  const [link, setLink] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [autoSkills, setAutoSkills] = useState(true);
 
@@ -109,6 +111,19 @@ export function SkillsView({
     await refresh();
   };
 
+  const importLink = async () => {
+    if (!link?.trim()) return;
+    const parsed = await fetchSkillMd(link);
+    if (!parsed.ok) {
+      setNotice({ severity: "error", text: parsed.error });
+      return;
+    }
+    const saved = await saveSkill(parsed.skill, RESERVED);
+    setNotice({ severity: "success", text: `Imported /${saved.slug} from ${new URL(link.trim()).hostname}. Read its steps before you run it; nothing runs until you start it.` });
+    setLink(null);
+    await refresh();
+  };
+
   const finishRename = async () => {
     if (!editing) return;
     await renameSkill(editing.id, editing.name, RESERVED);
@@ -128,6 +143,9 @@ export function SkillsView({
         <Button size="small" startIcon={<UploadIcon fontSize="small" />} onClick={() => fileInput.current?.click()}>
           Import SKILL.md
         </Button>
+        <Button size="small" onClick={() => setLink(link === null ? "" : null)}>
+          From a link
+        </Button>
         <input
           ref={fileInput}
           type="file"
@@ -138,6 +156,25 @@ export function SkillsView({
           onChange={(event) => void importFiles(event.target.files)}
         />
       </Stack>
+      {link !== null && (
+        <Stack direction="row" spacing={1} mb={1.5}>
+          <TextField
+            size="small"
+            fullWidth
+            autoFocus
+            label="Link to a SKILL.md"
+            placeholder="https://github.com/someone/skills/blob/main/tea/SKILL.md"
+            value={link}
+            onChange={(event) => setLink(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void importLink();
+            }}
+          />
+          <Button variant="contained" size="small" disabled={!link.trim()} onClick={() => void importLink()}>
+            Import
+          </Button>
+        </Stack>
+      )}
       <Typography variant="body2" color="text.secondary" mb={2}>
         A Skill is a task BrowserHarness has learned. Run one here or type <code>/</code> and its name in the chat.
         When you ask for something similar, it follows the Skill on its own. A shorter way updates the Skill, and a run

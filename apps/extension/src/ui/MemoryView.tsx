@@ -24,6 +24,99 @@ import {
   type AboutMeFact
 } from "../runtime/about-me";
 import { loadPreferences, updatePreferences } from "../settings/preferences";
+import {
+  instructionsFile,
+  instructionsFromFile,
+  loadInstructions,
+  MAX_INSTRUCTIONS,
+  saveInstructions
+} from "../runtime/instructions";
+
+/** How the person wants BrowserHarness to work: a few lines that go with every request. */
+function InstructionsCard() {
+  const [text, setText] = useState("");
+  const [saved, setSaved] = useState("");
+  const [note, setNote] = useState<{ severity: "success" | "warning"; text: string } | null>(null);
+
+  useEffect(() => {
+    void loadInstructions().then((value) => {
+      setText(value);
+      setSaved(value);
+    });
+  }, []);
+
+  const save = async (value: string) => {
+    const result = await saveInstructions(value);
+    if (!result.ok) {
+      setNote({ severity: "warning", text: result.error || "Not saved." });
+      return;
+    }
+    setSaved(value.trim());
+    setText(value.trim());
+    setNote({ severity: "success", text: "Saved. BrowserHarness follows these from your next request." });
+  };
+
+  return (
+    <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Typography variant="subtitle2" mb={0.5}>
+        How BrowserHarness should work for you
+      </Typography>
+      <Typography variant="body2" color="text.secondary" mb={1}>
+        A few lines it follows in every chat, task and scheduled run, unless a request says otherwise. They never switch
+        off approvals.
+      </Typography>
+      <TextField
+        fullWidth
+        multiline
+        minRows={3}
+        maxRows={10}
+        size="small"
+        label="Your instructions"
+        placeholder={"Answer briefly.\nShow prices in rupees.\nNever buy anything over ₹5,000 without asking me."}
+        value={text}
+        onChange={(event) => setText(event.target.value.slice(0, MAX_INSTRUCTIONS))}
+      />
+      {note && (
+        <Alert severity={note.severity} sx={{ mt: 1 }} onClose={() => setNote(null)}>
+          {note.text}
+        </Alert>
+      )}
+      <Stack direction="row" spacing={1} mt={1}>
+        <Button variant="contained" size="small" disabled={text.trim() === saved} onClick={() => void save(text)}>
+          Save instructions
+        </Button>
+        <Button
+          size="small"
+          disabled={!saved}
+          onClick={() => {
+            const url = URL.createObjectURL(new Blob([instructionsFile(saved)], { type: "text/markdown" }));
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "INSTRUCTIONS.md";
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }}
+        >
+          Download
+        </Button>
+        <Button size="small" component="label">
+          Load from file
+          <input
+            hidden
+            type="file"
+            accept=".md,.txt,text/markdown,text/plain"
+            aria-label="Load instructions from a file"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) await save(instructionsFromFile(await file.text()));
+            }}
+          />
+        </Button>
+      </Stack>
+    </Paper>
+  );
+}
 
 export function MemoryView({ onBack }: { onBack: () => void }) {
   const [facts, setFacts] = useState<AboutMeFact[]>([]);
@@ -81,6 +174,8 @@ export function MemoryView({ onBack }: { onBack: () => void }) {
         It also remembers your past conversations: ask “what did I find last week about…?” or type{" "}
         <code>/recall</code> and a few words. Turn off task history in Settings to stop this.
       </Typography>
+
+      <InstructionsCard />
 
       <Stack direction="row" spacing={1} mb={1}>
         <TextField

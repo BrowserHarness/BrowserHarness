@@ -74,6 +74,7 @@ import {
   parseExtractedFacts
 } from "../runtime/about-me";
 import { loadTaskHistory } from "../runtime/history";
+import { instructionsPrompt, loadInstructions } from "../runtime/instructions";
 import { recallAnswer, recallFor, recallPrompt } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
@@ -961,7 +962,7 @@ export function App() {
           );
         }
       }
-      aboutMe = aboutMePrompt(await loadAboutMe());
+      aboutMe = instructionsPrompt(await loadInstructions()) + aboutMePrompt(await loadAboutMe());
     } catch {
       aboutMe = "";
     }

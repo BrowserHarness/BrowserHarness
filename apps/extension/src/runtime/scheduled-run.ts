@@ -2,6 +2,7 @@
 // no questions (anything that needs approval stops and waits for the
 // person), and a short result for history and the notification.
 import { aboutMePrompt, loadAboutMe } from "./about-me";
+import { instructionsPrompt, loadInstructions } from "./instructions";
 import { autoApproves } from "./approval-mode";
 import { approvalQuestionFor, extensionMessage, runAgentTask } from "./agent-task";
 import { classifyTaskIntent } from "./intent";
@@ -60,6 +61,7 @@ export async function runUnattendedTask(
   const skill = command.kind === "skill" ? command.skill : null;
   const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
   const aboutMe =
+    instructionsPrompt(await loadInstructions().catch(() => "")) +
     aboutMePrompt(await loadAboutMe().catch(() => [])) +
     (skill ? "" : recallPrompt(recallFor(await loadTaskHistory().catch(() => []), taskText)));
   const preferences = await loadPreferences();

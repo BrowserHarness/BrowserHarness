@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Local real-Chromium test of deeper memory with a scripted mock model (no real LLM, no network):
 // past conversations come back when a request refers to them (chat, browser and /recall), the
-// model picks lasting facts out of a message, and a changed fact replaces the old one.
+// model picks lasting facts out of a message, a changed fact replaces the old one, standing
+// instructions go with every request, and a shared Skill imports from a link without running.
 // Requires: npm run build, playwright-core. Never runs on GitHub Actions.
 import http from "node:http";
 import os from "node:os";
@@ -169,6 +170,40 @@ try {
   await side.getByRole("button", { name: "About me" }).click();
   await side.getByTestId("about-me-fact").first().waitFor({ timeout: 5000 });
   check("the About me screen explains past conversations and /recall", (await sideText()).includes("remembers your past conversations"));
+
+  // 7. Standing instructions go with every request; a password in them is refused.
+  const instructions = side.getByLabel("Your instructions");
+  const savedInstructions = () => side.evaluate(async () => (await chrome.storage.local.get("browserharness.instructions"))["browserharness.instructions"] || "");
+  await instructions.fill("My bank password is hunter22");
+  await side.getByRole("button", { name: "Save instructions" }).click();
+  await waitText("looks like a password", 5000);
+  check("instructions with a password in them are not saved", (await savedInstructions()) === "");
+  await instructions.fill("Always show prices in rupees.");
+  await side.getByRole("button", { name: "Save instructions" }).click();
+  await waitText("follows these from your next request", 5000);
+  check("instructions are saved", (await savedInstructions()) === "Always show prices in rupees.");
+  await side.reload();
+  await side.waitForTimeout(800);
+  const beforeRules = prompts.length;
+  await ask("which kettle brand lasts longest?");
+  for (let i = 0; i < 100 && prompts.length === beforeRules; i++) await side.waitForTimeout(100);
+  check(
+    "standing instructions go with the next request",
+    prompts.slice(beforeRules).some((text) => text.includes("HOW I WANT YOU TO WORK") && text.includes("Always show prices in rupees."))
+  );
+
+  // 8. A shared Skill can be imported from a link; it is saved, not run.
+  await ctx.route("https://skills.example.test/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/markdown", body: "---\nname: Order masala tea\n---\n1. Open the shop\n2. Add masala tea to the cart" })
+  );
+  const beforeImport = prompts.length;
+  await side.getByRole("button", { name: "Skills" }).click();
+  await side.getByRole("button", { name: "From a link" }).click();
+  await side.getByLabel("Link to a SKILL.md").fill("https://skills.example.test/tea/SKILL.md");
+  await side.getByRole("button", { name: "Import", exact: true }).click();
+  await waitText("Imported /", 10000);
+  check("a Skill imports from a link", (await sideText()).includes("Order masala tea"));
+  check("importing a Skill runs nothing", prompts.length === beforeImport);
   if (process.env.SHOT_DIR) await side.screenshot({ path: path.join(process.env.SHOT_DIR, "memory.png"), fullPage: true });
 } catch (error) {
   check("memory e2e ran without crashing", false, error instanceof Error ? error.stack : String(error));

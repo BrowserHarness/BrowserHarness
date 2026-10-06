@@ -360,3 +360,44 @@ export function parseSkillMd(text: string): ParsedSkillMd {
 }
 
 export const SKILLS_STORAGE_KEY = KEY;
+
+/**
+ * The address of the SKILL.md behind a link people share: a GitHub file or
+ * folder page becomes its raw file; any other https link is used as it is.
+ */
+export function skillFileUrl(link: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(link.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  if (url.hostname === "github.com") {
+    const [owner, repo, kind, ref, ...rest] = url.pathname.split("/").filter(Boolean);
+    if (!owner || !repo) return null;
+    if (kind === "blob" && ref && rest.length) return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${rest.join("/")}`;
+    if (kind === "tree" && ref) return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${[...rest, "SKILL.md"].join("/")}`;
+    if (!kind) return `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/SKILL.md`;
+    return null;
+  }
+  return url.toString();
+}
+
+/** Downloads a shared SKILL.md and reads it; nothing in it runs. */
+export async function fetchSkillMd(link: string, fetchImpl: typeof fetch = fetch): Promise<ParsedSkillMd> {
+  const address = skillFileUrl(link);
+  if (!address) return { ok: false, error: "Paste an https link to a SKILL.md file (a GitHub file or folder link works too)." };
+  let response: Response;
+  try {
+    response = await fetchImpl(address, { credentials: "omit", redirect: "follow", signal: AbortSignal.timeout(15_000) });
+  } catch {
+    return { ok: false, error: "Couldn't download that link." };
+  }
+  if (!response.ok) return { ok: false, error: `Couldn't download that link (${response.status}).` };
+  if (Number(response.headers.get("content-length") || 0) > 50_000) return { ok: false, error: "The file is too large for a Skill (50 KB at most)." };
+  if (/text\/html/i.test(response.headers.get("content-type") || "")) {
+    return { ok: false, error: "That link is a web page, not a SKILL.md file. Use the file's raw link." };
+  }
+  return parseSkillMd((await response.text()).slice(0, 50_001));
+}
