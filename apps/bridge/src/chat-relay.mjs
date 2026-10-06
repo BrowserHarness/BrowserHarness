@@ -15,6 +15,9 @@ export const CHAT_APP_NAMES = {
   email: "email"
 };
 
+export const VOICE_OFF =
+  "I got your voice note, but voice notes aren't turned on for this bot. Type the task instead, or turn them on at your computer: browserharness-bridge voice setup --url <speech-to-text service> --model <its model>";
+
 export const CHAT_HELP =
   "Send me a task, like “check my inbox for invoices” or “/your-skill size 9”, and I'll do it in Chrome on your computer and reply with the result. Anything that needs your approval waits for you there.";
 
@@ -27,16 +30,18 @@ export function clipMessage(text, max) {
  * The shared part of a chat bot.
  * send(chatId, text) sends a reply. runTask(text, { from, user }) resolves to
  * { ok, id } once Chrome accepted the task, or { ok: false, error }.
- * handle({ chatId, userId, userName, text }) takes one incoming message;
+ * handle({ chatId, userId, userName, text, voice }) takes one incoming message;
+ * voice() downloads a voice note ({ data, type, name }) and is only called for
+ * allowed people, then transcribe(audio) turns it into the task's words.
  * deliver(id, outcome) sends a finished task's result back; notify(text)
  * reaches every allowed account, at targetFor(userId) (default: the id itself).
  */
-export function createChatRelay({ app, allowedUserIds = [], send, runTask, help = CHAT_HELP, targetFor = async (userId) => userId }) {
+export function createChatRelay({ app, allowedUserIds = [], send, runTask, help = CHAT_HELP, targetFor = async (userId) => userId, transcribe = null }) {
   const allowed = new Set(allowedUserIds.map(String));
   const waiting = new Map();
 
-  async function handle({ chatId, userId, userName = "", text }) {
-    const task = String(text || "").trim();
+  async function handle({ chatId, userId, userName = "", text, voice = null }) {
+    let task = String(text || "").trim();
     const user = String(userId ?? "");
     if (!user || !allowed.has(user)) {
       await send(
@@ -44,6 +49,24 @@ export function createChatRelay({ app, allowedUserIds = [], send, runTask, help 
         `This BrowserHarness bot is private. If it's yours, run this on your computer to allow this ${CHAT_APP_NAMES[app]} account:\n\nbrowserharness-bridge ${app} allow ${user}`
       );
       return;
+    }
+    let heard = false;
+    if (!task && voice) {
+      if (!transcribe) {
+        await send(chatId, VOICE_OFF);
+        return;
+      }
+      try {
+        task = String(await transcribe(await voice())).trim();
+      } catch (error) {
+        await send(chatId, `I couldn't make out that voice note: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      if (!task) {
+        await send(chatId, "I couldn't hear any words in that voice note. Try again, or type the task.");
+        return;
+      }
+      heard = true;
     }
     if (!task || task === "/start" || task === "/help" || task.toLowerCase() === "help") {
       await send(chatId, help);
@@ -60,7 +83,7 @@ export function createChatRelay({ app, allowedUserIds = [], send, runTask, help 
       return;
     }
     waiting.set(accepted.id, chatId);
-    await send(chatId, `On it: ${task}`);
+    await send(chatId, heard ? `On it (from your voice note): ${task}` : `On it: ${task}`);
   }
 
   async function deliver(id, outcome) {

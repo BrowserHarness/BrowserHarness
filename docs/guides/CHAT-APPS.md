@@ -29,6 +29,28 @@ Discord, Slack, Signal) to a `/schedule` request, or pick **Also send results
 to** under History → Scheduled. The task still runs in Chrome on your computer,
 so Chrome and the Bridge need to be running at that time.
 
+## Voice notes
+Send your bot a voice note instead of typing. The Bridge turns it into words
+with a speech-to-text service you choose, runs the words as the task, and the
+bot replies "On it (from your voice note): …" so you can see what it heard.
+Only voice notes from accounts you allowed are ever downloaded.
+
+Any service with an OpenAI-style `/audio/transcriptions` address works: a
+hosted one with your own API key, or one running on your computer (then
+nothing leaves it). BrowserHarness never picks the service or the model for
+you:
+```
+browserharness-bridge voice setup --url https://your-service.example/v1 --model <its speech-to-text model> --key <your API key>
+```
+Add `--language en` (or another language code) if the service guesses wrong.
+Setup sends one second of silence to check the address, model and key. Plain
+`http://` only works for a service on this computer. `voice status` shows the
+settings without the key, and `voice off` turns voice notes off.
+
+Voice notes work in Telegram, Discord (direct messages), Slack (add the
+`files:read` scope), Mattermost, Matrix and Signal, up to 20 MB each. Replies
+are text.
+
 ## Discord
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications),
    choose **New Application**, give it a name, then open **Bot** and choose
@@ -52,7 +74,7 @@ ignores everything else said there. No special Discord permissions or
    `connections:write` scope. Copy it (it starts with `xapp-`). Socket Mode
    means nothing on your computer has to be reachable from the internet.
 3. **OAuth & Permissions → Bot Token Scopes**: add `chat:write`,
-   `im:history` and `app_mentions:read`.
+   `im:history` and `app_mentions:read` (and `files:read` for voice notes).
 4. **Event Subscriptions**: turn them on and subscribe to the bot events
    `message.im` and `app_mention`.
 5. **App Home**: turn on the Messages tab and allow people to send messages
@@ -143,5 +165,6 @@ misconfigured domain is ignored and noted in `browserharness-bridge logs`.
 - `browserharness-bridge <app> status`: the bot and the allowed accounts
 - `browserharness-bridge <app> allow <id>`: allow another account
 - `browserharness-bridge <app> off`: turn the bot off and forget its token
+- `browserharness-bridge voice setup|status|off`: voice notes (see above)
 
 `<app>` is `telegram`, `discord`, `slack`, `signal`, `mattermost`, `matrix` or `email`.

@@ -4,6 +4,7 @@
 // be reachable from the internet.
 import { WebSocket } from "ws";
 import { clipMessage, createChatRelay, pause } from "./chat-relay.mjs";
+import { downloadVoice } from "./voice.mjs";
 
 const DEFAULT_API = "https://slack.com/api";
 const MAX_MESSAGE = 3900;
@@ -29,9 +30,15 @@ export function slackApi({ botToken, appToken, apiBase = DEFAULT_API, fetchImpl 
   };
 }
 
+/** The voice clip shared in a message, if any. */
+export function slackAudio(event) {
+  return (event?.files || []).find((file) => (file.subtype === "slack_audio" || /^audio\//.test(file.mimetype || "")) && (file.url_private_download || file.url_private)) || null;
+}
+
 /** The task in an event, or null when the app should stay quiet. */
 export function slackTask(event) {
-  if (!event || event.bot_id || event.subtype || typeof event.text !== "string") return null;
+  // A voice clip arrives as a shared file.
+  if (!event || event.bot_id || (event.subtype && event.subtype !== "file_share") || typeof event.text !== "string") return null;
   if (event.type === "app_mention") return event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
   if (event.type === "message" && event.channel_type === "im") return event.text;
   return null;
@@ -44,10 +51,11 @@ export function createSlackRelay({
   apiBase = DEFAULT_API,
   fetchImpl = globalThis.fetch,
   runTask,
+  transcribe = null,
   log = () => undefined
 }) {
   const api = slackApi({ botToken, appToken, apiBase, fetchImpl });
-  const relay = createChatRelay({ app: "slack", allowedUserIds, runTask, send: (channel, text) => api.sendMessage(channel, text) });
+  const relay = createChatRelay({ app: "slack", allowedUserIds, runTask, transcribe, send: (channel, text) => api.sendMessage(channel, text) });
   let socket = null;
   let stopped = false;
   const seen = new Set();
@@ -60,7 +68,22 @@ export function createSlackRelay({
     if (seen.has(key)) return;
     seen.add(key);
     if (seen.size > 500) seen.delete(seen.values().next().value);
-    await relay.handle({ chatId: event.channel, userId: event.user, text });
+    const audio = slackAudio(event);
+    await relay.handle({
+      chatId: event.channel,
+      userId: event.user,
+      text,
+      // Slack files need the bot token (and the files:read scope) to download.
+      voice: audio
+        ? () =>
+            downloadVoice(audio.url_private_download || audio.url_private, {
+              headers: { authorization: `Bearer ${botToken}` },
+              type: audio.mimetype,
+              name: audio.name || "voice.webm",
+              fetchImpl
+            })
+        : null
+    });
   }
 
   /** One Socket Mode connection; resolves when it closes, with whether to try again. */

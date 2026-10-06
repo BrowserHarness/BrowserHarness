@@ -3,6 +3,7 @@
 // messages into tasks. Encrypted rooms can't be read by the bot, so its rooms
 // must have encryption off.
 import { clipMessage, createChatRelay, pause } from "./chat-relay.mjs";
+import { downloadVoice } from "./voice.mjs";
 
 const MAX_MESSAGE = 3900;
 
@@ -20,7 +21,21 @@ export function matrixApi({ homeserver, token, fetchImpl = globalThis.fetch }) {
     if (!response.ok) throw new Error(json.error || `Matrix ${pathname.split("?")[0]} failed (${response.status})`);
     return json;
   };
+  const auth = { authorization: `Bearer ${token}` };
   return {
+    /** Downloads an mxc:// file, trying the newer signed-in address first. */
+    download: async (mxc, { type, name }) => {
+      const [, serverName, mediaId] = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(String(mxc)) || [];
+      if (!serverName) throw new Error("it has no file");
+      const root = homeserver.replace(/\/+$/, "");
+      const where = `${encodeURIComponent(serverName)}/${encodeURIComponent(mediaId)}`;
+      try {
+        return await downloadVoice(`${root}/_matrix/client/v1/media/download/${where}`, { headers: auth, type, name, fetchImpl });
+      } catch (error) {
+        if (!/\((400|404)\)/.test(error.message)) throw error;
+        return downloadVoice(`${root}/_matrix/media/v3/download/${where}`, { headers: auth, type, name, fetchImpl });
+      }
+    },
     whoami: () => call("GET", "/account/whoami"),
     sync: (since, timeoutMs) =>
       call("GET", `/sync?timeout=${timeoutMs}${since ? `&since=${encodeURIComponent(since)}` : ""}`, undefined, timeoutMs + 15_000),
@@ -37,6 +52,10 @@ export function matrixMessages(sync, botId) {
   for (const [roomId, room] of Object.entries(sync?.rooms?.join || {})) {
     for (const event of room.timeline?.events || []) {
       if (event.type !== "m.room.message" || event.sender === botId) continue;
+      if (event.content?.msgtype === "m.audio" && typeof event.content.url === "string") {
+        out.push({ roomId, userId: event.sender, text: "", audio: { url: event.content.url, type: event.content.info?.mimetype || "audio/ogg", name: event.content.body || "voice.ogg" } });
+        continue;
+      }
       if (event.content?.msgtype !== "m.text" || typeof event.content.body !== "string") continue;
       out.push({ roomId, userId: event.sender, text: event.content.body });
     }
@@ -54,7 +73,7 @@ export function matrixInvites(sync, botId) {
   }));
 }
 
-export function createMatrixRelay({ homeserver, token, botId = "", allowedUserIds = [], fetchImpl = globalThis.fetch, runTask, pollTimeoutMs = 30_000, log = () => undefined }) {
+export function createMatrixRelay({ homeserver, token, botId = "", allowedUserIds = [], fetchImpl = globalThis.fetch, runTask, transcribe = null, pollTimeoutMs = 30_000, log = () => undefined }) {
   const api = matrixApi({ homeserver, token, fetchImpl });
   const allowed = new Set(allowedUserIds.map(String));
   const roomFor = new Map();
@@ -64,6 +83,7 @@ export function createMatrixRelay({ homeserver, token, botId = "", allowedUserId
     app: "matrix",
     allowedUserIds,
     runTask,
+    transcribe,
     send: (roomId, text) => api.sendMessage(roomId, text),
     targetFor: async (userId) => {
       if (!roomFor.has(userId)) roomFor.set(userId, (await api.createDm(userId)).room_id);
@@ -81,7 +101,10 @@ export function createMatrixRelay({ homeserver, token, botId = "", allowedUserId
     }
     for (const message of matrixMessages(sync, self)) {
       if (allowed.has(message.userId)) roomFor.set(message.userId, message.roomId);
-      await relay.handle({ chatId: message.roomId, userId: message.userId, text: message.text }).catch((error) => log(`matrix: ${error.message}`));
+      const { audio } = message;
+      await relay
+        .handle({ chatId: message.roomId, userId: message.userId, text: message.text, voice: audio ? () => api.download(audio.url, audio) : null })
+        .catch((error) => log(`matrix: ${error.message}`));
     }
   }
 

@@ -4,6 +4,7 @@
 // of direct messages and mentions with every bot.
 import { WebSocket } from "ws";
 import { clipMessage, createChatRelay, pause } from "./chat-relay.mjs";
+import { downloadVoice } from "./voice.mjs";
 
 const DEFAULT_API = "https://discord.com/api/v10";
 const DEFAULT_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
@@ -56,6 +57,7 @@ export function createDiscordRelay({
   botId: knownBotId = "",
   fetchImpl = globalThis.fetch,
   runTask,
+  transcribe = null,
   log = () => undefined
 }) {
   const api = discordApi(token, apiBase, fetchImpl);
@@ -63,6 +65,7 @@ export function createDiscordRelay({
     app: "discord",
     allowedUserIds,
     runTask,
+    transcribe,
     send: (channelId, text) => api.sendMessage(channelId, text),
     targetFor: async (userId) => (await api.openDm(userId)).id
   });
@@ -73,7 +76,14 @@ export function createDiscordRelay({
   async function handle(message) {
     const text = discordTask(message, botId);
     if (text === null) return;
-    await relay.handle({ chatId: message.channel_id, userId: message.author?.id, userName: message.author?.username || "", text });
+    const audio = (message.attachments || []).find((file) => String(file.content_type || "").startsWith("audio/"));
+    await relay.handle({
+      chatId: message.channel_id,
+      userId: message.author?.id,
+      userName: message.author?.username || "",
+      text,
+      voice: audio?.url ? () => downloadVoice(audio.url, { type: audio.content_type, name: audio.filename || "voice.ogg", fetchImpl }) : null
+    });
   }
 
   /** One gateway connection; resolves when it closes, with whether to try again. */
