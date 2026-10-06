@@ -32,6 +32,10 @@
   "side_panel": {
     "default_path": "sidepanel.html"
   },
+  "options_ui": {
+    "page": "settings.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_title": "Open BrowserHarness",
     "default_icon": {

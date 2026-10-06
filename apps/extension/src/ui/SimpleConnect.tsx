@@ -1,15 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
-  Alert,
   Autocomplete,
   Box,
   Button,
   CircularProgress,
-  Paper,
   Stack,
   TextField,
   Typography
 } from "@mui/material";
+import { MoreDetails, Note, RecommendedBadge, SettingsCard, StatusPill, Steps } from "./kit";
 import {
   PROVIDERS,
   type ProviderConfig,
@@ -104,27 +103,6 @@ export async function detectLocalModels(
   return found;
 }
 
-function Card({
-  title,
-  body,
-  children
-}: {
-  title: string;
-  body: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Stack spacing={1.25}>
-        <Typography variant="subtitle1">{title}</Typography>
-        <Typography variant="body2" color="text.secondary">
-          {body}
-        </Typography>
-        {children}
-      </Stack>
-    </Paper>
-  );
-}
 
 /** Searchable list of every model a service offers; nothing is preselected. */
 export function ModelChooser({
@@ -140,9 +118,8 @@ export function ModelChooser({
 }) {
   const [choice, setChoice] = useState<AccountModel | null>(null);
   return (
-    <Stack spacing={1}>
+    <Stack spacing={1.25}>
       <Autocomplete
-        size="small"
         options={models}
         value={choice}
         onChange={(_, value) => setChoice(value)}
@@ -152,22 +129,41 @@ export function ModelChooser({
           <TextField
             {...params}
             label={label}
-            placeholder={models.length > 8 ? "Type to search" : undefined}
+            placeholder={models.length > 8 ? "Type to search, for example “claude” or “gpt”" : "Choose one"}
+            helperText={`${models.length} to choose from`}
           />
         )}
-        noOptionsText="No matching model"
+        noOptionsText="Nothing matches. Try fewer letters."
       />
-      <Button
-        variant="contained"
-        disabled={disabled || !choice}
-        onClick={() => choice && onUse(choice.id)}
-      >
-        Use this model
-      </Button>
+      <Box>
+        <Button variant="contained" size="large" disabled={disabled || !choice} onClick={() => choice && onUse(choice.id)}>
+          Use this model
+        </Button>
+      </Box>
     </Stack>
   );
 }
 
+function Waiting({ children }: { children: ReactNode }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" role="status">
+      <CircularProgress size={16} />
+      <Typography variant="body2">{children}</Typography>
+    </Stack>
+  );
+}
+
+/** Shows how the last check went, in the colours of the copy rulebook. */
+export function TestResult({ state, message }: { state: "idle" | "testing" | "success" | "error"; message: string }) {
+  if (state === "testing") return <Waiting>{message}</Waiting>;
+  if (state === "success") return <Note kind={/can only chat/.test(message) ? "warning" : "success"}>{message}</Note>;
+  if (state === "error") return <Note kind="danger">{message}</Note>;
+  return null;
+}
+
+const appName = (provider: LocalProvider) => PROVIDERS[provider].label.replace(" (local)", "");
+
+/** The three easy ways to connect an AI. */
 export function SimpleConnect({
   onConnect,
   state,
@@ -183,6 +179,7 @@ export function SimpleConnect({
   const [address, setAddress] = useState("");
   const [openRouter, setOpenRouter] = useState<ProviderAccount | null>(null);
   const [openRouterModels, setOpenRouterModels] = useState<AccountModel[] | null>(null);
+  const [lastUsed, setLastUsed] = useState<"openrouter" | "local" | null>(null);
 
   const scan = async (extra?: string) => {
     setLocal(null);
@@ -195,7 +192,7 @@ export function SimpleConnect({
       setOpenRouterModels(await listAccountModels(account));
     } catch (err) {
       setOpenRouterModels([]);
-      setError(err instanceof Error ? err.message : "Could not load OpenRouter models.");
+      setError(err instanceof Error ? `Could not load the list of models: ${err.message}` : "Could not load the list of models.");
     }
   };
 
@@ -216,149 +213,169 @@ export function SimpleConnect({
     try {
       await task();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not connect.");
+      setError(err instanceof Error ? err.message : "Could not connect. Please try again.");
     } finally {
       setBusy(false);
     }
   };
 
   const working = busy || state === "testing";
+  const resultFor = (where: "openrouter" | "local") =>
+    lastUsed === where ? (
+      <>
+        {error && <Note kind="danger">{error}</Note>}
+        <TestResult state={state} message={message} />
+      </>
+    ) : null;
 
   return (
-    <Stack spacing={1.5}>
+    <Stack spacing={2.5}>
       <Box>
-        <Typography variant="h6">Connect your AI</Typography>
+        <Typography variant="h6" component="h2">
+          Connect your AI
+        </Typography>
         <Typography variant="body2" color="text.secondary">
-          Connect a service once, then pick any of its models here or from the model menu at the top of the chat.
+          Pick one of these. You only need one. After you choose a model, BrowserHarness checks that it really works
+          before saving it.
         </Typography>
       </Box>
 
-      <Card
+      <SettingsCard
         title="OpenRouter (recommended)"
-        body="Sign in once and use Claude, GPT, Gemini, Qwen, DeepSeek and hundreds of other models. You pay only for what you use, and there is no key to copy."
+        action={<RecommendedBadge label="Easiest" />}
+        intro="One sign-in gives you hundreds of AIs, like Claude, GPT and Gemini. You pay OpenRouter only for what you use. There is no key to copy."
       >
         {!openRouter ? (
-          <Button
-            variant="contained"
-            disabled={working}
-            onClick={() =>
-              void run(async () => {
-                const account = makeAccount("openrouter", await connectWithOpenRouter());
-                await saveAccount(account);
-                setOpenRouter(account);
-                await loadOpenRouterModels(account);
-              })
-            }
-          >
-            {working ? "Connecting…" : "Connect"}
-          </Button>
+          <>
+            <Steps
+              steps={[
+                <>Press Connect. A small OpenRouter window opens.</>,
+                <>Sign in (or make a free account) and press Authorize. Add a little credit there if it asks.</>,
+                <>Come back here and pick an AI from the list.</>
+              ]}
+            />
+            <Box>
+              <Button
+                variant="contained"
+                size="large"
+                disabled={working}
+                onClick={() => {
+                  setLastUsed("openrouter");
+                  void run(async () => {
+                    const account = makeAccount("openrouter", await connectWithOpenRouter());
+                    await saveAccount(account);
+                    setOpenRouter(account);
+                    await loadOpenRouterModels(account);
+                  });
+                }}
+              >
+                {working && lastUsed === "openrouter" ? "Connecting…" : "Connect"}
+              </Button>
+            </Box>
+          </>
         ) : openRouterModels === null ? (
-          <Stack direction="row" spacing={1} alignItems="center">
-            <CircularProgress size={16} />
-            <Typography variant="body2">Loading OpenRouter models…</Typography>
-          </Stack>
+          <Waiting>Loading the list of AIs from OpenRouter…</Waiting>
         ) : (
           <>
-            <Typography variant="body2">
-              Connected. Choose a model ({openRouterModels.length} available):
-            </Typography>
+            <StatusPill state="good">Your OpenRouter account is connected</StatusPill>
             <ModelChooser
               label="OpenRouter model"
               models={openRouterModels}
               disabled={working}
-              onUse={(model) =>
-                void run(() =>
-                  onConnect({ provider: "openrouter", apiKey: openRouter.apiKey, model })
-                )
-              }
+              onUse={(model) => {
+                setLastUsed("openrouter");
+                void run(() => onConnect({ provider: "openrouter", apiKey: openRouter.apiKey, model }));
+              }}
             />
+            <Note kind="tip" title="Not sure which one to pick?">
+              Choose a recent, well-known model from a big company, for example a newer Claude, GPT or Gemini. Bigger
+              models handle websites better. Cheaper “mini” or “flash” models are fine for simple tasks.
+            </Note>
           </>
         )}
-      </Card>
+        {resultFor("openrouter")}
+      </SettingsCard>
 
-      <Card
+      <SettingsCard
         title="ChatGPT"
-        body="Sign in with your ChatGPT account and use your plan. This needs OpenAI's approval for BrowserHarness, which is not in place yet."
+        intro="Sign in with your ChatGPT account and use your plan. This needs OpenAI's approval for BrowserHarness, which we are still waiting for."
       >
-        <Button variant="outlined" disabled>
-          Coming soon
-        </Button>
-      </Card>
+        <Box>
+          <Button variant="outlined" disabled>
+            Coming soon
+          </Button>
+        </Box>
+      </SettingsCard>
 
-      <Card
-        title="A model on this computer"
-        body="Free and private. Works with LM Studio or Ollama when their local server is running. Every model you have loaded is listed."
+      <SettingsCard
+        title="A free AI on this computer"
+        intro="Free and private: your requests never leave this computer. You need the LM Studio or Ollama app with a model downloaded, and a fairly powerful computer."
       >
-        {local === null && (
-          <Stack direction="row" spacing={1} alignItems="center">
-            <CircularProgress size={16} />
-            <Typography variant="body2">Looking for local models…</Typography>
-          </Stack>
-        )}
+        {local === null && <Waiting>Looking for LM Studio and Ollama on this computer…</Waiting>}
         {local?.map((server) => (
-          <Stack key={server.baseUrl} spacing={1}>
-            <Typography variant="body2">
-              {PROVIDERS[server.provider].label.replace(" (local)", "")} found at {server.baseUrl.replace(/\/v1$/, "")}
+          <Stack key={server.baseUrl} spacing={1.25}>
+            <StatusPill state={server.models.length ? "good" : "waiting"}>
+              {appName(server.provider)} found at {server.baseUrl.replace(/\/v1$/, "")}
               {` (${server.models.length} model${server.models.length === 1 ? "" : "s"})`}
-            </Typography>
+            </StatusPill>
             {server.models.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                No model is loaded. Load one in {PROVIDERS[server.provider].label.replace(" (local)", "")}, then check again.
+                No model is loaded yet. Load one in {appName(server.provider)}, then press Look again.
               </Typography>
             ) : (
               <ModelChooser
-                label={`${PROVIDERS[server.provider].label.replace(" (local)", "")} model`}
+                label={`${appName(server.provider)} model`}
                 models={server.models}
                 disabled={working}
-                onUse={(model) =>
-                  void run(() =>
-                    onConnect({
-                      provider: server.provider,
-                      apiKey: "",
-                      model,
-                      baseUrl: server.baseUrl
-                    })
-                  )
-                }
+                onUse={(model) => {
+                  setLastUsed("local");
+                  void run(() => onConnect({ provider: server.provider, apiKey: "", model, baseUrl: server.baseUrl }));
+                }}
               />
             )}
           </Stack>
         ))}
         {local && local.length === 0 && (
-          <Typography variant="body2">
-            No local model found. In LM Studio open the Developer tab and start the server, or run Ollama, then check again.
-          </Typography>
+          <Steps
+            steps={[
+              <>Install LM Studio (lmstudio.ai) or Ollama (ollama.com) and download a model in it.</>,
+              <>
+                In LM Studio, open the <strong>Developer</strong> tab and press <strong>Start Server</strong>. Ollama
+                starts on its own.
+              </>,
+              <>Press Look again below.</>
+            ]}
+          />
         )}
         {local !== null && (
-          <Stack direction="row" spacing={1} alignItems="flex-start">
-            <TextField
-              size="small"
-              label="Server address (optional)"
-              placeholder="http://127.0.0.1:1234"
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              sx={{ flex: 1 }}
-            />
-            <Button
-              size="small"
-              onClick={() => void run(() => scan(address.trim() || undefined))}
-              disabled={working}
-              sx={{ mt: 0.5 }}
-            >
-              Check again
-            </Button>
-          </Stack>
+          <MoreDetails summary="My AI app shows a different address">
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "flex-start" }}>
+              <TextField
+                size="small"
+                label="Server address (optional)"
+                placeholder="http://127.0.0.1:1234"
+                helperText="Copy it from your AI app, for example http://127.0.0.1:1234"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                sx={{ flex: 1 }}
+              />
+            </Stack>
+          </MoreDetails>
         )}
-      </Card>
-
-      {error && <Alert severity="error">{error}</Alert>}
-      {state === "success" && <Alert severity="success">{message}</Alert>}
-      {state === "error" && !error && <Alert severity="error">{message}</Alert>}
-      {state === "testing" && (
-        <Alert severity="info" icon={<CircularProgress size={18} />}>
-          {message}
-        </Alert>
-      )}
+        {local !== null && (
+          <Box>
+            <Button variant="outlined" onClick={() => {
+                setLastUsed("local");
+                void run(() => scan(address.trim() || undefined));
+              }}
+              disabled={working}
+            >
+              Look again
+            </Button>
+          </Box>
+        )}
+        {resultFor("local")}
+      </SettingsCard>
     </Stack>
   );
 }

@@ -106,7 +106,7 @@ export async function subscriptionComplete(
   if (!result?.ok) {
     throw new Error(
       result?.error?.message ||
-        "The subscription request failed. Check that the Local Agent Bridge is connected."
+        "The subscription request failed. Check that the helper app is running and paired (Settings → Helper app)."
     );
   }
 
@@ -148,7 +148,7 @@ export async function checkSubscriptionReady(
       ? {
           state: "bridge_offline",
           message:
-            "The Local Agent Bridge is not connected. Start it and turn it on in Settings → Local Agent Bridge."
+            "The helper app is not connected. Start it on your computer and pair it under Settings → Helper app."
         }
       : {
           state: "error",

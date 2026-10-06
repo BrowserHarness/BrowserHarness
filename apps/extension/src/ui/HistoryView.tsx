@@ -1,37 +1,25 @@
 import { useEffect, useState } from "react";
-import { BackIcon, ClearAllIcon } from "./icons";
-import {
-  Alert,
-  Box,
-  Button,
-  IconButton,
-  Paper,
-  Stack,
-  Tab,
-  Tabs,
-  TextField,
-  Typography
-} from "@mui/material";
+import { Box, Button, Paper, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
+import { Note, ScreenFrame, useConfirm } from "./kit";
 import { ScheduledView } from "./ScheduledView";
-import {
-  clearTaskHistory,
-  loadTaskHistory,
-  searchTaskHistory,
-  type TaskHistoryEntry
-} from "../runtime/history";
+import { clearTaskHistory, loadTaskHistory, searchTaskHistory, type TaskHistoryEntry } from "../runtime/history";
 
 export function HistoryView({
   onBack,
   onRunAgain,
-  initialTab = "past"
+  initialTab = "past",
+  embedded
 }: {
   onBack: () => void;
   onRunAgain?: (task: string) => void;
   initialTab?: "past" | "scheduled";
+  /** Inside Settings, where Scheduled tasks has its own page. */
+  embedded?: boolean;
 }) {
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setTab] = useState(embedded ? "past" : initialTab);
   const [entries, setEntries] = useState<TaskHistoryEntry[]>([]);
   const [query, setQuery] = useState("");
+  const [dialog, confirm] = useConfirm();
   const shown = searchTaskHistory(entries, query);
 
   const refresh = async () => {
@@ -43,70 +31,53 @@ export function HistoryView({
   }, []);
 
   const clear = async () => {
+    const ok = await confirm({
+      title: "Delete your task history?",
+      body: `All ${entries.length} past task${entries.length === 1 ? "" : "s"} and answers are deleted. Your Skills and settings stay. This can't be undone.`,
+      confirmLabel: "Delete history",
+      danger: true
+    });
+    if (!ok) return;
     await clearTaskHistory();
     await refresh();
   };
 
-  return (
-    <Box sx={{ minHeight: "100vh", p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} mb={2}>
-        <IconButton onClick={onBack} aria-label="Back to chat">
-          <BackIcon />
-        </IconButton>
-        <Typography variant="h6" sx={{ flex: 1 }}>
-          Task history
-        </Typography>
-        {tab === "past" && (
-          <IconButton
-            aria-label="Clear task history"
-            onClick={() => void clear()}
-            disabled={entries.length === 0}
-          >
-            <ClearAllIcon />
-          </IconButton>
-        )}
-      </Stack>
-
-      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
-        <Tab value="past" label="Past tasks" sx={{ minHeight: 36 }} />
-        <Tab value="scheduled" label="Scheduled" sx={{ minHeight: 36 }} />
-      </Tabs>
-
-      {tab === "scheduled" ? (
-        <ScheduledView />
-      ) : (
-      <>
+  const past = (
+    <Stack spacing={2}>
       {entries.length > 0 && (
         <TextField
           fullWidth
-          size="small"
           label="Search past tasks"
+          placeholder="For example: kettle, flight, invoice"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          sx={{ mb: 2 }}
         />
       )}
-
       {entries.length === 0 ? (
-        <Alert severity="info">
-          No local task history yet. BrowserHarness keeps up to 500 completed tasks on this device.
-        </Alert>
+        <Note kind="info" title="Nothing here yet">
+          Tasks you finish are listed here, so you can find them again or run them again. The last 500 are kept, on this
+          computer only.
+        </Note>
       ) : shown.length === 0 ? (
-        <Alert severity="info">No past task matches “{query}”.</Alert>
+        <Note kind="info">No past task matches “{query}”.</Note>
       ) : (
-        <Stack spacing={1.5}>
+        <Stack spacing={1.25}>
           {shown.map((entry) => (
-            <Paper variant="outlined" sx={{ p: 1.5 }} key={entry.id}>
+            <Paper variant="outlined" sx={{ p: 1.75 }} key={entry.id}>
               <Stack spacing={0.75}>
-                <Typography variant="subtitle2">{entry.task}</Typography>
-                <Typography variant="body2">{entry.result}</Typography>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="subtitle2" fontSize="0.98rem">
+                  {entry.task}
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                  {entry.result}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
                   {new Date(entry.timestamp).toLocaleString()}
                   {entry.url ? ` · ${entry.url}` : ""}
                 </Typography>
                 {onRunAgain && (
                   <Box>
-                    <Button size="small" onClick={() => onRunAgain(entry.task)}>
+                    <Button size="small" variant="outlined" onClick={() => onRunAgain(entry.task)}>
                       Run again
                     </Button>
                   </Box>
@@ -116,13 +87,31 @@ export function HistoryView({
           ))}
         </Stack>
       )}
-
-      </>
+      {entries.length > 0 && (
+        <Box>
+          <Button color="error" variant="outlined" aria-label="Clear task history" onClick={() => void clear()}>
+            Delete all history
+          </Button>
+        </Box>
       )}
+    </Stack>
+  );
 
-      <Button sx={{ mt: 2 }} onClick={onBack}>
-        Back to chat
-      </Button>
-    </Box>
+  return (
+    <ScreenFrame
+      title="Task history"
+      embedded={embedded}
+      onBack={onBack}
+      intro={embedded ? "Everything you asked BrowserHarness to do, newest first. Kept on this computer only." : undefined}
+    >
+      {dialog}
+      {!embedded && (
+        <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
+          <Tab value="past" label="Past tasks" sx={{ minHeight: 36 }} />
+          <Tab value="scheduled" label="Scheduled" sx={{ minHeight: 36 }} />
+        </Tabs>
+      )}
+      {tab === "scheduled" ? <ScheduledView /> : past}
+    </ScreenFrame>
   );
 }

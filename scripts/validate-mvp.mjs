@@ -37,6 +37,7 @@ const requiredTools = [
 const requiredFiles = [
   "apps/extension/dist/manifest.json",
   "apps/extension/dist/sidepanel.html",
+  "apps/extension/dist/settings.html",
   "apps/extension/dist/assets/service-worker.js",
   "apps/extension/dist/assets/content.js",
   "apps/extension/dist/icons/icon16.png",
@@ -49,7 +50,7 @@ const requiredFiles = [
   "apps/extension/src/runtime/history.ts",
   "apps/extension/src/content/adapters/google-docs.ts",
   "apps/extension/src/ui/HistoryView.tsx",
-  "apps/extension/src/ui/MvpSettingsSections.tsx",
+  "apps/extension/src/ui/settings/SettingsShell.tsx",
   "docs/release/PRIVACY.md",
   "docs/release/TERMS.md",
   "docs/release/SUPPORT.md",

@@ -169,7 +169,7 @@ try {
   check("a changed fact replaces the old one", known.includes("I live in Mumbai") && !known.includes("I live in Pune") && known.includes("My name is Priya"), known.join("; "));
   await side.getByRole("button", { name: "About me" }).click();
   await side.getByTestId("about-me-fact").first().waitFor({ timeout: 5000 });
-  check("the About me screen explains past conversations and /recall", (await sideText()).includes("remembers your past conversations"));
+  check("the About me screen explains past conversations and /recall", (await sideText()).includes("remembers your past tasks") && (await sideText()).includes("/recall"));
 
   // 7. Standing instructions go with every request; a password in them is refused.
   const instructions = side.getByLabel("Your instructions");

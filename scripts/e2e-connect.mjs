@@ -75,6 +75,7 @@ try {
   await side.setViewportSize({ width: 430, height: 1200 });
   await side.goto(`chrome-extension://${extId}/sidepanel.html`);
   await side.getByRole("button", { name: "Settings" }).first().click();
+  await side.getByRole("button", { name: /^Your AI/ }).click();
   await side.getByText("Connect your AI").waitFor({ timeout: 10000 });
 
   const body0 = await side.locator("body").innerText();
@@ -91,14 +92,16 @@ try {
     check("both loaded models are offered, embeddings are not", offered.includes("deepseek-v4-flash-0731") && offered.includes("qwen2.5-7b-instruct") && !offered.includes("text-embedding-nomic"), offered.join(" | "));
     await side.getByRole("option", { name: "deepseek-v4-flash-0731" }).click();
     await side.getByRole("button", { name: "Use this model" }).first().click();
-    await side.getByText(/^Saved\./).first().waitFor({ timeout: 30000 }).catch(() => {});
+    await side.getByText(/^All set\./).first().waitFor({ timeout: 30000 }).catch(() => {});
     if (process.env.SHOT_DIR) await side.screenshot({ path: path.join(process.env.SHOT_DIR, "connect-local.png") });
-    check("the picked local model is tested and saved", /Saved\. Chat ✓/.test(await side.locator("body").innerText()));
+    check("the picked local model is tested and saved", /All set\. This AI can chat with you and use your browser/.test(await side.locator("body").innerText()));
 
+    await side.getByRole("button", { name: "All settings" }).click();
     await side.getByRole("button", { name: "Back to chat" }).click();
     const menuButton = side.getByRole("button", { name: "Choose model" });
     await menuButton.waitFor({ timeout: 10000 });
-    check("chat header shows the picked model", (await menuButton.innerText()).includes("deepseek-v4-flash-0731"));
+    await side.waitForFunction(() => document.querySelector("[aria-label=\"Choose model\"]")?.textContent?.includes("deepseek-v4-flash-0731"), null, { timeout: 5000 }).catch(() => {});
+    check("chat header shows the picked model", (await menuButton.innerText()).includes("deepseek-v4-flash-0731"), await menuButton.innerText());
     await menuButton.click();
     await side.getByRole("button", { name: "qwen2.5-7b-instruct" }).waitFor({ timeout: 10000 }).catch(() => {});
     const menuText = await side.locator(".MuiPopover-paper").innerText().catch(() => "");
@@ -118,40 +121,41 @@ try {
     check("the reply comes from the model picked in the menu, thinking hidden", chat.includes("Reply from qwen2.5-7b-instruct") && !chat.includes("planning the reply"), `models called: ${[...new Set(seenModels)].join(", ")}`);
 
     await side.getByRole("button", { name: "Settings" }).first().click();
+    await side.getByRole("button", { name: /^Your AI/ }).click();
     await side.getByText("Connect your AI").waitFor({ timeout: 10000 });
   } else {
     console.log("SKIP local auto-detect and model menu (port 1234 busy)");
   }
 
-  await side.getByRole("button", { name: /Advanced/ }).click();
-  await side.getByText("Add connection").waitFor({ timeout: 10000 });
-
-  const providerBox = side.getByRole("combobox", { name: "Provider" });
+  await side.getByRole("button", { name: "Show more ways to connect" }).click();
+  const providerBox = side.getByRole("combobox", { name: "Service" });
+  await providerBox.waitFor({ timeout: 10000 });
   await providerBox.click();
   const options = (await side.getByRole("option").allInnerTexts()).map((t) => t.trim());
   check(
     "provider list offers subscriptions and local models",
-    ["Claude subscription", "ChatGPT subscription", "LM Studio (local)", "Ollama (local)"].every((o) => options.includes(o)),
+    ["Claude subscription", "ChatGPT subscription", "LM Studio (on this computer)", "Ollama (on this computer)"].every((o) => options.includes(o)),
     options.join(" | ")
   );
 
   await side.getByRole("option", { name: "Claude subscription" }).click();
   await side.getByText("Not ready yet.").waitFor({ timeout: 10000 }).catch(() => {});
   const subText = await side.locator("body").innerText();
-  check("subscription shows a plain readiness message when the Bridge is off", subText.includes("Not ready yet.") && subText.includes("Local Agent Bridge is not connected"));
+  check("subscription shows a plain readiness message when the Bridge is off", subText.includes("Not ready yet.") && subText.includes("The helper app is not connected"));
 
   await providerBox.click();
-  await side.getByRole("option", { name: "LM Studio (local)" }).click();
-  check("local provider needs no API key field", (await side.getByLabel("API key").count()) === 0);
-  await side.getByLabel("Base URL").fill(`http://localhost:${port}/v1`);
-  await side.getByText(/models loaded/).waitFor({ timeout: 15000 }).catch(() => {});
-  check("models load from the local server", (await side.locator("body").innerText()).includes("3 models loaded"));
+  await side.getByRole("option", { name: "LM Studio (on this computer)" }).click();
+  check("local provider needs no API key field", (await side.getByLabel("Secret key (API key)").count()) === 0);
+  await side.getByLabel("Server address", { exact: true }).fill(`http://localhost:${port}/v1`);
+  await side.getByText(/models found/).waitFor({ timeout: 15000 }).catch(() => {});
+  check("models load from the local server", (await side.locator("body").innerText()).includes("3 models found"));
 
-  await side.getByRole("combobox", { name: "Model", exact: true }).fill("qwen2.5-7b-instruct");
-  await side.getByRole("button", { name: /Test Chat \+ Agent/ }).click();
-  await side.getByText(/^Saved\./).waitFor({ timeout: 30000 }).catch(() => {});
+  await side.getByRole("combobox", { name: "Model name", exact: true }).fill("qwen2.5-7b-instruct");
+  await side.getByRole("button", { name: "Test and save", exact: true }).click();
+  await side.getByText(/All set\./).last().waitFor({ timeout: 30000 }).catch(() => {});
   const saved = await side.locator("body").innerText();
-  check("local model passes the Chat and Agent checks and is saved", /Saved\. Chat ✓/.test(saved) && /Agent ✓/.test(saved), saved.match(/Saved\.[^\n]*/)?.[0] || "");
+  check("local model passes the Chat and Agent checks and is saved", /All set\. This AI can chat with you and use your browser/.test(saved), saved.match(/(All set|Saved|This AI)[^\n]*/)?.[0] || "");
+  check("the tested AI is listed with plain abilities", saved.includes("AIs you've tested") && saved.includes("Can use the browser"));
   check("no Authorization header was sent to the local server", seenAuth.length > 0 && seenAuth.every((a) => a === ""));
 } finally {
   await ctx.close();

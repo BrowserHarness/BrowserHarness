@@ -229,7 +229,7 @@ async function start(config, created, cliPath = THIS_FILE, { quiet = false } = {
       ? {
           pairing_token: config.token,
           note:
-            "Next: press Pair in BrowserHarness (Settings → Coding agents), then run: browserharness-bridge pair"
+            "Next: press Pair in BrowserHarness (Settings → Helper app), then run: browserharness-bridge pair"
         }
       : {})
   });
@@ -796,7 +796,7 @@ async function askLine(question) {
 }
 
 const PAIR_HELP =
-  "In Chrome, open BrowserHarness → Settings → Coding agents and press Pair. It shows a 6-digit code.";
+  "In Chrome, open BrowserHarness → Settings → Helper app and press Pair. It shows a 6-digit code.";
 
 // How to run this program again from a terminal.
 function commandHint(cliPath = THIS_FILE) {

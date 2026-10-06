@@ -92,6 +92,7 @@ import {
   loadSiteGrants,
   normalizeGrantHost,
   saveSiteGrants,
+  SITE_GRANTS_KEY,
   type SiteGrant
 } from "../settings/site-grants";
 import { Markdown } from "./Markdown";
@@ -156,7 +157,8 @@ import {
   type WorkflowRecordingEvent,
   type WorkflowRecordingSummary
 } from "../runtime/workflows";
-import { SettingsView } from "./SettingsView";
+import { SettingsShell, type SectionId } from "./settings/SettingsShell";
+import { PENDING_PROMPT_KEY, takePendingPrompt } from "./settings/handoff";
 import { ModelMenu } from "./ModelMenu";
 import { HistoryView } from "./HistoryView";
 import { saveTaskHistoryEntry } from "../runtime/history";
@@ -195,6 +197,14 @@ export function App() {
     const asked = new URLSearchParams(location.search).get("view");
     return asked === "scheduled" ? "history" : asked === "skills" || asked === "memory" || asked === "history" ? asked : "chat";
   });
+  const [settingsSection, setSettingsSection] = useState<SectionId | undefined>(undefined);
+  const openSettings = (section?: SectionId) => {
+    setSettingsSection(section);
+    setView("settings");
+  };
+  // A request sent from the big Settings tab, waiting for the chat to be ready.
+  const [queuedRun, setQueuedRun] = useState<string | null>(null);
+  const [contextReady, setContextReady] = useState(false);
   const [historyTab, setHistoryTab] = useState<"past" | "scheduled">(() =>
     new URLSearchParams(location.search).get("view") === "scheduled" ? "scheduled" : "past"
   );
@@ -238,6 +248,7 @@ export function App() {
     }
     setPrimary(primaryConnection);
     setFallback(fallbackConnection);
+    setContextReady(true);
   };
 
   useEffect(() => {
@@ -503,7 +514,7 @@ export function App() {
         }
         await saveScheduledTask(item);
         addAssistantMessage(
-          `Scheduled: **${item.task}**\n\n${describeSchedule(item.schedule)}. Next run ${new Date(item.next_run_at).toLocaleString([], { weekday: "long", hour: "numeric", minute: "2-digit" })}. It runs in its own background tab while Chrome is open, and anything that needs your approval waits for you.${item.deliver_to ? ` Each result also goes to ${CHAT_APP_LABELS[item.deliver_to]} (through the Bridge).` : ""} See it under History → Scheduled.`
+          `Scheduled: **${item.task}**\n\n${describeSchedule(item.schedule)}. Next run ${new Date(item.next_run_at).toLocaleString([], { weekday: "long", hour: "numeric", minute: "2-digit" })}. It runs in its own background tab while Chrome is open, and anything that needs your approval waits for you.${item.deliver_to ? ` Each result also goes to ${CHAT_APP_LABELS[item.deliver_to]} (through the helper app).` : ""} See it under History → Scheduled.`
         );
         return;
       }
@@ -527,11 +538,35 @@ export function App() {
   const approvalHost = useRef("");
   const siteGrants = useRef<SiteGrant[]>([]);
   useEffect(() => {
-    void loadSiteGrants()
-      .then((items) => {
-        siteGrants.current = items;
-      })
-      .catch(() => undefined);
+    const load = () =>
+      void loadSiteGrants()
+        .then((items) => {
+          siteGrants.current = items;
+        })
+        .catch(() => undefined);
+    load();
+    // A website removed in Settings must ask again right away.
+    const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === "local" && SITE_GRANTS_KEY in changes) load();
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, []);
+
+  useEffect(() => {
+    const take = async () => {
+      const pending = await takePendingPrompt().catch(() => null);
+      if (!pending) return;
+      setView("chat");
+      if (pending.run) setQueuedRun(pending.text);
+      else setPrompt(pending.text);
+    };
+    void take();
+    const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === "session" && changes[PENDING_PROMPT_KEY]?.newValue) void take();
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
   }, []);
 
   const approvalMode = useRef<ApprovalMode>("risky");
@@ -930,7 +965,7 @@ export function App() {
     // A model the user picked from the model menu may not have been checked
     // yet: try it. Only send them to settings when nothing usable is chosen.
     if (!primary || !hasCredentials(primary) || !primary.model) {
-      setView("settings");
+      openSettings("ai");
       return;
     }
 
@@ -1182,8 +1217,35 @@ export function App() {
     setRunning(false);
   };
 
+  useEffect(() => {
+    if (!queuedRun || !contextReady || running) return;
+    const text = queuedRun;
+    setQueuedRun(null);
+    void runTask(text);
+  }, [queuedRun, contextReady, running]);
+
   if (view === "settings") {
-    return <SettingsView onBack={() => setView("chat")} />;
+    return (
+      <SettingsShell
+        mode="panel"
+        initialSection={settingsSection}
+        onClose={() => setView("chat")}
+        actions={{
+          runTask: (text) => {
+            setView("chat");
+            void runTask(text);
+          },
+          fillPrompt: (text) => {
+            setPrompt(text);
+            setView("chat");
+          },
+          replay: (workflow) => {
+            setView("chat");
+            void replayWorkflow(workflow);
+          }
+        }}
+      />
+    );
   }
 
   const commandSuggestions = slashSuggestions(prompt, skills, siteCommands);
@@ -1272,7 +1334,7 @@ export function App() {
           <ModelMenu
             current={primary}
             onChanged={refreshContext}
-            onManage={() => setView("settings")}
+            onManage={() => openSettings("ai")}
           />
           <Tooltip title="Skills">
             <IconButton
@@ -1304,7 +1366,7 @@ export function App() {
           <Tooltip title="Settings">
             <IconButton
               size="small"
-              onClick={() => setView("settings")}
+              onClick={() => openSettings()}
               aria-label="Settings"
             >
               <SettingsIcon />

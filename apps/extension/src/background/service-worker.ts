@@ -167,10 +167,14 @@ import {
   type TaskSession
 } from "./task-sessions";
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   void chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(() => undefined);
+  // First install: open the welcome page, which walks through connecting an AI.
+  if (details.reason === "install") {
+    void chrome.tabs.create({ url: chrome.runtime.getURL("settings.html#home") }).catch(() => undefined);
+  }
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: QUICK_EXPLAIN_MENU_ID,
