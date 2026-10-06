@@ -21,6 +21,31 @@ export const VOICE_OFF =
 export const CHAT_HELP =
   "Send me a task, like “check my inbox for invoices” or “/your-skill size 9”, and I'll do it in Chrome on your computer and reply with the result. Anything that needs your approval waits for you there.\n\n/status: what's running and coming up\n/stop: stop what you started here\n/schedule every weekday at 8am …: a scheduled task\n/schedules: your scheduled tasks (/unschedule 2 turns one off)";
 
+// People who messaged a bot but aren't allowed yet, newest last, so Settings
+// in Chrome can offer an Allow button instead of a command.
+const strangers = new Map();
+
+function noteStranger(app, id, name) {
+  const key = `${app}:${id}`;
+  strangers.delete(key);
+  strangers.set(key, { app, id, name: String(name || "").slice(0, 80), at: new Date().toISOString() });
+  while (strangers.size > 20) strangers.delete(strangers.keys().next().value);
+}
+
+/** Who is waiting to be allowed, for one app. */
+export function waitingStrangers(app) {
+  return [...strangers.values()].filter((entry) => entry.app === app);
+}
+
+/** Forgets a waiting person (once allowed, or when the app is turned off). */
+export function forgetStranger(app, id) {
+  if (id === undefined) {
+    for (const entry of waitingStrangers(app)) strangers.delete(`${app}:${entry.id}`);
+  } else {
+    strangers.delete(`${app}:${id}`);
+  }
+}
+
 /** Cuts a reply to what the app accepts. */
 export function clipMessage(text, max) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -35,6 +60,7 @@ export function clipMessage(text, max) {
  * allowed people, then transcribe(audio) turns it into the task's words.
  * deliver(id, outcome) sends a finished task's result back; notify(text)
  * reaches every allowed account, at targetFor(userId) (default: the id itself).
+ * allow(ids) replaces who may use the bot.
  */
 export function createChatRelay({ app, allowedUserIds = [], send, runTask, help = CHAT_HELP, targetFor = async (userId) => userId, transcribe = null }) {
   const allowed = new Set(allowedUserIds.map(String));
@@ -44,9 +70,10 @@ export function createChatRelay({ app, allowedUserIds = [], send, runTask, help 
     let task = String(text || "").trim();
     const user = String(userId ?? "");
     if (!user || !allowed.has(user)) {
+      if (user) noteStranger(app, user, userName);
       await send(
         chatId,
-        `This BrowserHarness bot is private. If it's yours, run this on your computer to allow this ${CHAT_APP_NAMES[app]} account:\n\nbrowserharness-bridge ${app} allow ${user}`
+        `This BrowserHarness bot is private. If it's yours, open BrowserHarness in Chrome, go to Settings, then Phone & chat apps, and press Allow next to this ${CHAT_APP_NAMES[app]} account.\n\nOr run this on your computer:\n\nbrowserharness-bridge ${app} allow ${user}`
       );
       return;
     }
@@ -105,7 +132,13 @@ export function createChatRelay({ app, allowedUserIds = [], send, runTask, help 
     return sent;
   }
 
-  return { app, handle, deliver, notify };
+  /** Changes who may use the bot, without restarting it. */
+  function allow(ids) {
+    allowed.clear();
+    for (const id of ids) allowed.add(String(id));
+  }
+
+  return { app, handle, deliver, notify, allow };
 }
 
 /** Waits, unless stopped first. */

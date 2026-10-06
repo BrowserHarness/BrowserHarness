@@ -42,6 +42,7 @@ let currentSettings: BridgeSettings | null = null;
 let handler: BridgeCommandHandler | null = null;
 const pendingMcp = new Map<string, PendingMcpRequest>();
 const pendingLlm = new Map<string, PendingMcpRequest>();
+const pendingChat = new Map<string, PendingMcpRequest>();
 
 function clearTimers() {
   if (heartbeatTimer !== undefined) {
@@ -80,6 +81,14 @@ function disconnect() {
     });
   }
   pendingLlm.clear();
+  for (const pending of pendingChat.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({
+      ok: false,
+      error: { code: "BRIDGE_DISCONNECTED", message: "The helper app disconnected before the chat app was set up" }
+    });
+  }
+  pendingChat.clear();
 
   if (socket) {
     const existing = socket;
@@ -152,13 +161,14 @@ async function handleMessage(raw: MessageEvent) {
   }
 
   if (
-    value.type === "llm_result" &&
+    (value.type === "llm_result" || value.type === "chat_result") &&
     typeof value.id === "string"
   ) {
-    const pending = pendingLlm.get(value.id);
+    const pendingFor = value.type === "llm_result" ? pendingLlm : pendingChat;
+    const pending = pendingFor.get(value.id);
     if (!pending) return;
     clearTimeout(pending.timer);
-    pendingLlm.delete(value.id);
+    pendingFor.delete(value.id);
     const errorValue = value.error as
       | { code?: unknown; message?: unknown }
       | undefined;
@@ -171,11 +181,13 @@ async function handleMessage(raw: MessageEvent) {
               code:
                 typeof errorValue?.code === "string"
                   ? errorValue.code
-                  : "LLM_FAILED",
+                  : value.type === "llm_result"
+                    ? "LLM_FAILED"
+                    : "CHAT_SETUP_FAILED",
               message:
                 typeof errorValue?.message === "string"
                   ? errorValue.message
-                  : "Subscription request failed"
+                  : "The helper app couldn't finish that"
             }
           }
     );
@@ -461,6 +473,43 @@ export async function requestBridgeLlm(
               ? error.message
               : "Could not send the subscription request"
         }
+      });
+    }
+  });
+}
+
+export type BridgeChatAction = "status" | "setup" | "allow" | "remove" | "off";
+
+/**
+ * Ask the helper app to set up a chat app (Telegram, Slack, …), allow or
+ * remove a person, or turn an app off. Tokens go to the helper app only.
+ */
+export async function requestBridgeChat(
+  action: BridgeChatAction,
+  args: Record<string, unknown>,
+  timeoutMs = 60_000
+): Promise<BridgeRpcResult> {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !currentSettings?.enabled) {
+    return {
+      ok: false,
+      error: { code: "BRIDGE_DISCONNECTED", message: "Connect the helper app (Settings → Helper app) first" }
+    };
+  }
+  const id = crypto.randomUUID();
+  return new Promise<BridgeRpcResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingChat.delete(id);
+      resolve({ ok: false, error: { code: "CHAT_REQUEST_TIMEOUT", message: "The helper app took too long to answer" } });
+    }, timeoutMs) as unknown as number;
+    pendingChat.set(id, { resolve, timer });
+    try {
+      socket?.send(JSON.stringify({ type: "chat_request", id, action, args }));
+    } catch (error) {
+      clearTimeout(timer);
+      pendingChat.delete(id);
+      resolve({
+        ok: false,
+        error: { code: "BRIDGE_DISCONNECTED", message: error instanceof Error ? error.message : "Could not reach the helper app" }
       });
     }
   });

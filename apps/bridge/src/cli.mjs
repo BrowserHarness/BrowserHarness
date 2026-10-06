@@ -25,6 +25,7 @@ import { createMattermostRelay, mattermostApi } from "./mattermost.mjs";
 import { createMatrixRelay, matrixApi } from "./matrix.mjs";
 import { createEmailRelay, hostPort, openImap, providerFor, sendSmtp } from "./email.mjs";
 import { CHAT_APP_NAMES } from "./chat-relay.mjs";
+import { createChatManager } from "./chat-manager.mjs";
 import { createTranscriber, silentWav, voiceServiceUrl } from "./voice.mjs";
 import { createSetupServer, pairingMessage } from "./setup-page.mjs";
 import {
@@ -135,7 +136,19 @@ async function waitForState(config, expectedRunning, timeoutMs = 5000) {
 async function serve(config) {
   await mkdir(LOG_DIR, { recursive: true });
   const mcpManager = createMcpClientManager();
-  let chatApps = [];
+  const runTask = (text, meta) =>
+    bridge
+      .sendCommand({ session: meta.from, title: CHAT_APP_NAMES[meta.from], action: "remote_task", args: { text, from: meta.from } })
+      .then((result) => (result.ok ? { ok: true, id: result.data.id, reply: result.data.reply } : result))
+      .catch((error) => ({ ok: false, error: { message: error.message } }));
+  const chats = createChatManager({
+    specs: CHAT_APPS,
+    load: async () => (await ensureConfig()).config,
+    save: saveConfig,
+    createApp: (app, settings) => createChatApp(app, settings, runTask, voiceTranscriber(settings, chatLog)),
+    isSetUp: isChatAppSetUp,
+    inviteUrl: (app, current) => (app === "discord" ? discordInviteUrl(current.bot_id) : undefined)
+  });
   const bridge = createBridgeServer({
     host: config.host,
     port: config.port,
@@ -143,24 +156,19 @@ async function serve(config) {
     allowRemote: config.allow_remote === true,
     llmManager: createLlmAdapterManager(),
     mcpManager,
-    chatApps: () => chatApps.map((relay) => relay.app),
+    chatApps: () => chats.relays().map((relay) => relay.app),
+    chatManager: chats,
     onExtensionEvent: async (message) => {
       if (message.type === "chat_notify") {
-        const relay = chatApps.find((candidate) => candidate.app === message.app);
+        const relay = chats.relays().find((candidate) => candidate.app === message.app);
         await relay?.notify(message.text).catch((error) => process.stderr.write(`${message.app}: ${error.message}\n`));
         return;
       }
-      for (const relay of chatApps) await relay.deliver(message.id, message).catch(() => undefined);
+      for (const relay of chats.relays()) await relay.deliver(message.id, message).catch(() => undefined);
     }
   });
   const address = await bridge.listen();
-
-  chatApps = startChatApps(config, (text, meta) =>
-    bridge
-      .sendCommand({ session: meta.from, title: CHAT_APP_NAMES[meta.from], action: "remote_task", args: { text, from: meta.from } })
-      .then((result) => (result.ok ? { ok: true, id: result.data.id, reply: result.data.reply } : result))
-      .catch((error) => ({ ok: false, error: { message: error.message } }))
-  );
+  chats.start(config);
 
   await writeFile(PID_FILE, `${process.pid}\n`);
   await writeFile(
@@ -176,7 +184,7 @@ async function serve(config) {
   });
 
   const shutdown = async () => {
-    for (const relay of chatApps) relay.stop();
+    chats.stopAll();
     await bridge.close().catch(() => undefined);
     await Promise.all([
       rm(PID_FILE, { force: true }),
@@ -455,101 +463,54 @@ async function restartIfRunning(config) {
   return false;
 }
 
-/** Starts a bot for each chat app that is set up. */
-function startChatApps(config, runTask) {
-  const log = (line) => process.stderr.write(`${line}\n`);
-  const relays = [];
-  let transcribe = null;
-  if (config.voice?.model) {
-    try {
-      transcribe = createTranscriber({ url: config.voice.url, model: config.voice.model, apiKey: config.voice.key || "", language: config.voice.language || "" });
-    } catch (error) {
-      log(`voice notes: ${error.message}`);
-    }
+/** Turns voice notes into words, when voice notes are set up. */
+function voiceTranscriber(config, log) {
+  if (!config.voice?.model) return null;
+  try {
+    return createTranscriber({ url: config.voice.url, model: config.voice.model, apiKey: config.voice.key || "", language: config.voice.language || "" });
+  } catch (error) {
+    log(`voice notes: ${error.message}`);
+    return null;
   }
-  const { telegram, discord, slack, signal } = config;
-  if (telegram?.token) {
-    relays.push(createTelegramRelay({ token: telegram.token, allowedUserIds: telegram.allowed_user_ids || [], apiBase: telegram.api_base, runTask, transcribe, log }));
+}
+
+const chatLog = (line) => process.stderr.write(`${line}\n`);
+
+/** The bot for one chat app, or null when it isn't set up. Not started yet. */
+function createChatApp(app, config, runTask, transcribe, log = chatLog) {
+  const current = config[app];
+  const allowedUserIds = current?.allowed_user_ids || [];
+  if (app === "telegram" && current?.token) {
+    return createTelegramRelay({ token: current.token, allowedUserIds, apiBase: current.api_base, runTask, transcribe, log });
   }
-  if (discord?.token) {
-    relays.push(
-      createDiscordRelay({
-        token: discord.token,
-        botId: discord.bot_id,
-        allowedUserIds: discord.allowed_user_ids || [],
-        apiBase: discord.api_base,
-        gatewayUrl: discord.gateway_url,
-        runTask,
-        transcribe,
-        log
-      })
-    );
+  if (app === "discord" && current?.token) {
+    return createDiscordRelay({
+      token: current.token,
+      botId: current.bot_id,
+      allowedUserIds,
+      apiBase: current.api_base,
+      gatewayUrl: current.gateway_url,
+      runTask,
+      transcribe,
+      log
+    });
   }
-  if (slack?.bot_token && slack?.app_token) {
-    relays.push(
-      createSlackRelay({
-        botToken: slack.bot_token,
-        appToken: slack.app_token,
-        allowedUserIds: slack.allowed_user_ids || [],
-        apiBase: slack.api_base,
-        runTask,
-        transcribe,
-        log
-      })
-    );
+  if (app === "slack" && current?.bot_token && current?.app_token) {
+    return createSlackRelay({ botToken: current.bot_token, appToken: current.app_token, allowedUserIds, apiBase: current.api_base, runTask, transcribe, log });
   }
-  if (signal?.number) {
-    relays.push(createSignalRelay({
-        number: signal.number,
-        command: signal.command,
-        dataDir: signal.data_dir,
-        allowedUserIds: signal.allowed_user_ids || [],
-        runTask,
-        transcribe,
-        log
-      }));
+  if (app === "signal" && current?.number) {
+    return createSignalRelay({ number: current.number, command: current.command, dataDir: current.data_dir, allowedUserIds, runTask, transcribe, log });
   }
-  const { mattermost, matrix, email } = config;
-  if (mattermost?.token) {
-    relays.push(
-      createMattermostRelay({
-        server: mattermost.server,
-        token: mattermost.token,
-        botId: mattermost.bot_id,
-        botName: mattermost.bot,
-        allowedUserIds: mattermost.allowed_user_ids || [],
-        runTask,
-        transcribe,
-        log
-      })
-    );
+  if (app === "mattermost" && current?.token) {
+    return createMattermostRelay({ server: current.server, token: current.token, botId: current.bot_id, botName: current.bot, allowedUserIds, runTask, transcribe, log });
   }
-  if (matrix?.token) {
-    relays.push(
-      createMatrixRelay({
-        homeserver: matrix.homeserver,
-        token: matrix.token,
-        botId: matrix.bot,
-        allowedUserIds: matrix.allowed_user_ids || [],
-        runTask,
-        transcribe,
-        log
-      })
-    );
+  if (app === "matrix" && current?.token) {
+    return createMatrixRelay({ homeserver: current.homeserver, token: current.token, botId: current.bot, allowedUserIds, runTask, transcribe, log });
   }
-  if (email?.password) {
-    relays.push(
-      createEmailRelay({
-        ...emailSettings(email),
-        allowedUserIds: email.allowed_user_ids || [],
-        pollSeconds: Math.max(5, Number(email.poll_seconds) || 30),
-        runTask,
-        log
-      })
-    );
+  if (app === "email" && current?.password) {
+    return createEmailRelay({ ...emailSettings(current), allowedUserIds, pollSeconds: Math.max(5, Number(current.poll_seconds) || 30), runTask, log });
   }
-  for (const relay of relays) relay.start();
-  return relays;
+  return null;
 }
 
 /** Where an email bot reads and sends mail; plain connections only to this computer. */
@@ -565,15 +526,40 @@ function emailSettings(email) {
 
 const isChatAppSetUp = (current) => Boolean(current.token || current.bot_token || current.number || current.password);
 
+/** Stops setup when a detail is missing. */
+function need(spec, ...values) {
+  if (values.some((value) => !value || String(value).startsWith("--"))) {
+    throw Object.assign(new Error(`Usage: browserharness-bridge ${spec.usage}`), { code: "MISSING_DETAILS" });
+  }
+}
+
+/** The setup details typed after a chat app's setup command. */
+function chatSetupInput() {
+  const given = process.argv[4];
+  const positional = given && !given.startsWith("--") ? given : undefined;
+  return {
+    token: option("token") || positional,
+    bot_token: option("bot-token"),
+    app_token: option("app-token"),
+    server: option("server"),
+    homeserver: option("homeserver"),
+    address: option("address"),
+    password: option("password"),
+    imap: option("imap"),
+    smtp: option("smtp"),
+    number: option("number") || positional,
+    command: option("command")
+  };
+}
+
 /** What each chat app needs: how to check it, what an account id looks like. */
 const CHAT_APPS = {
   telegram: {
     usage: "telegram setup --token <token from @BotFather>",
     idPattern: /^\d+$/,
     idHint: "your Telegram user id",
-    async setup(current) {
-      const token = option("token") || process.argv[4];
-      if (!token || token.startsWith("--")) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+    async setup(current, { token }) {
+      need(this, token);
       const me = await telegramApi(token, current.api_base).getMe();
       return {
         settings: { token, bot: me.username },
@@ -585,9 +571,8 @@ const CHAT_APPS = {
     usage: "discord setup --token <bot token from the Discord Developer Portal>",
     idPattern: /^\d+$/,
     idHint: "your Discord user id",
-    async setup(current) {
-      const token = option("token") || process.argv[4];
-      if (!token || token.startsWith("--")) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+    async setup(current, { token }) {
+      need(this, token);
       const me = await discordApi(token, current.api_base).getMe();
       return {
         settings: { token, bot: me.username, bot_id: me.id },
@@ -603,10 +588,8 @@ const CHAT_APPS = {
     usage: "slack setup --bot-token <xoxb-…> --app-token <xapp-…>",
     idPattern: /^[UW][A-Z0-9]+$/,
     idHint: "your Slack member id",
-    async setup(current) {
-      const botToken = option("bot-token");
-      const appToken = option("app-token");
-      if (!botToken || !appToken) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+    async setup(current, { bot_token: botToken, app_token: appToken }) {
+      need(this, botToken, appToken);
       const api = slackApi({ botToken, appToken, apiBase: current.api_base });
       const me = await api.authTest();
       await api.openConnection();
@@ -620,10 +603,10 @@ const CHAT_APPS = {
     usage: "mattermost setup --server <https://your.mattermost.server> --token <bot access token>",
     idPattern: /^[a-z0-9]{26}$/,
     idHint: "your Mattermost user id (the bot tells you)",
-    async setup(current) {
-      const server = option("server") || current.server;
-      const token = option("token");
-      if (!server || !token) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+    async setup(current, input) {
+      const server = input.server || current.server;
+      const { token } = input;
+      need(this, server, token);
       const me = await mattermostApi({ server, token }).getMe();
       return {
         settings: { server, token, bot: me.username, bot_id: me.id },
@@ -635,10 +618,10 @@ const CHAT_APPS = {
     usage: "matrix setup --homeserver <https://matrix.example.org> --token <the bot account's access token>",
     idPattern: /^@[^:\s]+:\S+$/,
     idHint: "your Matrix id, like @you:matrix.org",
-    async setup(current) {
-      const homeserver = option("homeserver") || current.homeserver;
-      const token = option("token");
-      if (!homeserver || !token) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+    async setup(current, input) {
+      const homeserver = input.homeserver || current.homeserver;
+      const { token } = input;
+      need(this, homeserver, token);
       const me = await matrixApi({ homeserver, token }).whoami();
       return {
         settings: { homeserver, token, bot: me.user_id },
@@ -653,14 +636,16 @@ const CHAT_APPS = {
     usage: "email setup --address <the bot's mailbox> --password <app password> [--imap host:993] [--smtp host:465]",
     idPattern: /^[^@\s]+@[^@\s]+\.[^@\s]+$/,
     idHint: "your email address",
-    async setup(current) {
-      const address = option("address") || current.address;
-      const password = option("password");
+    async setup(current, input) {
+      const address = input.address || current.address;
+      const { password } = input;
+      need(this, address, password);
       const known = providerFor(address);
-      const imap = option("imap") || current.imap || known?.imap;
-      const smtp = option("smtp") || current.smtp || known?.smtp;
-      if (!address || !password) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
-      if (!imap || !smtp) throw new Error(`I don't know the mail servers for ${address}. Add --imap host:993 --smtp host:465 from your provider's help page.`);
+      const imap = input.imap || current.imap || known?.imap;
+      const smtp = input.smtp || current.smtp || known?.smtp;
+      if (!imap || !smtp) {
+        throw Object.assign(new Error(`I don't know the mail servers for ${address}. Add --imap host:993 --smtp host:465 from your provider's help page.`), { code: "EMAIL_SERVERS_UNKNOWN" });
+      }
       const settings = { address, password, imap, smtp, ...(current.secure === false ? { secure: false } : {}) };
       const check = emailSettings(settings);
       const box = await openImap({ ...check.imap, user: address, password });
@@ -676,10 +661,10 @@ const CHAT_APPS = {
     usage: "signal setup --number <the bot's number, like +15551234567> [--command <path to signal-cli>]",
     idPattern: SIGNAL_ID,
     idHint: "your phone number with country code, like +15551234567",
-    async setup(current) {
-      const number = option("number") || process.argv[4];
-      const command = option("command") || current.command || "signal-cli";
-      if (!number || !SIGNAL_ID.test(number) || !number.startsWith("+")) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+    async setup(current, input) {
+      const number = String(input.number || "").replace(/[\s()-]/g, "");
+      const command = input.command || current.command || "signal-cli";
+      need(this, SIGNAL_ID.test(number) && number.startsWith("+") ? number : "");
       const version = await runSignalCli(command, ["--version"]);
       return {
         settings: { number, command },
@@ -698,7 +683,7 @@ async function chatCommand(app, config, args) {
   const name = CHAT_APP_NAMES[app];
   const isSetUp = isChatAppSetUp(current);
   if (mode === "setup") {
-    const { settings, report } = await spec.setup(current);
+    const { settings, report } = await spec.setup(current, chatSetupInput());
     const next = { ...config, [app]: { ...current, ...settings, allowed_user_ids: current.allowed_user_ids || [] } };
     await saveConfig(next);
     print({ [app]: true, ...report, restarted: await restartIfRunning(next) });
