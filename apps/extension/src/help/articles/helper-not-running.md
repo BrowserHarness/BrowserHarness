@@ -18,8 +18,8 @@ summary: "BrowserHarness looked for the helper app and nothing answered."
 
 ## How to fix it
 1. If you haven't installed it, follow **Set up the helper app**.
-2. If you have, open a terminal and type `browserharness-bridge start`.
-3. In **Settings → Helper app**, press **Pair** again.
+2. If you have, double-click **Install BrowserHarness Helper** again. It starts the helper app.
+3. In **Settings → Helper app**, press **Pair** again if it asks.
 
 ## Related
 - [[knowledge/help/set-up-helper-app]]

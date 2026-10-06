@@ -16,11 +16,9 @@ summary: "It was paired before but isn't reachable right now."
 The helper app was paired, but it isn't running right now, so chat apps, subscriptions and coding tools can't work.
 
 ## How to fix it
-1. Open a terminal and type `browserharness-bridge start`.
-2. Wait a few seconds. BrowserHarness reconnects by itself, and **Settings → Helper app** shows **Connected and working**.
-3. If it doesn't, press **Pair** again.
-
-Type `browserharness-bridge status` to see whether it is running.
+1. Double-click **Install BrowserHarness Helper** again. It starts the helper app and keeps your pairing.
+2. Wait a few seconds. BrowserHarness reconnects by itself, and **Settings → Helper app** shows **Connected**.
+3. If it doesn't, press **Pair** again and type the code on the setup page.
 
 ## Related
 - [[knowledge/help/helper-not-running]]

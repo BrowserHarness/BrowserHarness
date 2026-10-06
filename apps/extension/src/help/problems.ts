@@ -274,7 +274,7 @@ export function diagnoseHelper(issue: HelperIssue, error?: unknown): Problem {
       reason: "BrowserHarness looked for the helper app on this computer, but it didn't answer. It isn't installed yet, or it was stopped.",
       fixes: [
         "If you haven't yet, install it with the steps above.",
-        "If you installed it before, open a terminal and type: browserharness-bridge start",
+        "If you installed it before, double-click Install BrowserHarness Helper again. It starts the helper app.",
         "Press Pair again."
       ],
       guide: "helper-not-running",
@@ -285,7 +285,11 @@ export function diagnoseHelper(issue: HelperIssue, error?: unknown): Problem {
     return {
       title: "The helper app isn't connected",
       reason: "It was paired before, but it isn't running right now, so BrowserHarness can't reach it.",
-      fixes: ["Open a terminal and type: browserharness-bridge start", "Wait a few seconds. It reconnects by itself.", "If it still doesn't, press Pair again."],
+      fixes: [
+        "Double-click Install BrowserHarness Helper again. It starts the helper app and keeps your pairing.",
+        "Wait a few seconds. It reconnects by itself.",
+        "If it still doesn't, press Pair again."
+      ],
       guide: "helper-not-connected",
       detail
     };
@@ -297,9 +301,9 @@ export function diagnoseHelper(issue: HelperIssue, error?: unknown): Problem {
     reason: expired
       ? "The code is only valid for 5 minutes, and it ran out."
       : declined
-        ? "The pairing was refused in the terminal."
+        ? "The pairing was refused on this computer."
         : "The helper app didn't accept the code.",
-    fixes: ["Press Pair to get a new code.", "Type all 6 numbers into the installer or terminal window, then press Enter."],
+    fixes: ["Press Pair to get a new code.", "Type all 6 numbers on the setup page in your browser, then press Connect."],
     guide: "helper-pairing-failed",
     detail
   };
