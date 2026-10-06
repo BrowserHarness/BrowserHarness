@@ -30,10 +30,12 @@ import {
   SettingsIcon,
   SkillsIcon,
   StopIcon,
+  RunIcon,
   WarningIcon,
   YesIcon
 } from "./icons";
-import { ProblemCard } from "./feedback";
+import { ProblemCard, useSaved } from "./feedback";
+import { PolishDialog } from "./PolishDialog";
 import { cantUseBrowser, diagnoseAi, type Problem } from "../help/problems";
 import { aiContext } from "./settings/connect-ai";
 import { SkillsView } from "./SkillsView";
@@ -120,10 +122,6 @@ import {
   parsePendingExplain
 } from "../runtime/quick-explain";
 import {
-  buildPolishPrompt,
-  cleanPolishedPrompt
-} from "../runtime/prompt-polish";
-import {
   Alert,
   AlertTitle,
   AppBar,
@@ -134,8 +132,8 @@ import {
   Divider,
   IconButton,
   Paper,
+  InputBase,
   Stack,
-  TextField,
   Toolbar,
   Tooltip,
   Typography
@@ -945,22 +943,26 @@ export function App() {
   };
 
   const [polishing, setPolishing] = useState(false);
-  const handlePolish = async () => {
-    const draft = prompt.trim();
-    if (!draft || polishing || !primary) return;
+  const saved = useSaved();
+  const askCurrentAi = async (text: string) => {
+    if (!primary) throw new Error("No AI is connected");
+    const routed = await directChatWithFallback(
+      primary,
+      fallback?.chatHealth.status === "healthy" ? fallback : null,
+      text
+    );
+    return routed.result;
+  };
+  const polishContext = () => {
+    const match = matchSkill(prompt, skills);
+    return {
+      page: /^https?:/.test(tab?.url || "") ? { title: tab?.title, url: tab?.url } : undefined,
+      skill: match ? { name: match.skill.slug, instructions: match.skill.instructions } : undefined
+    };
+  };
+  const handlePolish = () => {
+    if (!prompt.trim() || polishing || !primary) return;
     setPolishing(true);
-    try {
-      const routed = await directChatWithFallback(
-        primary,
-        fallback?.chatHealth.status === "healthy" ? fallback : null,
-        buildPolishPrompt(draft)
-      );
-      setPrompt(cleanPolishedPrompt(routed.result, draft));
-    } catch {
-      addAssistantMessage("Could not polish that request right now.");
-    } finally {
-      setPolishing(false);
-    }
   };
 
   const removeAttachment = async (id: string) => {
@@ -1330,23 +1332,6 @@ export function App() {
             <Box component="img" src="/icons/icon48.png" alt="BrowserHarness" title="BrowserHarness" sx={{ width: 28, height: 28, borderRadius: 1.25 }} />
           </Box>
 
-          {running && (
-            <Tooltip title="Stop current task">
-              <IconButton
-                size="small"
-                color="error"
-                onClick={handleStop}
-                aria-label="Stop current task"
-              >
-                <StopIcon />
-              </IconButton>
-            </Tooltip>
-          )}
-          <ModelMenu
-            current={primary}
-            onChanged={refreshContext}
-            onManage={() => openSettings("ai")}
-          />
           <Tooltip title="Skills">
             <IconButton
               size="small"
@@ -1671,13 +1656,16 @@ export function App() {
         )}
       </Box>
 
-      <Divider />
-      <Box sx={{ p: 1.5 }}>
+      <Box sx={{ px: 1.5, pb: 1.5, pt: 0.5, position: "sticky", bottom: 0, bgcolor: "background.default" }}>
         {running && (
-          <Stack direction="row" spacing={1} mb={1}>
+          <Stack direction="row" alignItems="center" spacing={1} mb={1} px={0.5}>
+            <CircularProgress size={14} />
+            <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+              {paused ? "Paused" : "Working on it…"}
+            </Typography>
             <Button
               size="small"
-              startIcon={<PauseIcon />}
+              startIcon={paused ? <RunIcon /> : <PauseIcon />}
               onClick={() =>
                 setPaused((value) => {
                   const next = !value;
@@ -1687,14 +1675,6 @@ export function App() {
               }
             >
               {paused ? "Resume" : "Pause"}
-            </Button>
-            <Button
-              size="small"
-              color="error"
-              startIcon={<StopIcon />}
-              onClick={handleStop}
-            >
-              Stop
             </Button>
           </Stack>
         )}
@@ -1741,92 +1721,135 @@ export function App() {
             ))}
           </Paper>
         )}
-        <TextField
-          multiline
-          maxRows={5}
-          fullWidth
-          placeholder="Ask BrowserHarness… (type / for commands)"
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Tab" && commandSuggestions.length > 0) {
-              event.preventDefault();
-              setPrompt(`/${commandSuggestions[0].name} `);
-              return;
-            }
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              void runTask();
-            }
+        <Paper
+          variant="outlined"
+          data-testid="composer"
+          sx={{
+            borderRadius: 4,
+            px: 1.25,
+            pt: 1,
+            pb: 0.75,
+            bgcolor: "background.paper",
+            transition: "border-color .15s, box-shadow .15s",
+            "&:focus-within": { borderColor: "primary.main", boxShadow: (theme) => `0 0 0 3px ${theme.palette.primary.main}22` }
           }}
-          slotProps={{
-            input: {
-              endAdornment: (
-                <Stack direction="row" alignItems="center">
-                  <Tooltip title="Attach files for uploads (up to 5 MB each)">
-                    <span>
-                      <IconButton
-                        size="small"
-                        onClick={() => fileInput.current?.click()}
-                        disabled={running}
-                        aria-label="Attach files"
-                      >
-                        <AddIcon />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                  <Tooltip title="Polish my request">
-                    <span>
-                      <IconButton
-                        size="small"
-                        onClick={() => void handlePolish()}
-                        disabled={!prompt.trim() || running || polishing}
-                        aria-label="Polish request"
-                      >
-                        <PolishIcon fontSize="small" />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                  {dictationAvailable() && (
-                    <Tooltip title={listening ? "Stop listening" : "Speak your request"}>
-                      <span>
-                        <IconButton
-                          size="small"
-                          color={listening ? "error" : "default"}
-                          onClick={handleDictate}
-                          disabled={running}
-                          aria-label={listening ? "Stop listening" : "Speak your request"}
-                        >
-                          <MicIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  )}
-                  <Tooltip
-                    title={recording ? "Finish teaching" : "Watch Me & Learn"}
-                  >
-                    <IconButton
-                      size="small"
-                      color={recording ? "error" : "default"}
-                      onClick={() => void handleRecord()}
-                      disabled={running}
-                      aria-label={recording ? "Finish recording" : "Record workflow"}
-                    >
-                      <RecordIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
+        >
+          <InputBase
+            multiline
+            minRows={2}
+            maxRows={8}
+            fullWidth
+            placeholder={primary ? "What should I do? Type / for your Skills" : "Connect an AI first, then tell me what to do"}
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Tab" && commandSuggestions.length > 0) {
+                event.preventDefault();
+                setPrompt(`/${commandSuggestions[0].name} `);
+                return;
+              }
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void runTask();
+              }
+            }}
+            inputProps={{ "aria-label": "Your request" }}
+            sx={{ px: 0.5, fontSize: "1rem", lineHeight: 1.5 }}
+          />
+          <Stack direction="row" alignItems="center" spacing={0.25} mt={0.5}>
+            <Tooltip title="Add files (up to 5 MB each)">
+              <span>
+                <IconButton size="small" onClick={() => fileInput.current?.click()} disabled={running} aria-label="Attach files">
+                  <AddIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title={primary ? "Improve my request: answer a few questions and your AI rewrites it" : "Connect an AI first"}>
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={handlePolish}
+                  disabled={!prompt.trim() || running || polishing || !primary}
+                  aria-label="Polish request"
+                >
+                  <PolishIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            {dictationAvailable() && (
+              <Tooltip title={listening ? "Stop listening" : "Speak your request"}>
+                <span>
                   <IconButton
                     size="small"
-                    color="primary"
-                    onClick={() => void runTask()}
-                    disabled={!prompt.trim() || running || recording}
-                    aria-label="Send"
+                    color={listening ? "error" : "default"}
+                    onClick={handleDictate}
+                    disabled={running}
+                    aria-label={listening ? "Stop listening" : "Speak your request"}
                   >
-                    <SendIcon />
+                    <MicIcon fontSize="small" />
                   </IconButton>
-                </Stack>
-              )
-            }
+                </span>
+              </Tooltip>
+            )}
+            <Tooltip title={recording ? "Finish teaching" : "Teach by showing: record what you do"}>
+              <span>
+                <IconButton
+                  size="small"
+                  color={recording ? "error" : "default"}
+                  onClick={() => void handleRecord()}
+                  disabled={running}
+                  aria-label={recording ? "Finish recording" : "Record workflow"}
+                >
+                  <RecordIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Box sx={{ flex: 1 }} />
+            <ModelMenu current={primary} onChanged={refreshContext} onManage={() => openSettings("ai")} above />
+            {running ? (
+              <Tooltip title="Stop current task">
+                <IconButton
+                  onClick={handleStop}
+                  aria-label="Stop current task"
+                  sx={{ bgcolor: "error.main", color: "#fff", width: 34, height: 34, "&:hover": { bgcolor: "error.dark" } }}
+                >
+                  <StopIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            ) : (
+              <Tooltip title="Send (Enter)">
+                <span>
+                  <IconButton
+                    onClick={() => void runTask()}
+                    disabled={!prompt.trim() || recording}
+                    aria-label="Send"
+                    sx={{
+                      bgcolor: "primary.main",
+                      color: "primary.contrastText",
+                      width: 34,
+                      height: 34,
+                      "&:hover": { bgcolor: "primary.dark" },
+                      "&.Mui-disabled": { bgcolor: "action.disabledBackground", color: "action.disabled" }
+                    }}
+                  >
+                    <SendIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+          </Stack>
+        </Paper>
+        <PolishDialog
+          open={polishing}
+          draft={prompt}
+          context={polishing ? polishContext() : {}}
+          ai={primary ? aiContext(primary) : {}}
+          ask={askCurrentAi}
+          onClose={() => setPolishing(false)}
+          onDone={(improved, answered) => {
+            setPolishing(false);
+            setPrompt(improved);
+            saved(answered ? `Request improved with your ${answered} answer${answered === 1 ? "" : "s"}. Check it, then press Send` : "Request improved. Check it, then press Send");
           }}
         />
       </Box>

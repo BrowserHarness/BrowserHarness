@@ -212,9 +212,9 @@ export function SavedNotes({ children }: { children: ReactNode }) {
         open={Boolean(note)}
         autoHideDuration={2200}
         onClose={() => setNote(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
         slots={{ transition: Slide }}
-        slotProps={{ transition: { direction: "up" } as object }}
+        slotProps={{ transition: { direction: "down" } as object }}
       >
         <Paper
           role="status"
