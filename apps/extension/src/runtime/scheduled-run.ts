@@ -64,7 +64,7 @@ export async function runUnattendedTask(
   const skill = command.kind === "skill" ? command.skill : null;
   const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
   const aboutMe =
-    (await userMemoryPrompt(spaceId)) +
+    (await userMemoryPrompt(spaceId, taskText)) +
     (skill ? "" : recallPrompt(recallFor(await loadTaskHistory(spaceId).catch(() => []), taskText)));
   const preferences = await loadPreferences();
 

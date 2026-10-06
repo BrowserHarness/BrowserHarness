@@ -22,6 +22,7 @@ import {
   clearGlobalAboutMe,
   isStorableFact,
   loadAboutMe,
+  loadEarlierFacts,
   loadGlobalAboutMe,
   moveFact,
   removeFact,
@@ -30,6 +31,14 @@ import {
   type FactScope
 } from "../runtime/about-me";
 import { loadPreferences, updatePreferences } from "../settings/preferences";
+import {
+  currentDecisions,
+  earlierDecisions,
+  recordDecision,
+  removeDecision,
+  reverseDecision,
+  type Decision
+} from "../runtime/decisions";
 import {
   instructionsFile,
   instructionsFromFile,
@@ -199,9 +208,142 @@ function FactRow({
   );
 }
 
+/** Choices made for a Space's work ("code home: GitHub"); a new one on the same thing replaces the old. */
+function DecisionsCard() {
+  const { active } = useSpaces();
+  const [current, setCurrent] = useState<Decision[]>([]);
+  const [before, setBefore] = useState<Decision[]>([]);
+  const [subject, setSubject] = useState("");
+  const [value, setValue] = useState("");
+  const [why, setWhy] = useState("");
+  const [everySpace, setEverySpace] = useState(false);
+  const [showBefore, setShowBefore] = useState(false);
+  const [error, setError] = useState("");
+  const saved = useSaved();
+
+  const refresh = async () => {
+    setCurrent(await currentDecisions());
+    setBefore(await earlierDecisions());
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, [active.id]);
+
+  const add = async () => {
+    const result = await recordDecision({ subject, value, rationale: why, scope: everySpace ? "global" : "space", by: "you" });
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setError("");
+    setSubject("");
+    setValue("");
+    setWhy("");
+    await refresh();
+    saved(result.replaced ? `Saved. “${result.replaced.value}” is kept as what you used before` : "Decision saved");
+  };
+
+  const row = (decision: Decision, earlierOne: boolean) => (
+    <Paper key={decision.id} variant="outlined" sx={{ p: 1, pl: 1.5 }} data-testid={earlierOne ? "earlier-decision" : "decision"}>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Typography
+          variant={earlierOne ? "body2" : "body1"}
+          color={earlierOne ? "text.secondary" : undefined}
+          sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+        >
+          <strong>{decision.subject}:</strong> {decision.value}
+          {decision.rationale ? ` (because ${decision.rationale})` : ""}
+          {decision.visibility === "all" ? " · every Space" : ""}
+          {earlierOne && decision.valid_until
+            ? ` · ${decision.status === "reversed" ? "taken back" : "replaced"} ${new Date(decision.valid_until).toLocaleDateString()}`
+            : ""}
+        </Typography>
+        {!earlierOne && (
+          <Tooltip title="No longer decided; kept under what you used before">
+            <Button
+              size="small"
+              aria-label={`Take back ${decision.subject}`}
+              onClick={async () => {
+                await reverseDecision(decision.id);
+                await refresh();
+                saved("Taken back");
+              }}
+            >
+              Take back
+            </Button>
+          </Tooltip>
+        )}
+        <Tooltip title="Delete">
+          <IconButton
+            size="small"
+            aria-label={`Delete decision ${decision.subject}`}
+            onClick={async () => {
+              await removeDecision(decision.id);
+              await refresh();
+            }}
+          >
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+    </Paper>
+  );
+
+  return (
+    <SettingsCard
+      title="Your decisions"
+      intro={
+        <>
+          Choices you made for the work in this Space, like where your code lives or which shop platform you use.
+          They are followed in every task here. When you change your mind, the new choice replaces the old one and the
+          old one is kept as history. You can also type <code>/decide code home: GitHub</code> in the chat.
+        </>
+      }
+    >
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+        <TextField fullWidth label="What it's about" placeholder="Code home" value={subject} onChange={(event) => setSubject(event.target.value)} />
+        <TextField fullWidth label="What you chose" placeholder="GitHub" value={value} onChange={(event) => setValue(event.target.value)} />
+      </Stack>
+      <TextField fullWidth label="Why (optional)" placeholder="It's where the team works" value={why} onChange={(event) => setWhy(event.target.value)} />
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+        <FormControlLabel
+          control={<Checkbox checked={everySpace} onChange={(event) => setEverySpace(event.target.checked)} />}
+          label="This decision is for every Space"
+        />
+        <Button variant="contained" onClick={() => void add()} disabled={!subject.trim() || !value.trim()}>
+          Save decision
+        </Button>
+      </Stack>
+      {error && <Note kind="warning">{error}</Note>}
+      {current.length === 0 ? (
+        <Note kind="info">No decisions saved yet.</Note>
+      ) : (
+        <Stack spacing={1} data-testid="decisions">
+          {current.map((decision) => row(decision, false))}
+        </Stack>
+      )}
+      {before.length > 0 && (
+        <Box>
+          <Button size="small" onClick={() => setShowBefore(!showBefore)} aria-expanded={showBefore}>
+            {showBefore ? "Hide earlier decisions" : `Earlier decisions (${before.length})`}
+          </Button>
+          {showBefore && (
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              {before.map((decision) => row(decision, true))}
+            </Stack>
+          )}
+        </Box>
+      )}
+    </SettingsCard>
+  );
+}
+
 export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?: boolean }) {
   const [facts, setFacts] = useState<AboutMeFact[]>([]);
   const [everywhere, setEverywhere] = useState<AboutMeFact[]>([]);
+  const [earlier, setEarlier] = useState<Array<AboutMeFact & { scope: FactScope }>>([]);
+  const [showEarlier, setShowEarlier] = useState(false);
   const [draft, setDraft] = useState("");
   const [draftEverywhere, setDraftEverywhere] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string; scope?: FactScope } | null>(null);
@@ -214,6 +356,12 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
   const refresh = async () => {
     setFacts(await loadAboutMe());
     setEverywhere(await loadGlobalAboutMe());
+    setEarlier(
+      [
+        ...(await loadEarlierFacts()).map((fact) => ({ ...fact, scope: "space" as const })),
+        ...(await loadEarlierFacts(undefined, "global")).map((fact) => ({ ...fact, scope: "global" as const }))
+      ].sort((a, b) => (b.valid_until ?? "").localeCompare(a.valid_until ?? ""))
+    );
   };
 
   useEffect(() => {
@@ -228,7 +376,8 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
       return;
     }
     setError("");
-    await addFacts([draft], "you", undefined, draftEverywhere ? "global" : "space");
+    // Added here without the tick: chosen for this Space, so a fact for every Space won't replace it.
+    await addFacts([draft], "you", undefined, draftEverywhere ? "global" : "space", { explicit: !draftEverywhere });
     setDraft("");
     await refresh();
     saved(draftEverywhere ? "Fact saved for every Space" : "Fact saved");
@@ -295,7 +444,8 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
           intro={
             <>
               Things like your city, your sizes or your favourite airline. You can also type <code>/remember</code> and
-              a fact in the chat. When something changes, the new fact replaces the old one. Your name, your city and
+              a fact in the chat. When something changes, the new fact replaces the old one, and the old one is kept
+              under <strong>What used to be true</strong>. Your name, your city and
               your language are used in every Space; everything else stays in the Space where you said it, unless you
               press <strong>Every Space</strong>.
             </>
@@ -351,7 +501,47 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
               </Box>
             </Stack>
           )}
+          {earlier.length > 0 && (
+            <Box>
+              <Button size="small" onClick={() => setShowEarlier(!showEarlier)} aria-expanded={showEarlier}>
+                {showEarlier ? "Hide what used to be true" : `What used to be true (${earlier.length})`}
+              </Button>
+              {showEarlier && (
+                <Stack spacing={1} sx={{ mt: 1 }} data-testid="earlier-facts">
+                  <Typography variant="body2" color="text.secondary">
+                    These were replaced by something newer. They are only used when you ask about the past, like
+                    “where did I live before?”.
+                  </Typography>
+                  {earlier.map((fact) => (
+                    <Paper key={fact.id} variant="outlined" sx={{ p: 1, pl: 1.5 }} data-testid="earlier-fact">
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography variant="body2" color="text.secondary" sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                          {fact.text}
+                          {fact.valid_until ? ` · until ${new Date(fact.valid_until).toLocaleDateString()}` : ""}
+                          {fact.scope === "global" ? " · every Space" : ""}
+                        </Typography>
+                        <Tooltip title="Delete">
+                          <IconButton
+                            size="small"
+                            aria-label={`Delete ${fact.text}`}
+                            onClick={async () => {
+                              await removeFact(fact.id, fact.scope);
+                              await refresh();
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Stack>
+              )}
+            </Box>
+          )}
         </SettingsCard>
+
+        <DecisionsCard />
 
         <InstructionsCard scope="space" />
         <InstructionsCard scope="global" />

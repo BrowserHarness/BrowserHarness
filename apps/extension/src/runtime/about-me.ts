@@ -8,7 +8,21 @@
 // call them, where they live, their language) or something said "across all
 // Spaces" goes to every Space; nothing else is promoted on its own.
 
-import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+import { resolveSpace } from "./memory-scope";
+import { keyForSpace, loadSpaces, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+
+/** Where a remembered thing came from. Only what is actually known is filled in. */
+export interface Provenance {
+  /** "you": the person said to keep it (/remember, the About you screen). "learned": picked up from their own message. */
+  by: "you" | "learned";
+  /** The Space it was said in (for a fact kept for every Space, too). */
+  space_id: string;
+  at: string;
+  /** The chat it was said in, when there was one. */
+  chat_id?: string;
+}
+
+export type FactStatus = "current" | "superseded" | "historical";
 
 export interface AboutMeFact {
   id: string;
@@ -17,6 +31,17 @@ export interface AboutMeFact {
   created_at: string;
   /** Facts about the same thing (where I live, my name) replace each other. */
   topic?: string;
+  /** Missing on facts saved before old facts were kept: those are current. */
+  status?: FactStatus;
+  valid_from?: string;
+  /** When it stopped being true (it was replaced). */
+  valid_until?: string;
+  /** The fact this one replaced, and the one that replaced it. */
+  supersedes?: string;
+  superseded_by?: string;
+  /** Said for this Space on purpose ("In this Space I am based in Delhi"), so a fact for every Space never replaces it. */
+  explicit_scope?: boolean;
+  provenance?: Provenance;
 }
 
 // Each Space keeps its own facts (see spaces.ts); facts for every Space live apart.
@@ -26,6 +51,8 @@ const GLOBAL_KEY = "browserharness.aboutMe.global";
 /** Where a fact applies: the Space it was said in, or every Space. */
 export type FactScope = "space" | "global";
 const MAX_FACTS = 60;
+/** Older facts kept per level, newest first. */
+const MAX_EARLIER = 100;
 const MAX_FACT = 200;
 
 /** Never stored, whoever asks. */
@@ -41,29 +68,53 @@ export function isStorableFact(text: string): boolean {
   return value.length >= 3 && !SENSITIVE.test(value);
 }
 
+/** True while a fact is still true (facts saved before history was kept count as true). */
+export function isCurrent(fact: { status?: string }): boolean {
+  return !fact.status || fact.status === "current";
+}
+
 /** The key for these facts: every Space, the given Space (a running task's), or the one in use. */
 async function factsKey(spaceId?: string, scope: FactScope = "space"): Promise<string> {
   if (scope === "global") return GLOBAL_KEY;
   return spaceId ? keyForSpace(KEY, spaceId) : spaceKey(KEY);
 }
 
-async function loadFrom(key: string): Promise<AboutMeFact[]> {
+/** Every fact kept at one level, true now or not. */
+async function loadAll(spaceId?: string, scope: FactScope = "space"): Promise<AboutMeFact[]> {
+  const key = await factsKey(spaceId, scope);
   const value = (await chrome.storage.local.get(key))[key];
   return Array.isArray(value) ? (value as AboutMeFact[]) : [];
 }
 
-/** This Space's own facts. */
+/** This Space's own facts that are true now. */
 export async function loadAboutMe(spaceId?: string): Promise<AboutMeFact[]> {
-  return loadFrom(await factsKey(spaceId));
+  return (await loadAll(spaceId)).filter(isCurrent);
 }
 
-/** Facts that go with every Space. */
+/** Facts that go with every Space and are true now. */
 export async function loadGlobalAboutMe(): Promise<AboutMeFact[]> {
-  return loadFrom(GLOBAL_KEY);
+  return (await loadAll(undefined, "global")).filter(isCurrent);
 }
 
+/** Facts at one level that are no longer true (replaced by a newer one), newest first. */
+export async function loadEarlierFacts(spaceId?: string, scope: FactScope = "space"): Promise<AboutMeFact[]> {
+  return (await loadAll(spaceId, scope)).filter((fact) => !isCurrent(fact));
+}
+
+/** Keeps the facts at one level: up to MAX_FACTS true now, and the newest older ones. */
 async function store(facts: AboutMeFact[], spaceId?: string, scope: FactScope = "space"): Promise<void> {
-  await chrome.storage.local.set({ [await factsKey(spaceId, scope)]: facts.slice(0, MAX_FACTS) });
+  const current = facts.filter(isCurrent).slice(0, MAX_FACTS);
+  const earlier = facts.filter((fact) => !isCurrent(fact)).slice(0, MAX_EARLIER);
+  await chrome.storage.local.set({ [await factsKey(spaceId, scope)]: [...current, ...earlier] });
+}
+
+function topicOf(fact: AboutMeFact): string | undefined {
+  return fact.topic ?? factTopic(fact.text);
+}
+
+/** Marks a fact as no longer true, keeping it and saying what replaced it. */
+function supersede(fact: AboutMeFact, by: AboutMeFact): AboutMeFact {
+  return { ...fact, status: "superseded", valid_until: by.created_at, superseded_by: by.id };
 }
 
 /**
@@ -83,92 +134,147 @@ export function factTopic(text: string): string | undefined {
   return undefined;
 }
 
+export interface AddFactOptions {
+  /** Said for this Space on purpose; see AboutMeFact.explicit_scope. */
+  explicit?: boolean;
+  chatId?: string;
+}
+
 /**
  * Adds facts that are new and safe to keep, to this Space (default) or to
- * every Space; a fact on the same topic as an older one replaces it. A fact
- * for every Space also replaces the same topic in the Space it was said in,
- * so the older, narrower one can't hide it. Returns the ones added.
+ * every Space. A fact on the same topic as an older one at the same level
+ * replaces it; the older one is kept as no longer true, never deleted.
+ *
+ * A fact for every Space also replaces the same topic in the Space it was
+ * said in, and, for who the person is (name, home, language), in every other
+ * Space, so an older, narrower fact can't hide it. A fact said for one Space
+ * on purpose ("In this Space I am based in Delhi") stays as that Space's own.
+ * Returns the ones added.
  */
 export async function addFacts(
   texts: string[],
   source: AboutMeFact["source"],
   spaceId?: string,
-  scope: FactScope = "space"
+  scope: FactScope = "space",
+  options: AddFactOptions = {}
 ): Promise<AboutMeFact[]> {
-  let facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
-  const known = new Set(facts.map((fact) => fact.text.toLowerCase()));
+  const saidIn = await resolveSpace(spaceId);
+  let facts = await loadAll(spaceId, scope);
+  const known = new Set(facts.filter(isCurrent).map((fact) => fact.text.toLowerCase()));
   const added: AboutMeFact[] = [];
   for (const text of texts) {
     const value = clean(text);
     if (!isStorableFact(value) || known.has(value.toLowerCase())) continue;
     known.add(value.toLowerCase());
     const topic = factTopic(value);
-    if (topic) facts = facts.filter((fact) => (fact.topic ?? factTopic(fact.text)) !== topic);
-    added.push({
+    const now = new Date().toISOString();
+    const fact: AboutMeFact = {
       id: crypto.randomUUID(),
       text: value,
       source,
-      created_at: new Date().toISOString(),
-      ...(topic ? { topic } : {})
-    });
+      created_at: now,
+      ...(topic ? { topic } : {}),
+      status: "current",
+      valid_from: now,
+      ...(scope === "space" && options.explicit ? { explicit_scope: true } : {}),
+      provenance: { by: source, space_id: saidIn, at: now, ...(options.chatId ? { chat_id: options.chatId } : {}) }
+    };
+    const replaced = topic ? facts.find((item) => isCurrent(item) && topicOf(item) === topic) : undefined;
+    if (replaced) {
+      fact.supersedes = replaced.id;
+      facts = facts.map((item) => (isCurrent(item) && topicOf(item) === topic ? supersede(item, fact) : item));
+    }
+    added.push(fact);
   }
   if (added.length) await store([...added, ...facts], spaceId, scope);
-  if (added.length && scope === "global") {
-    const topics = new Set(added.map((fact) => fact.topic).filter(Boolean));
-    const local = await loadAboutMe(spaceId);
-    const kept = local.filter((fact) => !topics.has(fact.topic ?? factTopic(fact.text)));
-    if (kept.length !== local.length) await store(kept, spaceId);
-  }
+  if (added.length && scope === "global") await supersedeNarrower(added, saidIn);
   return added;
+}
+
+/** Who the person is: true in every part of their life. */
+const IDENTITY_TOPICS = new Set(["name", "nickname", "home", "language"]);
+
+/**
+ * After facts for every Space arrive: older Space facts on the same topic,
+ * not said for their Space on purpose, are kept as no longer true. In the
+ * Space it was said in that is any topic; in other Spaces only who the person
+ * is, since only that was ever kept apart by accident (before every-Space
+ * facts existed).
+ */
+async function supersedeNarrower(added: AboutMeFact[], saidIn: string): Promise<void> {
+  const byTopic = new Map(added.filter((fact) => fact.topic).map((fact) => [fact.topic as string, fact]));
+  if (!byTopic.size) return;
+  const { spaces } = await loadSpaces();
+  const ids = new Set([saidIn, ...spaces.map((space) => space.id)]);
+  for (const id of ids) {
+    const facts = await loadAll(id);
+    let changed = false;
+    const next = facts.map((fact) => {
+      const topic = topicOf(fact);
+      const by = topic ? byTopic.get(topic) : undefined;
+      if (!by || !isCurrent(fact) || fact.explicit_scope) return fact;
+      if (id !== saidIn && !IDENTITY_TOPICS.has(topic as string)) return fact;
+      changed = true;
+      return supersede(fact, by);
+    });
+    if (changed) await store(next, id);
+  }
 }
 
 /** Adds facts each at its own level (see factScopeIn); returns the ones added, with their level. */
 export async function rememberFacts(
-  items: Array<{ text: string; scope: FactScope }>,
+  items: Array<{ text: string; scope: FactScope; explicit?: boolean }>,
   source: AboutMeFact["source"],
-  spaceId?: string
+  spaceId?: string,
+  chatId?: string
 ): Promise<Array<AboutMeFact & { scope: FactScope }>> {
   const added: Array<AboutMeFact & { scope: FactScope }> = [];
   for (const scope of ["global", "space"] as const) {
-    const texts = items.filter((item) => item.scope === scope).map((item) => item.text);
-    if (texts.length) added.push(...(await addFacts(texts, source, spaceId, scope)).map((fact) => ({ ...fact, scope })));
+    for (const explicit of [false, true]) {
+      const texts = items.filter((item) => item.scope === scope && Boolean(item.explicit) === explicit).map((item) => item.text);
+      if (!texts.length) continue;
+      const facts = await addFacts(texts, source, spaceId, scope, { explicit, chatId });
+      added.push(...facts.map((fact) => ({ ...fact, scope })));
+    }
   }
   return added;
 }
 
-/** Moves a fact between this Space and every Space. */
+/** Moves a fact between this Space and every Space (moving it to this Space is choosing it for this Space). */
 export async function moveFact(id: string, to: FactScope, spaceId?: string): Promise<boolean> {
   const from: FactScope = to === "global" ? "space" : "global";
-  const source = from === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
-  const fact = source.find((item) => item.id === id);
+  const source = await loadAll(spaceId, from);
+  const fact = source.find((item) => item.id === id && isCurrent(item));
   if (!fact) return false;
   await store(source.filter((item) => item.id !== id), spaceId, from);
-  await addFacts([fact.text], fact.source, spaceId, to);
+  await addFacts([fact.text], fact.source, spaceId, to, { explicit: to === "space" });
   return true;
 }
 
+/** Corrects a fact's wording (a typo, not a change in life): it stays one fact. */
 export async function updateFact(id: string, text: string, scope: FactScope = "space"): Promise<boolean> {
   const value = clean(text);
   if (!isStorableFact(value)) return false;
-  const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe();
+  const facts = await loadAll(undefined, scope);
   await store(facts.map((fact) => (fact.id === id ? { ...fact, text: value, source: "you" } : fact)), undefined, scope);
   return true;
 }
 
+/** Deletes one fact, true now or older, at the level it is shown. */
 export async function removeFact(id: string, scope: FactScope = "space"): Promise<void> {
-  const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe();
+  const facts = await loadAll(undefined, scope);
   await store(facts.filter((fact) => fact.id !== id), undefined, scope);
 }
 
 /**
- * Removes the facts that mention the words at one level: this Space (the
- * default, so a normal /forget never changes what other Spaces know) or every
- * Space. Returns how many went.
+ * Removes the facts that mention the words at one level, older ones too:
+ * this Space (the default, so a normal /forget never changes what other
+ * Spaces know) or every Space. Returns how many went.
  */
 export async function forgetMatching(words: string, spaceId?: string, scope: FactScope = "space"): Promise<number> {
   const needle = words.trim().toLowerCase();
   if (!needle) return 0;
-  const facts = scope === "global" ? await loadGlobalAboutMe() : await loadAboutMe(spaceId);
+  const facts = await loadAll(spaceId, scope);
   const kept = facts.filter((fact) => !fact.text.toLowerCase().includes(needle));
   if (kept.length !== facts.length) await store(kept, spaceId, scope);
   return facts.length - kept.length;
@@ -209,8 +315,6 @@ export async function clearGlobalAboutMe(): Promise<void> {
   await chrome.storage.local.remove(GLOBAL_KEY);
 }
 
-/** Who the person is: true in every part of their life. */
-const IDENTITY_TOPICS = new Set(["name", "nickname", "home", "language"]);
 /** Said for every Space on purpose. */
 const EVERY_SPACE =
   /\b(across|in|for) (all|every) (my |of my )?spaces?\b|\bin every space\b|\beverywhere\b|\bwherever i am\b|\bgenerally\b|\bin general\b|\bglobally\b|\bin all my (chats|work)\b/i;
@@ -229,12 +333,18 @@ export function factScopeIn(fact: string, said = ""): FactScope {
   return topic && IDENTITY_TOPICS.has(topic) ? "global" : "space";
 }
 
-/** Removes "across all Spaces," and the like from a fact, keeping what it says. */
+/** True when the words keep a fact to this Space on purpose ("For this project…", "In this Space…"). */
+export function saidForThisSpace(fact: string, said = ""): boolean {
+  return THIS_SPACE.test(`${said} ${fact}`);
+}
+
+/** Removes "across all Spaces," / "in this Space," and the like from a fact, keeping what it says. */
 export function withoutScopeWords(text: string): string {
   return clean(
     text
       .replace(/^\s*(across|in|for) (all|every) (my |of my )?spaces?,?\s*/i, "")
       .replace(/,?\s*(across|in|for) (all|every) (my |of my )?spaces?\b/i, "")
+      .replace(/^\s*(for|in) this (space|project),?\s*/i, "")
   ).replace(/^./, (first) => first.toUpperCase());
 }
 
@@ -268,14 +378,14 @@ export function factsInMessage(text: string): string[] {
 }
 
 /** The facts in a message, each with the level it belongs at (see factScopeIn). */
-export function scopedFactsInMessage(text: string): Array<{ text: string; scope: FactScope }> {
-  const found: Array<{ text: string; scope: FactScope }> = [];
+export function scopedFactsInMessage(text: string): Array<{ text: string; scope: FactScope; explicit?: boolean }> {
+  const found: Array<{ text: string; scope: FactScope; explicit?: boolean }> = [];
   for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
     for (const [pattern, render] of PATTERNS) {
       const match = pattern.exec(sentence);
       if (!match) continue;
       const fact = withoutScopeWords(render(match));
-      if (isStorableFact(fact) && !found.some((item) => item.text === fact)) found.push({ text: fact, scope: factScopeIn(fact, sentence) });
+      if (isStorableFact(fact) && !found.some((item) => item.text === fact)) found.push({ text: fact, scope: factScopeIn(fact, sentence), ...(saidForThisSpace(fact, sentence) ? { explicit: true } : {}) });
     }
   }
   return found.slice(0, 5);
@@ -330,6 +440,8 @@ export function parseExtractedFacts(reply: string): string[] {
  * fact wins (it is the narrower, more specific one).
  */
 export function aboutMeFor(globalFacts: AboutMeFact[], spaceFacts: AboutMeFact[]): AboutMeFact[] {
+  globalFacts = globalFacts.filter(isCurrent);
+  spaceFacts = spaceFacts.filter(isCurrent);
   const local = new Set(spaceFacts.map((fact) => fact.topic ?? factTopic(fact.text)).filter(Boolean));
   const seen = new Set(spaceFacts.map((fact) => fact.text.toLowerCase()));
   return [
@@ -349,6 +461,61 @@ export function aboutMePrompt(facts: AboutMeFact[]): string {
     "",
     "ABOUT ME (facts I saved; use them when they help with this request, never share them with websites unless the request needs it):",
     ...facts.slice(0, 30).map((fact) => `- ${fact.text}`)
+  ].join("\n");
+}
+
+/** A question about how things were before ("Where did I live before Mumbai?"). */
+export function asksAboutThePast(question: string): boolean {
+  return /\b(before|previous(ly)?|used to|earlier|former(ly)?|old|last (one|time)|originally|at first|did i (say|tell|live|use)|what did we|replaced?|changed? from|switched from)\b/i.test(question);
+}
+
+const TOPIC_WORDS: Record<string, string[]> = {
+  name: ["name"],
+  nickname: ["call", "called", "nickname"],
+  home: ["live", "lived", "living", "city", "town", "home", "based", "moved", "move"],
+  work: ["work", "worked", "job", "company", "employer", "office"],
+  currency: ["currency", "money", "price", "prices"],
+  language: ["language", "speak"],
+  timezone: ["timezone", "time zone"],
+  budget: ["budget"]
+};
+
+const STOP = new Set(["the", "and", "did", "what", "where", "which", "was", "were", "you", "your", "that", "this", "with", "for", "before", "previously", "used", "earlier", "say", "said", "tell", "told"]);
+
+/** How well a question and a remembered line match: shared words, plus topic words ("live" for a home). */
+export function relevance(question: string, text: string, topic?: string): number {
+  const words = new Set(question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu)?.filter((word) => !STOP.has(word)) ?? []);
+  let score = 0;
+  for (const word of text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []) if (words.has(word) && !STOP.has(word)) score += 1;
+  const base = topic?.replace(/^favourite:/, "");
+  for (const word of (base && TOPIC_WORDS[base]) || (base ? [base] : [])) if (words.has(word)) score += 2;
+  return score;
+}
+
+/**
+ * Facts that were true before and match a question about the past, from this
+ * Space and every Space, newest first. Nothing for an ordinary request, so
+ * old facts never reach the agent as if they were still true.
+ */
+export async function earlierFactsFor(question: string, spaceId?: string): Promise<AboutMeFact[]> {
+  if (!asksAboutThePast(question)) return [];
+  const earlier = [...(await loadEarlierFacts(spaceId)), ...(await loadEarlierFacts(undefined, "global"))];
+  return earlier
+    .map((fact) => ({ fact, score: relevance(question, fact.text, topicOf(fact)) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || (b.fact.valid_until ?? "").localeCompare(a.fact.valid_until ?? ""))
+    .slice(0, 5)
+    .map((item) => item.fact);
+}
+
+/** The block for older facts, only added when the request asks about the past. */
+export function earlierFactsPrompt(facts: AboutMeFact[]): string {
+  if (!facts.length) return "";
+  return [
+    "",
+    "",
+    "NO LONGER TRUE (things I said before that were later replaced; use them only to answer questions about the past, never as how things are now):",
+    ...facts.map((fact) => `- ${fact.text} (until ${(fact.valid_until ?? "").slice(0, 10) || "later"})`)
   ].join("\n");
 }
 

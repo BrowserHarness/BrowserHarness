@@ -42,7 +42,8 @@ export const SPACE_SCOPED_KEYS = {
  */
 export const SPACE_TAGGED_KEYS = {
   skills: "browserharness.skills",
-  episodes: "browserharness.taskEpisodes.v1"
+  episodes: "browserharness.taskEpisodes.v1",
+  decisions: "browserharness.decisions.v1"
 } as const;
 
 const KEY = SPACES_STORAGE_KEY;
