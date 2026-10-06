@@ -13,6 +13,7 @@ describe("diagnoseAi", () => {
     ["Could not load models (403)", { local: true, app: "Ollama" }, "ollama-blocked"],
     ["Model request failed (404): model not found", { model: "gpt-9" }, "ai-model-not-found"],
     ["The page is too big for x's context window (400)", { local: true }, "ai-page-too-big"],
+    ["Model request failed (413): Request too large for model `qwen` on input tokens per minute (ITPM): Limit 7000, Requested 11032", { service: "Groq" }, "ai-page-too-big"],
     ["Chrome did not allow BrowserHarness to reach this AI", {}, "allow-address"],
     ["Sign-in was cancelled.", {}, "openrouter-sign-in"],
     ["Model qwen returned an empty response. Pick another model.", {}, "ai-cant-use-browser"],
@@ -26,6 +27,14 @@ describe("diagnoseAi", () => {
       expect(problem.detail).toBe(message);
     });
   }
+
+  it("reads well when the service has no name", () => {
+    for (const message of ["Model request failed (429)", "Model request failed (413)", "Model request failed (401)", "Model request failed (403)"]) {
+      const problem = diagnoseAi(message, { service: "the AI service" });
+      expect(problem.title).toMatch(/^[A-Z]/);
+      expect(JSON.stringify(problem)).not.toMatch(/the the|your the/i);
+    }
+  });
 
   it("names the service and the local app", () => {
     expect(diagnoseAi("Model request failed (401)", { service: "Anthropic" }).title).toContain("Anthropic");
@@ -74,6 +83,10 @@ describe("guides", () => {
   it("shows only the reader's part of a knowledge base page", () => {
     const guide = parseGuide('---\ntype: guide\nslug: x\ntitle: "X title"\nsummary: "Short"\n---\n\n# X title\n\nBody text.\n\n## How to fix it\n1. Do it.\n\n## Related\n- [[knowledge/help/y]]\n\n## Sources\n- s\n');
     expect(guide).toEqual({ slug: "x", title: "X title", summary: "Short", body: "Body text.\n\n## How to fix it\n1. Do it.", related: ["y"] });
+  });
+  it("reads guides with Windows line endings", () => {
+    const guide = parseGuide('---\r\nslug: x\r\ntitle: "X title"\r\nsummary: "Short"\r\n---\r\n\r\n# X title\r\n\r\nBody text.\r\n');
+    expect(guide).toEqual({ slug: "x", title: "X title", summary: "Short", body: "Body text.", related: [] });
   });
   it("related guides all exist", () => {
     for (const guide of GUIDES) for (const slug of guide.related) expect(findGuide(slug), `${guide.slug} → ${slug}`).toBeDefined();

@@ -151,6 +151,7 @@ Rules:
 - Use only element_id values from the current page list. Never invent one.
 - After a tool fails, read the error in RECENT EXECUTION EVIDENCE and try a different action.
 - Do not repeat the same action on an unchanged page.
+- To search, type the words into the search box, then press_key Enter on that same box. Searching is always allowed.
 - When the goal is done, or the answer is in the page text, reply with kind "final".
 - Google Docs (adapter "google-docs"): write with {"kind":"tool","tool":"type","input":{"element_id":"bc-google-doc-editor","text":"all the text, \\n between lines"}} in one step; do not click the document first.
 - Never submit, buy, send, delete or change account settings unless the user asked for it.`;
@@ -163,11 +164,22 @@ function usesLocalBudget(config: ProviderConfig): boolean {
 }
 
 export function promptBudgetFor(config: ProviderConfig): PromptBudget {
-  return usesLocalBudget(config) ? LOCAL_BUDGET : HOSTED_BUDGET;
+  return usesLocalBudget(config) || smallRequestsOnly.has(nativeToolsKey(config)) ? LOCAL_BUDGET : HOSTED_BUDGET;
+}
+
+// Services whose plan refused a request as too large (Groq's free plan takes
+// 7,000 tokens a minute): send them the shorter local-model prompt from now on.
+const smallRequestsOnly = new Set<string>();
+
+function isRequestTooLarge(error: unknown): boolean {
+  return /\(413\)|request too large/i.test(error instanceof Error ? error.message : String(error));
 }
 
 export function agentSystemFor(config: ProviderConfig): string {
   if (usesLocalBudget(config)) return AGENT_SYSTEM_COMPACT;
+  if (smallRequestsOnly.has(nativeToolsKey(config))) {
+    return usesNativeTools(config) ? `${AGENT_SYSTEM_COMPACT}\n\n${NATIVE_TOOLS_NOTE}` : AGENT_SYSTEM_COMPACT;
+  }
   return usesNativeTools(config) ? `${AGENT_SYSTEM}\n\n${NATIVE_TOOLS_NOTE}` : AGENT_SYSTEM;
 }
 
@@ -747,6 +759,39 @@ export async function fetchWithTimeout(
   }
 }
 
+/**
+ * Free plans, like Groq's, allow only so much text per minute. When the
+ * service says how long to wait and it is short, wait once and ask again.
+ */
+// The chat screen can wait a minute; Chrome may stop the background worker,
+// which runs scheduled tasks, after about 30 idle seconds.
+const MAX_RATE_LIMIT_WAIT_MS = typeof window === "undefined" ? 20_000 : 60_000;
+
+export async function rateLimitWaitMs(response: Response): Promise<number> {
+  let seconds = Number(response.headers.get("retry-after"));
+  if (!(seconds > 0)) {
+    const text = await response.clone().text().catch(() => "");
+    const match = text.match(/try again in (?:(\d+)m)?(\d+(?:\.\d+)?)s\b/i);
+    seconds = match ? Number(match[1] || 0) * 60 + Number(match[2]) : 0;
+  }
+  return seconds > 0 && seconds * 1000 <= MAX_RATE_LIMIT_WAIT_MS ? Math.ceil(seconds * 1000) + 250 : 0;
+}
+
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("Request was cancelled"));
+    const timer = globalThis.setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        globalThis.clearTimeout(timer);
+        reject(new Error("Request was cancelled"));
+      },
+      { once: true }
+    );
+  });
+}
+
 async function openAICompatibleRequest(
   config: ProviderConfig,
   body: Record<string, unknown>,
@@ -814,6 +859,12 @@ async function openAICompatibleRequest(
       messages: body.messages
     };
     response = await request(plain);
+  }
+
+  const wait = response.status === 429 ? await rateLimitWaitMs(response) : 0;
+  if (wait) {
+    await pause(wait, signal);
+    response = await request(body);
   }
 
   if (!response.ok) {
@@ -1313,38 +1364,50 @@ export async function nextAgentDecision(
     );
   }
 
-  const prompt = agentPrompt(
-    task,
-    observation,
-    trail,
-    evidence,
-    visionAvailable,
-    Boolean(screenshotDataUrl),
-    recalledMemory,
-    recalledProcedures,
-    mcpCatalog,
-    promptBudgetFor(config)
-  );
+  const promptFor = () =>
+    agentPrompt(
+      task,
+      observation,
+      trail,
+      evidence,
+      visionAvailable,
+      Boolean(screenshotDataUrl),
+      recalledMemory,
+      recalledProcedures,
+      mcpCatalog,
+      promptBudgetFor(config)
+    );
+  let prompt = promptFor();
 
-  const raw =
+  const ask = (text: string) =>
     config.provider === "anthropic"
-      ? await anthropicRequest(
+      ? anthropicRequest(
           config,
           agentSystemFor(config),
-          prompt,
+          text,
           700,
           AGENT_TIMEOUT_MS,
           signal,
           screenshotDataUrl,
           true
         )
-      : await openAICompatibleRequest(
+      : openAICompatibleRequest(
           config,
-          agentBody(config, prompt, screenshotDataUrl),
+          agentBody(config, text, screenshotDataUrl),
           AGENT_TIMEOUT_MS,
           signal,
           true
         );
+
+  let raw: string;
+  try {
+    raw = await ask(prompt);
+  } catch (error) {
+    if (!isRequestTooLarge(error) || promptBudgetFor(config) === LOCAL_BUDGET) throw error;
+    smallRequestsOnly.add(nativeToolsKey(config));
+    prompt = promptFor();
+    raw = await ask(prompt);
+  }
 
   try {
     return parseAgentDecision(raw);

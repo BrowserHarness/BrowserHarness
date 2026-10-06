@@ -24,10 +24,10 @@ for (const file of [path.join(dist, "manifest.json"), bundle]) {
   }
 }
 const { Client } = await import(
-  require.resolve("@modelcontextprotocol/client", { paths: [path.join(root, "apps/bridge")] })
+  pathToFileURL(require.resolve("@modelcontextprotocol/client", { paths: [path.join(root, "apps/bridge")] })).href
 );
 const { StdioClientTransport } = await import(
-  require.resolve("@modelcontextprotocol/client/stdio", { paths: [path.join(root, "apps/bridge")] })
+  pathToFileURL(require.resolve("@modelcontextprotocol/client/stdio", { paths: [path.join(root, "apps/bridge")] })).href
 );
 
 const results = [];
@@ -38,7 +38,9 @@ const check = (name, ok, detail = "") => {
 
 // A temporary home folder with four coding agents "installed".
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "bh-home-"));
-for (const dir of [".claude", ".codex", ".cursor", ".hermes"]) fs.mkdirSync(path.join(home, dir));
+// Hermes keeps its files in AppData\Local\hermes on Windows.
+const hermes = process.platform === "win32" ? path.join("AppData", "Local", "hermes") : ".hermes";
+for (const dir of [".claude", ".codex", ".cursor", hermes]) fs.mkdirSync(path.join(home, dir), { recursive: true });
 fs.writeFileSync(path.join(home, ".codex", "config.toml"), 'model = "gpt-5"\n');
 const port = 10_200 + Math.floor(Math.random() * 500);
 fs.mkdirSync(path.join(home, ".browserharness-bridge"));
@@ -47,7 +49,7 @@ fs.writeFileSync(
   JSON.stringify({ host: "127.0.0.1", port, allow_remote: false, token: "e2e-" + Math.random().toString(36).slice(2) })
 );
 // The real `claude` command is used when it exists; it writes into this home.
-const env = { ...process.env, HOME: home, USERPROFILE: home };
+const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming"), LOCALAPPDATA: path.join(home, "AppData", "Local") };
 const installed = path.join(home, ".browserharness-bridge", "bin", "browserharness-bridge.mjs");
 const bridge = (file, ...args) => {
   const run = spawnSync(process.execPath, [file, ...args], { env, encoding: "utf8", timeout: 60_000 });
@@ -215,7 +217,7 @@ try {
   check("Codex config keeps its settings and gains browserharness", codex.startsWith('model = "gpt-5"') && codex.includes(`args = [${JSON.stringify(installed)}, "mcp"]`));
   const claudeJson = JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8"));
   check("Claude Code has the browserharness MCP server", claudeJson.mcpServers?.browserharness?.args?.[0] === installed);
-  check("skill files are written", fs.existsSync(path.join(home, ".claude/skills/browserharness/SKILL.md")) && fs.existsSync(path.join(home, ".hermes/skills/browserharness/SKILL.md")));
+  check("skill files are written", fs.existsSync(path.join(home, ".claude/skills/browserharness/SKILL.md")) && fs.existsSync(path.join(home, hermes, "skills/browserharness/SKILL.md")));
   const status = bridge(installed, "status");
   check("Bridge is running", status.json?.running === true && status.json?.extension_connected === false);
 
@@ -451,6 +453,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 `
   );
   fs.chmodSync(fakeSignal, 0o755);
+  // Windows can't run a #! script; signal-cli ships there as a .bat, so stand in with one.
+  const signalCommand = process.platform === "win32" ? `${fakeSignal}.bat` : fakeSignal;
+  if (signalCommand !== fakeSignal) fs.writeFileSync(signalCommand, `@node "%~dp0signal-cli" %*\r\n`);
   fs.writeFileSync(
     configFile,
     JSON.stringify({
@@ -501,7 +506,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   const slackDone = await waitFor(() => slack.sent.find((item) => item.channel === "D42" && /^Done\n\nTG_DONE Greet/.test(item.text)), 60_000);
   check("a Slack direct message runs in Chrome and the result comes back", Boolean(slackDone), JSON.stringify(slack.sent.slice(-3)));
 
-  const signalSetup = await bridgeAsync(installed, "signal", "setup", "--number", "+15559998888", "--command", fakeSignal);
+  const signalSetup = await bridgeAsync(installed, "signal", "setup", "--number", "+15559998888", "--command", signalCommand);
   check("signal setup finds signal-cli", signalSetup.json?.signal_cli === "signal-cli 0.13.0" && signalSetup.json?.number === "+15559998888", signalSetup.stderr?.trim());
   const signalAllow = await bridgeAsync(installed, "signal", "allow", "+15550001111");
   check("signal allow adds the number", signalAllow.json?.allowed_user_ids?.includes("+15550001111"), signalAllow.stderr?.trim());

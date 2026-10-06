@@ -33,14 +33,25 @@ export interface ConnectFeedback {
 
 export const IDLE: ConnectFeedback = { state: "idle", message: "" };
 
+/** Services people often add by address under "OpenAI-compatible". */
+const COMPATIBLE_SERVICES: Record<string, string> = { "api.groq.com": "Groq" };
+
+function compatibleServiceName(baseUrl?: string): string {
+  try {
+    return COMPATIBLE_SERVICES[new URL(baseUrl || "").hostname] || "the AI service";
+  } catch {
+    return "the AI service";
+  }
+}
+
 /** Who to name in messages: "OpenRouter", "LM Studio" and so on. */
-export function aiContext(config: Pick<ProviderConfig, "provider" | "model">): AiContext {
+export function aiContext(config: Pick<ProviderConfig, "provider" | "model"> & { baseUrl?: string }): AiContext {
   const local = isLocalProvider(config.provider);
   const label = PROVIDERS[config.provider]?.label.replace(" (local)", "") || "the AI service";
   return {
     local,
     app: config.provider === "ollama" ? "Ollama" : config.provider === "lm-studio" ? "LM Studio" : undefined,
-    service: config.provider === "openai-compatible" ? "the AI service" : label,
+    service: config.provider === "openai-compatible" ? compatibleServiceName(config.baseUrl) : label,
     model: config.model
   };
 }

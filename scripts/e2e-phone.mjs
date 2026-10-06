@@ -87,7 +87,7 @@ fs.writeFileSync(
     telegram: { api_base: `http://127.0.0.1:${stub.address().port}/tg` }
   })
 );
-const env = { ...process.env, HOME: home, USERPROFILE: home };
+const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming"), LOCALAPPDATA: path.join(home, "AppData", "Local") };
 const helper = (...args) => {
   const run = spawnSync(process.execPath, [bundle, ...args], { env, encoding: "utf8", timeout: 60_000 });
   try {

@@ -1,5 +1,5 @@
 const KNOWN_SITES =
-  "youtube|google|google flights|amazon|gmail|linkedin|twitter|x\\.com|reddit|wikipedia|github|facebook|instagram|netflix|ebay|flipkart|notion|slack|outlook|whatsapp web";
+  "youtube|google|google flights|duckduckgo|bing|yahoo|amazon|gmail|linkedin|twitter|x\\.com|reddit|wikipedia|github|facebook|instagram|netflix|ebay|flipkart|notion|slack|outlook|whatsapp web";
 
 const BROWSER_CONTEXT_PATTERNS: RegExp[] = [
   /\b(this|current)\s+(page|tab|site|website|document|doc)\b/i,
@@ -34,4 +34,13 @@ export function classifyTaskIntent(task: string): TaskIntent {
   return BROWSER_CONTEXT_PATTERNS.some((pattern) => pattern.test(normalized))
     ? "browser"
     : "chat";
+}
+
+/**
+ * A chat answer that is really a browser action, like Qwen's
+ * "<tool_call> <function=browser_navigate>", means the request needed the
+ * browser after all.
+ */
+export function replyAsksForBrowser(reply: string): boolean {
+  return /<tool_call>|<function=[\w.-]+>/i.test(reply);
 }

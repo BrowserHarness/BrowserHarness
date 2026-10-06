@@ -149,6 +149,30 @@ describe("embedding capability", () => {
 });
 
 describe("directChatCompletion", () => {
+  it("waits once when a free plan's per-minute limit says to try again in a few seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const limited = '{"error":{"message":"Rate limit reached on tokens per minute (TPM): Limit 7000. Please try again in 1.5s."}}';
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(limited, { status: 429 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(limited.replace("1.5s", "2m0s"), { status: 429 }));
+      const groq: ProviderConfig = { provider: "openai-compatible", apiKey: "gsk-test", model: "qwen/qwen3.8-27b", baseUrl: "https://api.groq.com/openai/v1" };
+
+      const answer = directChatCompletion(groq, "hi");
+      await vi.advanceTimersByTimeAsync(1_800);
+      expect(await answer).toBe("OK");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      // A long wait is left to the person, who sees why.
+      await expect(directChatCompletion(groq, "hi")).rejects.toThrow(/429/);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses plain chat output for NVIDIA direct chat", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -247,6 +271,25 @@ describe("testModelConnection", () => {
 });
 
 describe("nextAgentDecision", () => {
+  it("sends a shorter prompt after a plan refuses a request as too large", async () => {
+    const answer = JSON.stringify({ choices: [{ message: { content: JSON.stringify({ kind: "final", message: "Done" }) } }] });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response('{"error":{"message":"Request too large for model on tokens per minute (TPM): Limit 7000, Requested 7404"}}', { status: 413 }))
+      .mockImplementation(async () => new Response(answer, { status: 200 }));
+    const groq: ProviderConfig = { provider: "openai-compatible", apiKey: "gsk-test", model: "too-large-test", baseUrl: "https://api.groq.com/openai/v1" };
+    const bigPage = { ...observation, visible_text: "beach ".repeat(2000) };
+
+    expect(await nextAgentDecision(groq, "find quiet beaches", bigPage, [])).toMatchObject({ kind: "final" });
+    await nextAgentDecision(groq, "find quiet beaches", bigPage, []);
+    const sizes = fetchMock.mock.calls.map(([, init]) => String(init?.body).length);
+    expect(sizes[1]).toBeLessThan(sizes[0]);
+    // It stays short for the rest of the session, instructions included.
+    expect(sizes[2]).toBe(sizes[1]);
+    const system = (call: number) => JSON.parse(String(fetchMock.mock.calls[call][1]?.body)).messages[0].content.length;
+    expect(system(1)).toBeLessThan(system(0));
+  });
+
   it("uses native tool calling for hosted browser planning", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

@@ -632,13 +632,23 @@ async function sendToTab(
       };
     }
 
-    try {
+    const attach = async (): Promise<ToolResult> => {
       await chrome.scripting.executeScript({
         target: { tabId },
         files: ["assets/content.js"]
       });
       return await chrome.tabs.sendMessage(tabId, payload);
-    } catch (error) {
+    };
+    try {
+      return await attach();
+    } catch (firstAttachError) {
+      // A page that is still loading, for example right after a link was
+      // followed, can't be attached to yet: wait for it once.
+      const attached = await waitForTabUsable(tabId, 10_000)
+        .then(attach)
+        .catch(() => null);
+      if (attached) return attached;
+      const error = firstAttachError;
       const pattern = tab.url ? originPatternForUrl(tab.url) : null;
       const hasOriginPermission = pattern
         ? await chrome.permissions.contains({ origins: [pattern] })
