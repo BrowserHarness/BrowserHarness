@@ -11,6 +11,7 @@ export interface SlashCommandInfo {
 export const BUILT_IN_COMMANDS: SlashCommandInfo[] = [
   { name: "remember", usage: "/remember <fact>", description: "Save a fact about you, like “I live in Pune”" },
   { name: "forget", usage: "/forget <words>", description: "Delete facts in this Space that mention these words (add “everywhere” for every Space)" },
+  { name: "decide", usage: "/decide <what>: <choice>", description: "Note a choice for this Space, like “code home: GitHub” (it replaces the earlier one)" },
   { name: "memory", usage: "/memory", description: "See and edit what BrowserHarness knows about you" },
   { name: "recall", usage: "/recall <words>", description: "Find what we did or talked about before" },
   { name: "skills", usage: "/skills", description: "See, run, rename and share your Skills" },
@@ -68,7 +69,7 @@ export function slashSuggestions(
       description: `${command.title} (${command.site})`
     }))
   ];
-  return all.filter((command) => command.name.startsWith(typed)).slice(0, 8);
+  return all.filter((command) => command.name.startsWith(typed)).slice(0, 10);
 }
 
 export function helpText(skills: UserSkill[], siteCommands: SiteCommand[] = []): string {

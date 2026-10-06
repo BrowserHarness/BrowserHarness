@@ -98,11 +98,13 @@ import {
   mightStateFacts,
   parseExtractedFacts,
   rememberFacts,
+  saidForThisSpace,
   scopedFactsInMessage,
   withoutScopeWords
 } from "../runtime/about-me";
 import { loadTaskHistory } from "../runtime/history";
 import { userMemoryPrompt } from "../runtime/user-memory";
+import { decideCommand } from "../runtime/decisions";
 import { recallAnswer, recallFor, recallPrompt } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
@@ -601,7 +603,12 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           addAssistantMessage("That looks like a password, card or ID number, so I won't save it.");
           return;
         }
-        const added = await rememberFacts([{ text: withoutScopeWords(command.args), scope: factScopeIn(command.args) }], "you");
+        const added = await rememberFacts(
+          [{ text: withoutScopeWords(command.args), scope: factScopeIn(command.args), explicit: saidForThisSpace(command.args) }],
+          "you",
+          undefined,
+          chatId
+        );
         addAssistantMessage(
           added.length
             ? `Got it. I'll remember: ${added[0].text}${added[0].scope === "global" ? " (in every Space)" : ""}`
@@ -616,6 +623,10 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         }
         // Only this Space, unless they say "everywhere".
         addAssistantMessage(await forgetCommand(command.args));
+        return;
+      }
+      case "decide": {
+        addAssistantMessage(await decideCommand(command.args, undefined, chatId));
         return;
       }
       case "memory":
@@ -1136,7 +1147,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       learnAboutMe = preferences.learnAboutMe && !skillRun;
       if (preferences.learnAboutMe && !skillRun) {
         // Each fact at its own level: this Space unless it's who you are or said for every Space.
-        const learned = await rememberFacts(scopedFactsInMessage(typed), "learned", spaceId);
+        const learned = await rememberFacts(scopedFactsInMessage(typed), "learned", spaceId, chatId);
         if (learned.length) {
           addActivity(
             `Remembered about you: ${learned.map((fact) => fact.text).join("; ")}`,
@@ -1144,7 +1155,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           );
         }
       }
-      aboutMe = await userMemoryPrompt(spaceId);
+      aboutMe = await userMemoryPrompt(spaceId, typed);
     } catch {
       aboutMe = "";
     }
@@ -1167,9 +1178,14 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         const known = aboutMeFor(await loadGlobalAboutMe(), await loadAboutMe(spaceId));
         const reply = await directChatWithFallback(model, null, factExtractionPrompt(typed, known));
         const added = await rememberFacts(
-          parseExtractedFacts(reply.result).map((fact) => ({ text: fact, scope: factScopeIn(fact, typed) })),
+          parseExtractedFacts(reply.result).map((fact) => ({
+            text: fact,
+            scope: factScopeIn(fact, typed),
+            explicit: saidForThisSpace(fact, typed)
+          })),
           "learned",
-          spaceId
+          spaceId,
+          chatId
         );
         if (added.length) {
           addActivity(`Remembered about you: ${added.map((fact) => fact.text).join("; ")}`, "done");

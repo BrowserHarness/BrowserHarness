@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Local real-Chromium test of deeper memory with a scripted mock model (no real LLM, no network):
 // past conversations come back when a request refers to them (chat, browser and /recall), the
-// model picks lasting facts out of a message, a changed fact replaces the old one, standing
+// model picks lasting facts out of a message, a changed fact replaces the old one (kept as history,
+// shown only for questions about the past), decisions replace each other, standing
 // instructions go with every request, and a shared Skill imports from a link without running.
 // Requires: npm run build, playwright-core. Never runs on GitHub Actions.
 import http from "node:http";
@@ -127,7 +128,9 @@ try {
   const facts = () =>
     side.evaluate(async () => {
       const stored = await chrome.storage.local.get(["browserharness.aboutMe", "browserharness.aboutMe.global"]);
-      return [...(stored["browserharness.aboutMe"] || []), ...(stored["browserharness.aboutMe.global"] || [])].map((fact) => fact.text);
+      return [...(stored["browserharness.aboutMe"] || []), ...(stored["browserharness.aboutMe.global"] || [])]
+        .filter((fact) => !fact.status || fact.status === "current")
+        .map((fact) => fact.text);
     });
 
   // 1. A question about earlier work is answered from past conversations.
@@ -206,6 +209,47 @@ try {
       (text) => text.includes("HOW I WANT YOU TO WORK") && text.includes("Always show prices in rupees.") && text.includes("In every Space:\nPrefer Indian sites.")
     )
   );
+
+  check(
+    "only today's home goes with an ordinary request",
+    prompts.slice(beforeRules).some((text) => text.includes("I live in Mumbai")) && !prompts.slice(beforeRules).some((text) => text.includes("Pune"))
+  );
+
+  // 7b. The old home is kept, and only comes back for a question about the past.
+  const beforePast = prompts.length;
+  await ask("Where did I live before Mumbai?");
+  for (let i = 0; i < 100 && prompts.length === beforePast; i++) await side.waitForTimeout(100);
+  check(
+    "a question about the past gets the old home, marked as no longer true",
+    prompts.slice(beforePast).some((text) => /NO LONGER TRUE[^\n]*\n- I live in Pune/.test(text))
+  );
+
+  // 7c. Decisions: a new one replaces the old, which is kept as history.
+  await ask("/decide code home: Forgejo");
+  await waitText("Noted: Code home is Forgejo", 5000);
+  await ask("/decide code home: GitHub because the team works there");
+  await waitText("I'll keep “Forgejo” as what you used before", 5000);
+  const beforeDecision = prompts.length;
+  await ask("draft the release notes");
+  for (let i = 0; i < 100 && prompts.length === beforeDecision; i++) await side.waitForTimeout(100);
+  const decisionPrompts = prompts.slice(beforeDecision);
+  check(
+    "the decision in force goes with requests, the old one does not",
+    decisionPrompts.some((text) => text.includes("Code home: GitHub (because the team works there)")) &&
+      // (The chat's own earlier turns still mention it; the memory blocks must not.)
+      !decisionPrompts.some((text) => /(DECISIONS|ABOUT ME)[^]*?\n\n/.exec(text)?.[0].includes("Forgejo"))
+  );
+  await side.getByRole("button", { name: "Open the menu" }).click();
+  await side.getByRole("button", { name: "About me" }).click();
+  await side.getByTestId("decision").first().waitFor({ timeout: 5000 });
+  check("About you lists the decision in force", (await side.getByTestId("decision").allInnerTexts()).join(" ").includes("GitHub"));
+  await side.getByRole("button", { name: /Earlier decisions \(1\)/ }).click();
+  check("…and the one it replaced", (await side.getByTestId("earlier-decision").allInnerTexts()).join(" ").includes("Forgejo"));
+  await side.getByRole("button", { name: /What used to be true \(1\)/ }).click();
+  check("About you shows what used to be true", (await side.getByTestId("earlier-fact").allInnerTexts()).join(" ").includes("I live in Pune"));
+  await side.screenshot({ path: path.join(os.tmpdir(), "browserharness-memory-history.png"), fullPage: true });
+  await side.reload();
+  await side.waitForTimeout(800);
 
   // 8. A shared Skill can be imported from a link; it is saved, not run.
   await ctx.route("https://skills.example.test/**", (route) =>

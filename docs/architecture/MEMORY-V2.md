@@ -42,7 +42,7 @@ Leaks across Spaces (fixed in Phase 2, see section 3):
 
 Not yet done (later phases):
 6. No "All Spaces" level: About me and instructions are per-Space only, so "My name is Neo" must be told to each Space (done in Phase 3, see 3b).
-7. Supersession deletes the older fact; no `validFrom/validUntil/supersededBy`, no decisions (Phase 4).
+7. Supersession deleted the older fact; no `validFrom/validUntil/supersededBy`, no decisions (done in Phase 4, see 3c).
 8. No Context Compiler: prompts are assembled by string concatenation in `App.tsx` and `scheduled-run.ts` (`instructionsPrompt + aboutMePrompt + recallPrompt + skillHint + chatContextPrompt`), with no authority ranking, token budget or diagnostics (Phase 5).
 9. No candidate/dedupe/sensitivity pipeline shared by all writers; three separate secret regexes (Phase 6).
 10. Page content: facts are only learned from the person's own typed message, never from pages (good), but nothing formally marks page-derived episode text as untrusted (Phase 6/8).
@@ -83,11 +83,68 @@ No stored data is rewritten. New fields are optional and read-time defaults hand
 - UI: About you shows "In this Space" and "In every Space" lists with an Every Space / Only this Space button on each fact, an "every Space" tick when adding, and two wish cards. Privacy has "Forget for every Space". `/remember` says "(in every Space)" when it saved there. `/forget <words>` only touches this Space; `/forget everywhere <words>` (or "across all Spaces") removes facts used in every Space. A plain `/forget` that only matches an every-Space fact deletes nothing and says how to remove it.
 - Tests: `runtime/all-spaces-memory.test.ts` (15): scenarios 1 and 2 from the brief, level rules, Space-wins-on-topic, home change, move both ways, forget, secrets refused, Space deletion keeps every-Space facts, old data unchanged and unpromoted. Smokes: spaces (said-for-all-Spaces fact reaches Work), memory (wishes for every Space saved apart and sent).
 
+## 3c. Phase 4: facts that change, and decisions (Phase 4 PR)
+
+### Phase 3 status
+Phase 3 merged as PR #39 with the `/forget` rule above: `/forget <words>` only touches this Space; `/forget everywhere <words>` or `/forget across all Spaces <words>` touches the every-Space facts; a plain `/forget` that matches only an every-Space fact deletes nothing and explains how.
+
+### Temporal fact model
+`AboutMeFact` (`runtime/about-me.ts`) is extended, not duplicated. New optional fields:
+- `status`: `current | superseded | historical` (missing = current).
+- `valid_from`, `valid_until`, `supersedes`, `superseded_by` (ids).
+- `explicit_scope`: the fact was kept to this Space on purpose ("In this Space I am based in Delhi", "For this project…", added on the About you screen without the every-Space tick, or moved there with "Only this Space").
+- `provenance`: `{ by: "you" | "learned", space_id, at, chat_id? }`. `by` is "you" for `/remember` and the About you screen, "learned" when picked up from the person's own message. `space_id` is the Space it was said in (also for every-Space facts). `chat_id` only when there was a chat. Facts saved before Phase 4 get no provenance: nothing is made up.
+
+Both the current facts and the replaced ones live in the same array under the same key. Up to 60 current facts and the newest 100 replaced ones are kept per level.
+
+### Supersession rules (`addFacts`)
+- **A. Same level replaces same level.** Every-Space "I live in Pune", then every-Space "I live in Mumbai": Mumbai is current; Pune becomes `superseded`, `valid_until` = Mumbai's time, `superseded_by` = Mumbai's id; Mumbai `supersedes` Pune.
+- **B. A Space fact overrides an every-Space fact only in that Space.** Every-Space USD plus Work INR: Work sees INR, other Spaces see USD, and USD is not superseded.
+- **C. A new every-Space fact supersedes older narrower ones that were not kept apart on purpose.** In the Space where it was said: any topic. In other Spaces: only who the person is (name, nickname, home, language), because those were only ever kept per Space by accident (before Phase 3). A fact with `explicit_scope` is never superseded by an every-Space fact.
+- Saying an old fact again makes it current again (a new record that supersedes the one in between).
+- Editing a fact's wording on the About you screen is a correction, not a change in life: the same record keeps its id, `valid_from`, links, `explicit_scope` and provenance; `source` becomes "you"; `topic` is recomputed from the new words (and dropped when they no longer map to a known topic). If the corrected fact now shares a topic with another current fact at its level, that one is kept as replaced, so there is never more than one current fact per topic per level.
+- Moving a fact between this Space and every Space ("Every Space" / "Only this Space") moves the same record. Its id, text, topic, `created_at`, `valid_from`, links and provenance are unchanged, and no replaced copy is left behind, so a move is never recorded as a change in life. `explicit_scope` is set when it moves into a Space and removed when it moves to every Space. Its older versions stay where they were and still point at it. `factLineage(id)` walks the line across both levels.
+  - If the destination has a current fact on the same topic, the moved fact wins there and the other is kept as replaced as of the move. Moving to every Space also applies rule C.
+  - If the destination already has exactly the same words, the destination record stays, and links to the moved record are pointed at it, so none are left dangling.
+- `/forget` and Delete remove matching facts outright, current and replaced, at that one level.
+
+### Decision model
+`runtime/decisions.ts`, one store `browserharness.decisions.v1`, tagged with `space_id` and `visibility` and checked by the same `visibleInSpace` wall as episodes and Skills:
+
+`{ id, type: "decision", subject, value, rationale?, scope: space | global, status: current | superseded | reversed | historical, created_at, valid_from, valid_until?, supersedes?, superseded_by?, space_id, visibility, provenance }`
+
+- A new decision on the same subject at the same level supersedes the current one (subject compared ignoring case and "the/our/my"). Repeating the same value changes nothing. "Take back" marks it `reversed`.
+- Decisions belong to the Space they were made in. A decision for every Space (`visibility: "all"`) is made only when said ("/decide everywhere …", "across all Spaces …", or the tick on the About you screen), and survives deleting the Space it was made in. A Space's own decision wins over an every-Space decision on the same subject there.
+- Deleting a Space removes its own decisions (`SPACE_TAGGED_KEYS.decisions`).
+- Ways in: `/decide <what>: <choice> [because …]` in the chat, and the "Your decisions" card on About you (add, take back, delete, earlier decisions).
+- Decisions are kept apart from wishes (standing instructions): wishes say how to work; decisions record a choice and its history.
+
+### Effective values and retrieval (`runtime/user-memory.ts`)
+- `currentState(spaceId)`: current facts (this Space's own, then every-Space ones not overridden on the same topic) and current decisions (same precedence). Order of authority: this Space's current value, then the every-Space value, then history.
+- `userMemoryPrompt(spaceId, request)` sends wishes, current facts and current decisions. Replaced facts and decisions are added only when the request asks about the past ("before", "previously", "used to", "what did we", "replaced"…), only the ones matching the question's words or topic (e.g. "live" for home), at most 5 each, under blocks labelled "NO LONGER TRUE" / "EARLIER DECISIONS". They are never presented as current.
+- `earlierState(question, spaceId)`, `loadEarlierFacts`, `earlierDecisions(spaceId, subject?)` give the history directly.
+- The About you screen shows "What used to be true" and "Earlier decisions" lists, each item deletable.
+
+### Migration
+None. Old facts have no `status` and read as current; nothing is rewritten on load. Old facts only change when a newer fact supersedes them (they are then marked, not deleted).
+
+### Tests
+`runtime/temporal-memory.test.ts` (16): Pune→Mumbai (prompt has Mumbai only, Pune kept with links and provenance), "where did I live before Mumbai?", previous currency, English→Hindi for every Space, Work INR over every-Space USD (USD not superseded), explicit "In this Space I am based in Delhi" survives two every-Space moves, old accidental local homes superseded in every Space, other topics in other Spaces untouched, About you choice for this Space kept, an old fact said again, `/forget` takes history too and only in its Space, pre-Phase-4 data loads unchanged, Forgejo→GitHub with history questions, decisions isolated per Space (including take-back/delete from another Space and Space deletion), every-Space decisions only when said, reversal/repeat/secret refusal. Memory smoke adds: only today's home goes with an ordinary request, the old home comes back for "Where did I live before Mumbai?", `/decide` replaces and the prompt carries only the decision in force, and About you shows both history lists.
+
+### Remaining gaps
+- Facts only supersede by known topic (`factTopic`: name, nickname, home, work, favourite X, currency, budget, timezone, language). Other changing facts ("I drive a Swift" → "I drive a Creta") pile up side by side until the Phase 6 candidate pipeline compares them.
+- Decisions are only made on purpose (`/decide`, the card). They are not picked up from conversation yet.
+- The agent's `memory` tool does not yet read facts or decisions; history reaches it only through the prompt.
+- Space backup/restore covers About me (with history) but not that Space's decisions.
+- History questions are matched by words; a question in other words may not find the old fact. The Context Compiler should do this selection properly.
+
 ## 4. Recorded follow-ups
 1. Skills saved before Memory v2 have no scope and are read as `visibility: "all"`. Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
 2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
-3. Phase 3 replaces the older same-topic fact in the speaking Space when a fact for every Space arrives; the older fact is deleted, not kept as history. Phase 4 should turn both this and the existing same-topic replacement into supersession with history.
+3. Done in Phase 4: same-topic replacement now keeps the older fact as superseded history.
+4. Decisions live in one store (`browserharness.decisions.v1`) with one overall cap of 300. One busy Space must eventually not be able to push out another Space's decision history: cap per Space (as episodes are) or keep current decisions outside the cap. This is the same kind of issue as follow-up 2.
+5. Memory is stored in `chrome.storage.local` behind plain functions. To make it provider-ready (an external or synced memory store later), the Context Compiler should read through one interface (`currentState`, `earlierState`, episodes, Skills) rather than the stores directly.
 
 ## 5. Recommended next phases
-- Phase 4: keep superseded facts with `valid_until`/`superseded_by`; add decisions with `current/superseded/reversed/historical`.
-- Phase 5: Context Compiler replacing the string concatenation, with authority order, per-model budget and a diagnostics record.
+- Phase 5: Context Compiler replacing the string concatenation (`userMemoryPrompt` + recall + Skill hint + chat context), with authority order (this Space > every Space > history), per-model token budget, selection of what is useful for the request, and a diagnostics record of what was sent and why.
+- Then: shared candidate/dedupe/sensitivity pipeline (Phase 6), Skill scope promotion (Phase 7), task/agent records (Phase 8), backup of tagged records (Phase 9).
