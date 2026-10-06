@@ -230,6 +230,68 @@ try {
   await side.getByTestId("chat-list").getByText("Kettle shopping").waitFor({ timeout: 5000 });
   await closeMenu();
 
+  // 5c. A Skill stays in its Space; sharing it with every Space and copying it are different (Phase 7).
+  const goTo = async (name) => {
+    await openMenu();
+    await side.getByTestId("space-switcher").click();
+    await side.getByRole("menuitem", { name }).click();
+    await side.waitForTimeout(400);
+    await closeMenu().catch(() => {});
+  };
+  const openSkills = async () => {
+    await openMenu();
+    await side.getByRole("button", { name: "Skills" }).click();
+    await side.getByText("Your Skills").waitFor({ timeout: 5000 }).catch(() => {});
+    await side.waitForTimeout(300);
+  };
+  const leaveSkills = () => side.getByRole("button", { name: "Back to chat" }).first().click();
+  const skillCards = async () => (await side.getByTestId("skill-card").allInnerTexts()).join(" | ");
+  const skillPath = path.join(profile, "expense-SKILL.md");
+  fs.writeFileSync(skillPath, "---\nname: expense-report\ndescription: File the monthly expense report\n---\n\n# Expense report\n\nOpen the expenses page and fill in the totals.\n");
+  await openSkills();
+  await side.getByTestId("skill-import-input").setInputFiles(skillPath);
+  await waitText(side, "Imported /expense-report", 5000);
+  check("a Skill saved in Personal is kept for Personal only", (await skillCards()).includes("Expense report") && (await skillCards()).includes("This Space"));
+  await leaveSkills();
+  await goTo("Work");
+  await openSkills();
+  check("…and isn't in Work", !(await skillCards()).includes("Expense report"), await skillCards());
+  await leaveSkills();
+  await goTo("Personal");
+  await openSkills();
+  await side.getByRole("button", { name: "More for Expense report" }).click();
+  await side.getByRole("menuitem", { name: "Copy to Work" }).click();
+  await waitText(side, "Copied to Work", 5000);
+  await leaveSkills();
+  await goTo("Work");
+  await openSkills();
+  const copyCard = side.getByTestId("skill-card").filter({ hasText: "Expense report" });
+  await copyCard.getByRole("button", { name: /^Rename/ }).click();
+  await side.getByLabel("Skill name").fill("Work expenses");
+  await side.getByLabel("Skill name").press("Enter");
+  await side.waitForTimeout(400);
+  const allSkills = (await storage("browserharness.skills")) || [];
+  const original = allSkills.find((item) => item.space_id === "personal");
+  const copied = allSkills.find((item) => item.provenance?.origin === "copied");
+  check(
+    "a copy in Work is its own Skill: renaming it leaves the original alone",
+    allSkills.length === 2 && original?.name === "Expense report" && copied?.name === "Work expenses" && copied.provenance.source_skill_id === original.id && copied.id !== original.id,
+    JSON.stringify(allSkills.map((item) => [item.name, item.space_id, item.provenance?.origin]))
+  );
+  await leaveSkills();
+  await goTo("Personal");
+  await openSkills();
+  await side.getByRole("button", { name: "More for Expense report" }).click();
+  await side.getByRole("menuitem", { name: "Use it in every Space" }).click();
+  await waitText(side, "can now be used in every Space", 5000);
+  await leaveSkills();
+  await goTo("Work");
+  await openSkills();
+  const workSkills = await skillCards();
+  check("shared with every Space, the same Skill now shows in Work too", workSkills.includes("Expense report") && workSkills.includes("Every Space") && workSkills.includes("Work expenses") && ((await storage("browserharness.skills")) || []).length === 2, workSkills);
+  await leaveSkills();
+  await goTo("Personal");
+
   // 6. The full-page chat: the menu stays open, and tasks work in the web page, never in the chat tab.
   const full = await ctx.newPage();
   await full.setViewportSize({ width: 1280, height: 860 });

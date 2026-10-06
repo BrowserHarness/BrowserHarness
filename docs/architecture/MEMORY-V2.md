@@ -233,7 +233,7 @@ Each compile records: the Space, provider/model, intent, budget (final target, u
 - `runtime/remote-tasks.test.ts`: a phone task compiles exactly the same context as the side panel for the same words in the same Space; with an LM Studio backup, a phone chat and a phone browser task are both budgeted for the backup, a backup that failed browser control is not counted for a browser task, the agent gets the same memory source, and stored diagnostics hold no keys or addresses.
 - Real-Chromium learning check: "Summarize this page for me" carries no name; "draft an introduction for me" carries it.
 
-## 3e. Phase 6: the Memory Write Pipeline (Phase 6 PR)
+## 3e. Phase 6: the Memory Write Pipeline (PR #42, merged at main 38b98b3)
 
 The Context Compiler is the read side ("send only what helps"). Phase 6 is the write side: **remember only what is durable, grounded in the person's own words, safe, correctly scoped and worth using again.** It sits on top of the Phase 4 stores and does not replace them.
 
@@ -341,8 +341,70 @@ No migration and no rewrite of old records. New optional fields: `AboutMeFact.ki
 - `runtime/task-memory.test.ts`: episodes and helper findings carry `trust: "observed"`, the parent session and task provenance.
 - Real-Chromium: memory smoke (a friend's quoted home, a one-off "use GitHub to search" and "Remember that my password hunter2" are not kept even when the AI reads the friend's home as the person's; a short stay and a maybe don't replace home even when the AI says so; a standing wish is offered and kept with one tap; a loose decision offered; a settled one kept and undone), spaces smoke (`/remember Across all Spaces, keep answers concise` is kept as a standing wish for every Space and reaches requests in another Space; Space facts stay put), learning smoke (sensitive refused, facts remembered).
 
+## 3f. Phase 7: Skill scope, sharing and copying (Phase 7 PR)
+
+**A Skill learned in one Space stays in that Space unless the person deliberately shares it. Sharing one Skill with every Space and copying it into another Space are different operations: one shared Skill versus two independent Skills.** Site Skills, procedural memory and raw recordings are unchanged (they describe websites, not the person, and stay shared).
+
+### Before Phase 7
+Phase 2 already tagged new Skills with `space_id` and `visibility: "space"` and filtered with `loadSkills(spaceId)`; untagged older Skills read as `visibility: "all"`. Missing: any way to share, unshare or copy a Skill; any record of how a Skill was made; tie-breaking between a Space's own Skill and a shared one; protection for shared Skills against one Space's lessons; and the store's single cap of 200, newest first, let one busy Space push out other Spaces' and shared Skills. Save as Skill, Update the Skill and Undo for a learned Skill used the Space in use at the moment of the tap, not the chat's Space.
+
+### Visibility
+| Shown on the Skill card | Stored | Who can use it |
+|---|---|---|
+| This Space | `visibility: "space"`, `space_id` | that Space only |
+| Every Space | `visibility: "all"` (`space_id` = where it was made) | every Space |
+| (Built-in commands) | not in the Skill store | everywhere, as before |
+
+Every new user Skill defaults to the Space it is made in: learned on its own (`applyLearningPlan` with the task's Space), Save as Skill (the chat's Space), a recording made into a Skill, an imported SKILL.md file or link (the Space in use on the Skills screen), and a copy (the target Space). Importing never shares a Skill with every Space on its own; the person can choose "Use it in every Space" afterwards. A recording stays in the shared recording store, but the Skill made from it belongs to the Space it was made in.
+
+### Legacy Skills
+A Skill with no `space_id` and no `visibility` (saved before Memory v2) is read as `visibility: "all"`, `legacy: true`, `provenance: { origin: "legacy" }`: still available in every Space, never made private, no Space or creation details invented. Saving it again writes those fields as read. Deleting a Space never removes it. Moving it into one Space ("Use it only in this Space") is the person's choice; its origin stays `legacy`. Skills from Phases 2 to 6 have a Space but no origin record; none is added.
+
+### Origin (`provenance`)
+New Skills record `provenance: { origin, space_id, at }`, with origin `learned` (auto), `saved` (Save as Skill), `recording`, `imported`, `copied` or `legacy`. Keeping a learned Skill, renaming, improving, sharing or unsharing never changes its origin.
+
+### Sharing and unsharing (`setSkillReach`)
+- **Use it in every Space** (`every-space`): only for a Skill owned by the Space in use. It changes `visibility` on the same record; id, name, slug, steps, lessons, run counts, created time and origin stay. It is not a copy.
+- **Use it only in this Space** (`this-space`): for a shared Skill. The same record becomes `visibility: "space"` with `space_id` = the Space in use, keeping its id and history, and it disappears from other Spaces.
+
+### Copying (`copySkillToSpace`)
+**Copy to <Space>** makes a new, independent Skill in the target Space: a new id, the name, description, steps, start page and lessons to start from, run counts reset to 0, no last-run time, `visibility: "space"`, and `provenance: { origin: "copied", space_id, source_skill_id, source_space_id, copied_at }`. Nothing keeps the two in step: editing, renaming, running or improving one never changes the other. A Space's own Skill can't be copied into the same Space, or into a Space that doesn't exist. `/command` names stay unique across all Spaces, so a copy of `/expense-report` gets `/expense-report-2` unless renamed.
+
+### Matching
+Filtering happens before matching: `loadSkills(spaceId)` returns this Space's own Skills plus every-Space Skills; a private Skill of another Space is never scored, listed, run by name or deleted from here. When a Space's own Skill and a shared Skill fit equally well, the Space's own one wins (`matchSkill`); a clearly better shared match still wins. Neither is deleted. `MemorySource.relevantSkills()` returns the same allowed universe and order; the Context Compiler is unchanged.
+
+Every entry point uses the task's fixed Space: side-panel tasks (the chat's Space), scheduled and phone tasks (the pinned Space), the browser agent's skills tool (the `space_id` on its tool messages). Coding-tool (Bridge) commands have no task Space and keep the existing behaviour (the Space in use).
+
+### Shared Skills don't pick up one Space's details
+A shared Skill may run in many Spaces, so a lesson or a shorter way found in one Space ("department code FIN-44") is not written into it on its own. `applyLearningPlan` counts the run (worked or failed) on the shared Skill and returns the lesson or new steps as `held`. In the side panel the answer says so and offers **Keep it for this Space only** (a copy for this Space carrying it; that copy then wins matches in this Space) or **Add it for every Space** (written into the shared Skill). Scheduled and phone runs have nobody to ask, so only the run is counted. A Space's own Skill learns lessons and shorter ways on its own, as before. "Update the Skill with this run" is the person's own choice and still updates a shared Skill (the note says "in every Space").
+
+### Deleting and room
+- Deleting a Space's own Skill deletes only it. Deleting a shared Skill removes that one shared Skill (the Skills screen asks first, since it is gone from every Space). Copies are separate Skills and survive deletion of their source.
+- Deleting a Space removes its own Skills only; shared Skills, legacy Skills and copies living in other Spaces stay.
+- The store keeps at most 200 Skills per Space and 200 shared ones, newest first, so one busy Space only ever pushes out its own. Auto-learned pruning (30 unused per Space) only looks at the learning Space's own Skills.
+
+### Skills screen
+Each card shows a small "This Space" or "Every Space" label. A ⋯ button offers "Use it in every Space" or "Use it only in this Space", and "Copy to <Space>" for each other Space. The list follows the Space in use.
+
+### Results
+649 unit tests pass (625 before); typecheck and `validate:mvp` pass; real-Chromium smokes: spaces 32/32 (4 new), memory 31/31, learning 24/24, phone 18/18, automation 16/16, agent 13/13, helpers 11/11, e2e 13/13, settings 26/26, features 18/18, self-learning 13/13, docs 6/6. Filtering, matching and the compiler's Skill lookup over 600 Skills in three Spaces take about 24 ms.
+
+### Schema and migration
+No migration and no rewrite. New optional fields on `UserSkill`: `legacy`, `provenance` (`SkillProvenance`). New functions: `setSkillReach`, `copySkillToSpace`, `addSkillLesson`, `skillReach`; `applyLearningPlan` now returns `{ saved, held? }`, with `addRefinementToSharedSkill` and `keepRefinementInSpace`.
+
+### Tests
+`runtime/skill-scope.test.ts` (24): learned, saved, imported and recording Skills stay in their Space; keeping a learned Skill keeps its origin; sharing keeps id, words, lessons, counts and origin; another Space's Skill can't be shared from here; unsharing keeps history and hides it elsewhere; a copy has a new id, fresh counts and lineage; no same-Space or unknown-Space copies; changing the copy never changes the original and the other way round; legacy Skills stay everywhere, read as legacy with no invented details, survive Space deletion and can be moved into one Space; Phase 2–6 Skills get no origin; another Space's perfect match is never considered (matching, context, slash command); own beats shared on a tie, a better shared match still wins; deleting a Space removes only its own; copies survive deletion of the source; a shared Skill holds a lesson ("FIN-44") and a shorter way instead of changing for every Space, while counting the run; "keep for this Space" makes a copy that then wins in that Space; "add for every Space" updates the shared Skill; own Skills learn as before; one busy Space can't push out others; a task's Space is used whatever Space is in use; performance. The Phase 2 tests in `memory-scope.test.ts` and the phone test in `remote-tasks.test.ts` still pass. Real-Chromium spaces smoke: a Skill imported in Personal is in Personal only and not in Work; copied to Work and renamed there, the original is unchanged; shared with every Space, the same Skill shows in Work.
+
+### Remaining gaps after Phase 7
+- Held lessons for shared Skills live on the chat message; an unanswered one lapses, and scheduled/phone runs drop them (the run is still counted).
+- Coding-tool (Bridge) Skill lookups use the Space in use, as there is no task Space for them.
+- Slugs stay unique across all Spaces, so copies get a numbered `/command`.
+- Site Skills, procedural memory and recordings stay shared by every Space.
+- Space backups don't include Skills yet (Phase 9).
+- The decisions store still has one overall cap of 300 (follow-up 4).
+
 ## 4. Recorded follow-ups
-1. Skills saved before Memory v2 have no scope and are read as `visibility: "all"`. Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
+1. Done in Phase 7: legacy Skills read as an explicit every-Space Skill marked `legacy`. (Was: Skills saved before Memory v2 have no scope and are read as `visibility: "all"`.) Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
 2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
 3. Done in Phase 4: same-topic replacement now keeps the older fact as superseded history.
 4. Decisions live in one store (`browserharness.decisions.v1`) with one overall cap of 300. One busy Space must eventually not be able to push out another Space's decision history: cap per Space (as episodes are) or keep current decisions outside the cap. This is the same kind of issue as follow-up 2.
@@ -366,9 +428,9 @@ No migration and no rewrite of old records. New optional fields: `AboutMeFact.ki
 - Instructions said in chat are only offered, never saved on their own (current product policy). `/remember` and the screens save them.
 - The model extraction still drops secrets in `parseExtractedFacts` (same shared check) before the pipeline, so those drops are not in write diagnostics.
 - Write diagnostics have no screen.
-- Skills saved before Memory v2 still read as visible everywhere (Phase 7).
+- Skills saved before Memory v2 still read as visible everywhere (done in Phase 7: explicit legacy every-Space Skills).
 - The decisions store still has one overall cap of 300 (follow-up 4).
 
 ## 5. Recommended next phases
-- Done: Phase 6, the Memory Write Pipeline.
-- Next: Skill scope promotion (Phase 7), task/agent records with verifier verdicts (Phase 8), backup of tagged records including decisions (Phase 9). Memory-provider adapters implement `MemorySource`.
+- Done: Phase 6, the Memory Write Pipeline; Phase 7, Skill scope, sharing and copying.
+- Next: task/agent records with verifier verdicts (Phase 8), backup of tagged records including decisions (Phase 9). Memory-provider adapters implement `MemorySource`.

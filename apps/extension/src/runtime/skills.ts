@@ -6,6 +6,12 @@ import { renderIntentPrompt, workflowToIntentSkill } from "./intent-skill";
 import type { BrowserTaskSessionEvidence } from "./session-evidence";
 import type { SavedWorkflow } from "./workflows";
 import { recordSpace, resolveSpace, withinSpace } from "./memory-scope";
+import { DEFAULT_SPACE_ID, loadSpaces } from "./spaces";
+
+async function spaceExists(id: string): Promise<boolean> {
+  if (id === DEFAULT_SPACE_ID) return true;
+  return (await loadSpaces()).spaces.some((space) => space.id === id);
+}
 
 export interface UserSkill {
   id: string;
@@ -33,10 +39,36 @@ export interface UserSkill {
    * every Space; Skills saved before Spaces had a say keep working everywhere.
    */
   visibility?: "space" | "all";
+  /**
+   * Saved before Skills belonged to a Space: it has no Space of its own and
+   * is shared by every Space. Set when read; its origin is not guessed.
+   */
+  legacy?: boolean;
+  /** How the Skill came to be. Missing on Skills saved before this was kept; never guessed for them. */
+  provenance?: SkillProvenance;
+}
+
+/** How a Skill came to be. Changing where it can be used never changes this. */
+export interface SkillProvenance {
+  origin: "learned" | "saved" | "recording" | "imported" | "copied" | "legacy";
+  /** The Space it was made in (for a copy: the Space it was copied into). */
+  space_id?: string;
+  at?: string;
+  /** For a copy: the Skill and Space it was copied from, and when. */
+  source_skill_id?: string;
+  source_space_id?: string;
+  copied_at?: string;
+}
+
+/** Where a Skill can be used, in plain words for the Skill card. */
+export type SkillReach = "this-space" | "every-space";
+export function skillReach(skill: UserSkill): SkillReach {
+  return skill.visibility === "all" ? "every-space" : "this-space";
 }
 
 const KEY = "browserharness.skills";
-const MAX_SKILLS = 200;
+/** At most this many Skills per Space, and this many shared with every Space, so one busy Space never pushes out another's. */
+export const MAX_SKILLS = 200;
 const MAX_LESSONS = 8;
 const MAX_INSTRUCTIONS = 8000;
 
@@ -67,9 +99,28 @@ function uniqueSlug(base: string, taken: string[], ownId?: string, skills: UserS
   }
 }
 
-/** A Skill saved before Skills belonged to a Space was shared by every Space, and still is. */
+/**
+ * A Skill saved before Skills belonged to a Space was shared by every Space,
+ * and still is: it reads as an every-Space Skill marked legacy, with no Space
+ * and no invented origin.
+ */
 function normalizeSkill(skill: UserSkill): UserSkill {
-  return skill.space_id || skill.visibility ? skill : { ...skill, visibility: "all" };
+  if (skill.space_id || skill.visibility) return skill;
+  return { ...skill, visibility: "all", legacy: true, provenance: skill.provenance ?? { origin: "legacy" } };
+}
+
+/** The origin a new Skill gets from the way it was made. */
+function originOf(skill: UserSkill): SkillProvenance["origin"] {
+  switch (skill.source) {
+    case "auto":
+      return "learned";
+    case "recording":
+      return "recording";
+    case "import":
+      return "imported";
+    default:
+      return "saved";
+  }
 }
 
 /** Every Skill in every Space. Only for keeping slugs unique and for storage. */
@@ -92,8 +143,24 @@ export function ownedBySpace(skill: UserSkill, spaceId: string): boolean {
   return skill.visibility !== "all" && recordSpace(skill) === spaceId;
 }
 
+/** Who a Skill's room counts against: its own Space, or the every-Space shelf. */
+function shelf(skill: UserSkill): string {
+  return skill.visibility === "all" ? "\u0000all" : recordSpace(skill);
+}
+
+/** Newest first, at most MAX_SKILLS per Space and MAX_SKILLS shared ones: a busy Space only ever pushes out its own. */
+function capped(skills: UserSkill[]): UserSkill[] {
+  const counts = new Map<string, number>();
+  return skills.filter((skill) => {
+    const key = shelf(skill);
+    const count = (counts.get(key) ?? 0) + 1;
+    counts.set(key, count);
+    return count <= MAX_SKILLS;
+  });
+}
+
 async function store(skills: UserSkill[]): Promise<void> {
-  await chrome.storage.local.set({ [KEY]: skills.slice(0, MAX_SKILLS) });
+  await chrome.storage.local.set({ [KEY]: capped(skills) });
 }
 
 /**
@@ -110,8 +177,12 @@ export async function saveSkill(skill: UserSkill, reserved: string[] = [], space
       : skill.space_id || skill.visibility
         ? { space_id: skill.space_id, visibility: skill.visibility }
         : { space_id: await resolveSpace(spaceId), visibility: "space" as const };
+  // Where it came from is kept as first recorded (keeping a learned Skill doesn't make it "saved").
+  const provenance =
+    existing?.provenance ?? skill.provenance ?? (existing ? undefined : { origin: originOf(skill), space_id: scope.space_id, at: new Date().toISOString() });
   const next: UserSkill = {
     ...skill,
+    ...(provenance ? { provenance } : {}),
     ...(scope.space_id ? { space_id: scope.space_id } : {}),
     ...(scope.visibility ? { visibility: scope.visibility } : {}),
     instructions: skill.instructions.slice(0, MAX_INSTRUCTIONS),
@@ -127,6 +198,69 @@ export async function deleteSkill(id: string, spaceId?: string): Promise<void> {
   const visible = new Set((await loadSkills(spaceId)).map((skill) => skill.id));
   if (!visible.has(id)) return;
   await store((await loadAllSkills()).filter((skill) => skill.id !== id));
+}
+
+/**
+ * Makes one Skill available in every Space, or only in this one. It is the
+ * same Skill either way: id, name, steps, lessons, run counts and origin stay.
+ * Making it available everywhere is only offered for a Skill of this Space;
+ * "only this Space" moves a shared Skill into the Space it is used from.
+ */
+export async function setSkillReach(id: string, reach: SkillReach, spaceId?: string): Promise<UserSkill | null> {
+  const space = await resolveSpace(spaceId);
+  const skills = await loadAllSkills();
+  const skill = skills.find((item) => item.id === id);
+  if (!skill || !withinSpace([skill], space).length) return null;
+  if (reach === "every-space" && !ownedBySpace(skill, space)) return skill.visibility === "all" ? skill : null;
+  const next: UserSkill =
+    reach === "every-space"
+      ? { ...skill, visibility: "all" }
+      : { ...skill, visibility: "space", space_id: space, legacy: undefined };
+  if (!next.legacy) delete next.legacy;
+  await store(skills.map((item) => (item.id === id ? next : item)));
+  return next;
+}
+
+/**
+ * Copies a Skill into another Space as a new, independent Skill: the same
+ * name, steps and lessons to start from, its own id, a fresh run count, and a
+ * note of where it was copied from. Changing either one never changes the other.
+ */
+export async function copySkillToSpace(id: string, toSpaceId: string, fromSpaceId?: string, reserved: string[] = []): Promise<UserSkill | null> {
+  const from = await resolveSpace(fromSpaceId);
+  const original = (await loadSkills(from)).find((item) => item.id === id);
+  if (!original || !toSpaceId) return null;
+  // Copying a Space's own Skill into the same Space would only make a twin.
+  if (original.visibility !== "all" && recordSpace(original) === toSpaceId) return null;
+  if (!(await spaceExists(toSpaceId))) return null;
+  const now = new Date().toISOString();
+  const copy: UserSkill = {
+    id: crypto.randomUUID(),
+    name: original.name,
+    slug: original.slug,
+    description: original.description,
+    instructions: original.instructions,
+    ...(original.start_url ? { start_url: original.start_url } : {}),
+    // A copy is something the person chose to keep, not a draft learned on its own.
+    source: original.source === "auto" ? "chat" : original.source,
+    created_at: now,
+    updated_at: now,
+    runs: 0,
+    successes: 0,
+    failures: 0,
+    lessons: [...original.lessons],
+    space_id: toSpaceId,
+    visibility: "space",
+    provenance: {
+      origin: "copied",
+      space_id: toSpaceId,
+      at: now,
+      source_skill_id: original.id,
+      source_space_id: original.visibility === "all" ? from : recordSpace(original),
+      copied_at: now
+    }
+  };
+  return saveSkill(copy, reserved, toSpaceId);
 }
 
 export async function renameSkill(id: string, name: string, reserved: string[] = [], spaceId?: string): Promise<UserSkill | null> {
@@ -157,6 +291,17 @@ export async function recordSkillRun(
         ? [note, ...skill.lessons.filter((item) => item !== note)].slice(0, MAX_LESSONS)
         : skill.lessons
   };
+  await store(skills.map((item) => (item.id === id ? next : item)));
+  return next;
+}
+
+/** Adds a lesson without counting a run (the person chose to keep it). */
+export async function addSkillLesson(id: string, lesson: string): Promise<UserSkill | null> {
+  const skills = await loadAllSkills();
+  const skill = skills.find((item) => item.id === id);
+  const note = lesson.replace(/\s+/g, " ").trim().slice(0, 240);
+  if (!skill || !note) return skill ?? null;
+  const next: UserSkill = { ...skill, lessons: [note, ...skill.lessons.filter((item) => item !== note)].slice(0, MAX_LESSONS), updated_at: new Date().toISOString() };
   await store(skills.map((item) => (item.id === id ? next : item)));
   return next;
 }

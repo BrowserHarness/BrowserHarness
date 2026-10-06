@@ -5,6 +5,8 @@
 import type { BrowserTaskSessionEvidence } from "./session-evidence";
 import { resolveSpace } from "./memory-scope";
 import {
+  addSkillLesson,
+  copySkillToSpace,
   deleteSkill,
   loadAllSkills,
   ownedBySpace,
@@ -66,14 +68,21 @@ export function skillSimilarity(task: string, skill: Pick<UserSkill, "name" | "d
   return Math.min(1, shared / union + siteNamed);
 }
 
-/** The saved Skill that best fits a new request, if one fits well enough. */
+/**
+ * The saved Skill that best fits a new request, if one fits well enough.
+ * Pass only the Skills the Space may use (loadSkills), never all of them.
+ * When a Space's own Skill and an every-Space Skill fit equally well, the
+ * Space's own one wins.
+ */
 export function matchSkill(task: string, skills: UserSkill[]): { skill: UserSkill; score: number } | null {
   let best: { skill: UserSkill; score: number } | null = null;
   for (const skill of skills) {
     // A Skill that keeps failing is not offered as a hint.
     if (skill.runs >= 3 && skill.successes === 0) continue;
     const score = skillSimilarity(task, skill);
-    if (score >= MATCH_THRESHOLD && score > (best?.score ?? 0)) best = { skill, score };
+    if (score < MATCH_THRESHOLD) continue;
+    const ownBeatsShared = best && score === best.score && skill.visibility !== "all" && best.skill.visibility === "all";
+    if (!best || score > best.score || ownBeatsShared) best = { skill, score };
   }
   return best;
 }
@@ -158,24 +167,76 @@ export function autoSkillsToPrune(skills: UserSkill[]): string[] {
 }
 
 /**
- * Carries out a plan in the Space the task ran in; returns the Skill it
- * saved, if any. A learned Skill belongs to that Space, and only that
- * Space's own unused Skills make room for it.
+ * A lesson or a shorter way found while running an every-Space Skill in one
+ * Space. It may hold that Space's own details ("department code FIN-44"), so
+ * it is not written into the shared Skill on its own: the person chooses to
+ * add it for every Space or keep a copy for this Space with it.
  */
-export async function applyLearningPlan(plan: LearningPlan, reserved: string[] = [], spaceId?: string): Promise<UserSkill | null> {
+export interface HeldRefinement {
+  skillId: string;
+  slug: string;
+  /** The Space the run happened in. */
+  spaceId: string;
+  lesson?: string;
+  improved?: Pick<UserSkill, "instructions" | "start_url">;
+}
+
+export interface LearningResult {
+  /** A Skill learned or improved by this run. */
+  saved: UserSkill | null;
+  /** Something learned about a shared Skill, waiting for the person. */
+  held?: HeldRefinement;
+}
+
+/**
+ * Carries out a plan in the Space the task ran in. A learned Skill belongs to
+ * that Space, and only that Space's own unused Skills make room for it. A
+ * Skill shared with every Space only has its run counted: a lesson or new
+ * steps from one Space are held for the person instead of changing it for all.
+ */
+export async function applyLearningPlan(plan: LearningPlan, reserved: string[] = [], spaceId?: string): Promise<LearningResult> {
   const space = await resolveSpace(spaceId);
   if (plan.kind === "learn") {
     const saved = await saveSkill(plan.skill, reserved, space);
     const own = (await loadAllSkills()).filter((skill) => ownedBySpace(skill, space));
     for (const id of autoSkillsToPrune(own)) await deleteSkill(id, space);
-    return saved;
+    return { saved };
   }
+  const id = plan.kind === "improve" ? plan.skill.id : plan.kind === "none" ? "" : plan.skillId;
+  const current = id ? (await loadAllSkills()).find((skill) => skill.id === id) : undefined;
+  const shared = current?.visibility === "all";
   if (plan.kind === "improve") {
+    if (shared && current) {
+      await recordSkillRun(current.id, "worked");
+      return { saved: null, held: { skillId: current.id, slug: current.slug, spaceId: space, improved: { instructions: plan.skill.instructions, start_url: plan.skill.start_url } } };
+    }
     const saved = await saveSkill(plan.skill, reserved, space);
     await recordSkillRun(saved.id, "worked");
-    return saved;
+    return { saved };
   }
   if (plan.kind === "confirm") await recordSkillRun(plan.skillId, "worked");
-  if (plan.kind === "lesson") await recordSkillRun(plan.skillId, "failed", plan.lesson);
-  return null;
+  if (plan.kind === "lesson") {
+    if (shared && current) {
+      await recordSkillRun(current.id, "failed");
+      return { saved: null, held: { skillId: current.id, slug: current.slug, spaceId: space, lesson: plan.lesson } };
+    }
+    await recordSkillRun(plan.skillId, "failed", plan.lesson);
+  }
+  return { saved: null };
+}
+
+/** The person chose to add a held lesson or new steps to the shared Skill, for every Space. */
+export async function addRefinementToSharedSkill(held: HeldRefinement, reserved: string[] = []): Promise<UserSkill | null> {
+  const current = (await loadAllSkills()).find((skill) => skill.id === held.skillId);
+  if (!current) return null;
+  if (held.improved) return saveSkill({ ...current, instructions: held.improved.instructions, start_url: held.improved.start_url ?? current.start_url, lessons: [] }, reserved);
+  return held.lesson ? addSkillLesson(current.id, held.lesson) : current;
+}
+
+/** The person chose to keep the refinement in this Space only: a copy of the shared Skill for this Space, with it. */
+export async function keepRefinementInSpace(held: HeldRefinement, reserved: string[] = []): Promise<UserSkill | null> {
+  const copy = await copySkillToSpace(held.skillId, held.spaceId, held.spaceId, reserved);
+  if (!copy) return null;
+  if (held.improved) return saveSkill({ ...copy, instructions: held.improved.instructions, start_url: held.improved.start_url ?? copy.start_url, lessons: [] }, reserved);
+  return held.lesson ? addSkillLesson(copy.id, held.lesson) : copy;
 }
