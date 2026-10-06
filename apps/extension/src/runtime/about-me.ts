@@ -113,8 +113,15 @@ function topicOf(fact: AboutMeFact): string | undefined {
 }
 
 /** Marks a fact as no longer true, keeping it and saying what replaced it. */
-function supersede(fact: AboutMeFact, by: AboutMeFact): AboutMeFact {
-  return { ...fact, status: "superseded", valid_until: by.created_at, superseded_by: by.id };
+function supersede(fact: AboutMeFact, by: AboutMeFact, at = by.created_at): AboutMeFact {
+  return { ...fact, status: "superseded", valid_until: at, superseded_by: by.id };
+}
+
+/** The fact with this topic, or none: topic follows the words. */
+function withTopic(fact: AboutMeFact, text: string): AboutMeFact {
+  const { topic: _old, ...rest } = fact;
+  const topic = factTopic(text);
+  return { ...rest, text, ...(topic ? { topic } : {}) };
 }
 
 /**
@@ -201,7 +208,7 @@ const IDENTITY_TOPICS = new Set(["name", "nickname", "home", "language"]);
  * is, since only that was ever kept apart by accident (before every-Space
  * facts existed).
  */
-async function supersedeNarrower(added: AboutMeFact[], saidIn: string): Promise<void> {
+async function supersedeNarrower(added: AboutMeFact[], saidIn: string, at?: string): Promise<void> {
   const byTopic = new Map(added.filter((fact) => fact.topic).map((fact) => [fact.topic as string, fact]));
   if (!byTopic.size) return;
   const { spaces } = await loadSpaces();
@@ -215,7 +222,7 @@ async function supersedeNarrower(added: AboutMeFact[], saidIn: string): Promise<
       if (!by || !isCurrent(fact) || fact.explicit_scope) return fact;
       if (id !== saidIn && !IDENTITY_TOPICS.has(topic as string)) return fact;
       changed = true;
-      return supersede(fact, by);
+      return supersede(fact, by, at);
     });
     if (changed) await store(next, id);
   }
@@ -240,24 +247,107 @@ export async function rememberFacts(
   return added;
 }
 
-/** Moves a fact between this Space and every Space (moving it to this Space is choosing it for this Space). */
+/**
+ * Moves a fact between this Space and every Space. It is the same fact in a
+ * new place, not a change in life: id, wording, topic, dates, links and
+ * provenance stay as they are; only where it lives (and whether it was kept
+ * to this Space on purpose) changes. Its older versions stay where they were
+ * and keep pointing at it.
+ *
+ * If the destination already has a current fact on the same topic, the moved
+ * one wins there (the person chose it) and the other is kept as replaced, as
+ * of now. If the destination already says exactly the same thing, the two
+ * become one: the destination's record stays and links to the moved one are
+ * pointed at it.
+ */
 export async function moveFact(id: string, to: FactScope, spaceId?: string): Promise<boolean> {
   const from: FactScope = to === "global" ? "space" : "global";
   const source = await loadAll(spaceId, from);
   const fact = source.find((item) => item.id === id && isCurrent(item));
   if (!fact) return false;
+  const now = new Date().toISOString();
+  const { explicit_scope: _explicit, ...rest } = fact;
+  const moved: AboutMeFact = to === "space" ? { ...rest, explicit_scope: true } : rest;
+  let target = await loadAll(spaceId, to);
+  const same = target.find((item) => isCurrent(item) && item.text.toLowerCase() === fact.text.toLowerCase());
   await store(source.filter((item) => item.id !== id), spaceId, from);
-  await addFacts([fact.text], fact.source, spaceId, to, { explicit: to === "space" });
+  if (same) {
+    // Already said there: keep that record, and point any links at it.
+    target = target.map((item) =>
+      item.id === same.id
+        ? { ...item, ...(to === "space" ? { explicit_scope: true } : {}), ...(!item.supersedes && fact.supersedes ? { supersedes: fact.supersedes } : {}) }
+        : item
+    );
+    await store(target.map((item) => relink(item, id, same.id)), spaceId, to);
+    const left = await loadAll(spaceId, from);
+    await store(left.map((item) => relink(item, id, same.id)), spaceId, from);
+    return true;
+  }
+  const topic = topicOf(moved);
+  target = target.map((item) => (topic && isCurrent(item) && topicOf(item) === topic ? supersede(item, moved, now) : item));
+  await store([moved, ...target], spaceId, to);
+  if (to === "global") await supersedeNarrower([moved], await resolveSpace(spaceId), now);
   return true;
 }
 
-/** Corrects a fact's wording (a typo, not a change in life): it stays one fact. */
+/** Points a fact's links from one id to another. */
+function relink(fact: AboutMeFact, from: string, to: string): AboutMeFact {
+  if (fact.superseded_by !== from && fact.supersedes !== from) return fact;
+  return {
+    ...fact,
+    ...(fact.superseded_by === from ? { superseded_by: to } : {}),
+    ...(fact.supersedes === from ? { supersedes: to } : {})
+  };
+}
+
+/**
+ * Corrects a fact's wording (a typo or a better phrasing, not a change in
+ * life): it stays the same fact, with the same id, dates, links, level and
+ * provenance. Its topic follows the new words, so "My currency is INR"
+ * corrected to "I live in Mumbai" is about home now, and to "I own a bicycle"
+ * has no topic. If the corrected fact now shares a topic with another current
+ * fact at its level, it is the newest word on that and the other is kept as
+ * replaced.
+ */
 export async function updateFact(id: string, text: string, scope: FactScope = "space"): Promise<boolean> {
   const value = clean(text);
   if (!isStorableFact(value)) return false;
   const facts = await loadAll(undefined, scope);
-  await store(facts.map((fact) => (fact.id === id ? { ...fact, text: value, source: "you" } : fact)), undefined, scope);
+  const found = facts.find((fact) => fact.id === id);
+  if (!found) return false;
+  const corrected = { ...withTopic(found, value), source: "you" as const };
+  const topic = isCurrent(corrected) ? corrected.topic : undefined;
+  const now = new Date().toISOString();
+  await store(
+    facts.map((fact) => {
+      if (fact.id === id) return corrected;
+      return topic && isCurrent(fact) && topicOf(fact) === topic ? supersede(fact, corrected, now) : fact;
+    }),
+    undefined,
+    scope
+  );
   return true;
+}
+
+/** A fact and its line of earlier and later versions, oldest first, looked up in this Space and every Space. */
+export async function factLineage(id: string, spaceId?: string): Promise<AboutMeFact[]> {
+  const all = [...(await loadAll(spaceId)), ...(await loadAll(undefined, "global"))];
+  const byId = new Map(all.map((fact) => [fact.id, fact]));
+  const start = byId.get(id);
+  if (!start) return [];
+  const line = [start];
+  const seen = new Set([id]);
+  for (let fact = start; fact.supersedes && byId.has(fact.supersedes) && !seen.has(fact.supersedes); ) {
+    fact = byId.get(fact.supersedes) as AboutMeFact;
+    seen.add(fact.id);
+    line.unshift(fact);
+  }
+  for (let fact = start; fact.superseded_by && byId.has(fact.superseded_by) && !seen.has(fact.superseded_by); ) {
+    fact = byId.get(fact.superseded_by) as AboutMeFact;
+    seen.add(fact.id);
+    line.push(fact);
+  }
+  return line;
 }
 
 /** Deletes one fact, true now or older, at the level it is shown. */

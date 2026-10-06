@@ -102,7 +102,10 @@ Both the current facts and the replaced ones live in the same array under the sa
 - **B. A Space fact overrides an every-Space fact only in that Space.** Every-Space USD plus Work INR: Work sees INR, other Spaces see USD, and USD is not superseded.
 - **C. A new every-Space fact supersedes older narrower ones that were not kept apart on purpose.** In the Space where it was said: any topic. In other Spaces: only who the person is (name, nickname, home, language), because those were only ever kept per Space by accident (before Phase 3). A fact with `explicit_scope` is never superseded by an every-Space fact.
 - Saying an old fact again makes it current again (a new record that supersedes the one in between).
-- Editing a fact's wording on the About you screen is a correction, not a change in life: the same record is updated.
+- Editing a fact's wording on the About you screen is a correction, not a change in life: the same record keeps its id, `valid_from`, links, `explicit_scope` and provenance; `source` becomes "you"; `topic` is recomputed from the new words (and dropped when they no longer map to a known topic). If the corrected fact now shares a topic with another current fact at its level, that one is kept as replaced, so there is never more than one current fact per topic per level.
+- Moving a fact between this Space and every Space ("Every Space" / "Only this Space") moves the same record. Its id, text, topic, `created_at`, `valid_from`, links and provenance are unchanged, and no replaced copy is left behind, so a move is never recorded as a change in life. `explicit_scope` is set when it moves into a Space and removed when it moves to every Space. Its older versions stay where they were and still point at it. `factLineage(id)` walks the line across both levels.
+  - If the destination has a current fact on the same topic, the moved fact wins there and the other is kept as replaced as of the move. Moving to every Space also applies rule C.
+  - If the destination already has exactly the same words, the destination record stays, and links to the moved record are pointed at it, so none are left dangling.
 - `/forget` and Delete remove matching facts outright, current and replaced, at that one level.
 
 ### Decision model
@@ -139,7 +142,8 @@ None. Old facts have no `status` and read as current; nothing is rewritten on lo
 1. Skills saved before Memory v2 have no scope and are read as `visibility: "all"`. Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
 2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
 3. Done in Phase 4: same-topic replacement now keeps the older fact as superseded history.
-4. Memory is stored in `chrome.storage.local` behind plain functions. To make it provider-ready (an external or synced memory store later), the Context Compiler should read through one interface (`currentState`, `earlierState`, episodes, Skills) rather than the stores directly.
+4. Decisions live in one store (`browserharness.decisions.v1`) with one overall cap of 300. One busy Space must eventually not be able to push out another Space's decision history: cap per Space (as episodes are) or keep current decisions outside the cap. This is the same kind of issue as follow-up 2.
+5. Memory is stored in `chrome.storage.local` behind plain functions. To make it provider-ready (an external or synced memory store later), the Context Compiler should read through one interface (`currentState`, `earlierState`, episodes, Skills) rather than the stores directly.
 
 ## 5. Recommended next phases
 - Phase 5: Context Compiler replacing the string concatenation (`userMemoryPrompt` + recall + Skill hint + chat context), with authority order (this Space > every Space > history), per-model token budget, selection of what is useful for the request, and a diagnostics record of what was sent and why.

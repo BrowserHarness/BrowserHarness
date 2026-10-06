@@ -3,13 +3,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   addFacts,
+  factLineage,
   forgetCommand,
   loadAboutMe,
   loadEarlierFacts,
   loadGlobalAboutMe,
   moveFact,
   rememberFacts,
-  scopedFactsInMessage
+  scopedFactsInMessage,
+  updateFact
 } from "./about-me";
 import {
   currentDecisions,
@@ -288,5 +290,157 @@ describe("decisions", () => {
     expect((await earlierDecisions(DEFAULT_SPACE_ID))[0].status).toBe("reversed");
     expect((await recordDecision({ subject: "Admin password", value: "hunter22" }, DEFAULT_SPACE_ID)).ok).toBe(false);
     expect(await decideCommand("just a sentence", DEFAULT_SPACE_ID)).toContain("Tell me what you decided");
+  });
+});
+
+describe("correcting a fact's wording", () => {
+  const ids = (facts: Array<{ id: string }>) => facts.map((fact) => fact.id);
+
+  it("keeps the same fact and its topic when the topic still fits", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    const [inr] = await addFacts(["My currency is INR"], "you", w);
+    expect(await updateFact(inr.id, "My currency is USD")).toBe(true);
+    const [fixed] = await loadAboutMe(w);
+    expect(fixed).toMatchObject({ id: inr.id, text: "My currency is USD", topic: "currency", valid_from: inr.valid_from, created_at: inr.created_at });
+    expect(fixed.provenance).toEqual(inr.provenance);
+    // A correction, not a change in life: nothing is kept as replaced.
+    expect(await loadEarlierFacts(w)).toEqual([]);
+  });
+
+  it("follows the new words to a new topic", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    await addFacts(["My currency is USD"], "you", w);
+    const [inr] = await addFacts(["My currency is INR"], "you", w, "space", { explicit: true });
+    expect(await updateFact(inr.id, "I live in Mumbai")).toBe(true);
+    const fixed = (await loadAboutMe(w)).find((fact) => fact.id === inr.id);
+    expect(fixed).toMatchObject({ topic: "home", explicit_scope: true, supersedes: (await loadEarlierFacts(w))[0].id });
+    // Still kept as an earlier currency, pointing at the corrected fact.
+    expect((await loadEarlierFacts(w))[0]).toMatchObject({ text: "My currency is USD", superseded_by: inr.id });
+    // Every-Space currency now shows in Work, and the corrected home wins there.
+    await addFacts(["My currency is EUR"], "you", undefined, "global");
+    await addFacts(["I live in Pune"], "you", DEFAULT_SPACE_ID, "global");
+    const office = await userMemoryPrompt(w);
+    expect(office).toContain("My currency is EUR");
+    expect(office).toContain("I live in Mumbai");
+    expect(office).not.toContain("Pune");
+  });
+
+  it("drops a topic the new words no longer have", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    const [inr] = await addFacts(["My currency is INR"], "you", w);
+    await updateFact(inr.id, "I own a bicycle");
+    const [fixed] = await loadAboutMe(w);
+    expect(fixed.text).toBe("I own a bicycle");
+    expect(fixed.topic).toBeUndefined();
+    // A later currency no longer replaces the bicycle.
+    await addFacts(["My currency is GBP"], "you", w);
+    expect(texts(await loadAboutMe(w)).sort()).toEqual(["I own a bicycle", "My currency is GBP"]);
+    expect(ids(await loadEarlierFacts(w))).toEqual([]);
+  });
+
+  it("a correction onto a topic already in use leaves one current fact on it", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    const [pune] = await addFacts(["I live in Pune"], "you", w);
+    const [bike] = await addFacts(["I own a bicycle"], "you", w);
+    await updateFact(bike.id, "I live in Goa");
+    expect(texts(await loadAboutMe(w))).toEqual(["I live in Goa"]);
+    expect((await loadEarlierFacts(w))[0]).toMatchObject({ id: pune.id, superseded_by: bike.id });
+  });
+});
+
+describe("moving a fact between this Space and every Space", () => {
+  it("moves the same fact, keeping its history linked and its dates", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    await addFacts(["I live in Pune"], "you", w, "global");
+    const [mumbai] = await addFacts(["I live in Mumbai"], "you", w, "global");
+    expect(await moveFact(mumbai.id, "space")).toBe(true);
+    const [moved] = await loadAboutMe(w);
+    // Same record, same dates and provenance: not a new event in life.
+    expect(moved).toMatchObject({
+      id: mumbai.id,
+      text: "I live in Mumbai",
+      topic: "home",
+      created_at: mumbai.created_at,
+      valid_from: mumbai.valid_from,
+      supersedes: mumbai.supersedes,
+      explicit_scope: true
+    });
+    expect(moved.provenance).toEqual(mumbai.provenance);
+    expect(moved.valid_until).toBeUndefined();
+    // Pune still points at it, and the line can be walked both ways.
+    const [pune] = await loadEarlierFacts(undefined, "global");
+    expect(pune).toMatchObject({ text: "I live in Pune", superseded_by: mumbai.id });
+    expect(texts(await factLineage(pune.id, w))).toEqual(["I live in Pune", "I live in Mumbai"]);
+    expect(texts(await factLineage(mumbai.id, w))).toEqual(["I live in Pune", "I live in Mumbai"]);
+    // No false "moved home" event anywhere.
+    expect(await loadEarlierFacts(w)).toEqual([]);
+    expect(texts(await loadEarlierFacts(undefined, "global"))).toEqual(["I live in Pune"]);
+    // And back to every Space: still the same record, no longer kept here on purpose.
+    await moveFact(mumbai.id, "global");
+    const [back] = await loadGlobalAboutMe();
+    expect(back.id).toBe(mumbai.id);
+    expect(back.explicit_scope).toBeUndefined();
+    expect(texts(await factLineage(pune.id, w))).toEqual(["I live in Pune", "I live in Mumbai"]);
+  });
+
+  it("every Space → this Space, where this Space already has the topic: one current value, the other kept", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    const [inr] = await addFacts(["My currency is INR"], "you", w);
+    const [usd] = await addFacts(["My currency is USD"], "you", undefined, "global");
+    await moveFact(usd.id, "space");
+    expect(texts(await loadAboutMe(w))).toEqual(["My currency is USD"]);
+    const [old] = await loadEarlierFacts(w);
+    expect(old).toMatchObject({ id: inr.id, status: "superseded", superseded_by: usd.id });
+    expect(old.valid_until! >= usd.created_at).toBe(true);
+    expect(await loadGlobalAboutMe()).toEqual([]);
+    expect((await loadAboutMe(w))[0].explicit_scope).toBe(true);
+  });
+
+  it("this Space → every Space, where every Space already has the topic: one current value, the other kept", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    const [usd] = await addFacts(["My currency is USD"], "you", undefined, "global");
+    const [inr] = await addFacts(["My currency is INR"], "you", w);
+    await moveFact(inr.id, "global");
+    expect(texts(await loadGlobalAboutMe())).toEqual(["My currency is INR"]);
+    expect((await loadGlobalAboutMe())[0]).toMatchObject({ id: inr.id, created_at: inr.created_at, valid_from: inr.valid_from });
+    expect((await loadEarlierFacts(undefined, "global"))[0]).toMatchObject({ id: usd.id, superseded_by: inr.id });
+    expect(await loadAboutMe(w)).toEqual([]);
+    expect(await userMemoryPrompt(DEFAULT_SPACE_ID)).toContain("My currency is INR");
+    expect(await userMemoryPrompt(DEFAULT_SPACE_ID)).not.toContain("USD");
+  });
+
+  it("moving onto the very same words leaves one fact and no broken links", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    await addFacts(["I live in Pune"], "you", w);
+    const [local] = await addFacts(["I live in Goa"], "you", w);
+    const [shared] = await addFacts(["I live in Goa"], "you", undefined, "global");
+    // (The every-Space fact replaced the local one already; say it again here on purpose.)
+    const [again] = await addFacts(["I live in Goa"], "you", w, "space", { explicit: true });
+    await moveFact(again.id, "global");
+    expect(texts(await loadGlobalAboutMe())).toEqual(["I live in Goa"]);
+    expect((await loadGlobalAboutMe())[0].id).toBe(shared.id);
+    const all = [...(await loadEarlierFacts(w)), ...(await loadEarlierFacts(undefined, "global"))];
+    const known = new Set([...all.map((fact) => fact.id), shared.id]);
+    for (const fact of all) if (fact.superseded_by) expect(known.has(fact.superseded_by)).toBe(true);
+    expect(local.id).not.toBe(shared.id);
+  });
+
+  it("is kept to this Space on purpose after moving there, so a new home for every Space leaves it", async () => {
+    const w = await space("Work");
+    pinSpace(w);
+    const [goa] = await addFacts(["I live in Goa"], "you", w, "global");
+    await moveFact(goa.id, "space");
+    await addFacts(["I live in Delhi"], "learned", DEFAULT_SPACE_ID, "global");
+    expect(texts(await loadAboutMe(w))).toEqual(["I live in Goa"]);
+    expect(await userMemoryPrompt(w)).toContain("I live in Goa");
+    expect(await userMemoryPrompt(DEFAULT_SPACE_ID)).toContain("I live in Delhi");
   });
 });
