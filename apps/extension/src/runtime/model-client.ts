@@ -163,11 +163,22 @@ function usesLocalBudget(config: ProviderConfig): boolean {
 }
 
 export function promptBudgetFor(config: ProviderConfig): PromptBudget {
-  return usesLocalBudget(config) ? LOCAL_BUDGET : HOSTED_BUDGET;
+  return usesLocalBudget(config) || smallRequestsOnly.has(nativeToolsKey(config)) ? LOCAL_BUDGET : HOSTED_BUDGET;
+}
+
+// Services whose plan refused a request as too large (Groq's free plan takes
+// 7,000 tokens a minute): send them the shorter local-model prompt from now on.
+const smallRequestsOnly = new Set<string>();
+
+function isRequestTooLarge(error: unknown): boolean {
+  return /\(413\)|request too large/i.test(error instanceof Error ? error.message : String(error));
 }
 
 export function agentSystemFor(config: ProviderConfig): string {
   if (usesLocalBudget(config)) return AGENT_SYSTEM_COMPACT;
+  if (smallRequestsOnly.has(nativeToolsKey(config))) {
+    return usesNativeTools(config) ? `${AGENT_SYSTEM_COMPACT}\n\n${NATIVE_TOOLS_NOTE}` : AGENT_SYSTEM_COMPACT;
+  }
   return usesNativeTools(config) ? `${AGENT_SYSTEM}\n\n${NATIVE_TOOLS_NOTE}` : AGENT_SYSTEM;
 }
 
@@ -1352,38 +1363,50 @@ export async function nextAgentDecision(
     );
   }
 
-  const prompt = agentPrompt(
-    task,
-    observation,
-    trail,
-    evidence,
-    visionAvailable,
-    Boolean(screenshotDataUrl),
-    recalledMemory,
-    recalledProcedures,
-    mcpCatalog,
-    promptBudgetFor(config)
-  );
+  const promptFor = () =>
+    agentPrompt(
+      task,
+      observation,
+      trail,
+      evidence,
+      visionAvailable,
+      Boolean(screenshotDataUrl),
+      recalledMemory,
+      recalledProcedures,
+      mcpCatalog,
+      promptBudgetFor(config)
+    );
+  let prompt = promptFor();
 
-  const raw =
+  const ask = (text: string) =>
     config.provider === "anthropic"
-      ? await anthropicRequest(
+      ? anthropicRequest(
           config,
           agentSystemFor(config),
-          prompt,
+          text,
           700,
           AGENT_TIMEOUT_MS,
           signal,
           screenshotDataUrl,
           true
         )
-      : await openAICompatibleRequest(
+      : openAICompatibleRequest(
           config,
-          agentBody(config, prompt, screenshotDataUrl),
+          agentBody(config, text, screenshotDataUrl),
           AGENT_TIMEOUT_MS,
           signal,
           true
         );
+
+  let raw: string;
+  try {
+    raw = await ask(prompt);
+  } catch (error) {
+    if (!isRequestTooLarge(error) || promptBudgetFor(config) === LOCAL_BUDGET) throw error;
+    smallRequestsOnly.add(nativeToolsKey(config));
+    prompt = promptFor();
+    raw = await ask(prompt);
+  }
 
   try {
     return parseAgentDecision(raw);
