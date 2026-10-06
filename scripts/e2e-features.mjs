@@ -47,7 +47,8 @@ const server = http
         const user = String(body.messages.at(-1).content?.[0]?.text ?? body.messages.at(-1).content ?? "");
         const done = user.split("RECENT EXECUTION EVIDENCE:").pop() || "";
         // The goal can quote earlier turns and the prompt recalls past tasks; only the newest goal counts.
-        const goalText = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "";
+        // Past conversations recalled after the request are context, not the goal.
+        const goalText = (/USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "").split("\n\nFROM OUR PAST CONVERSATIONS")[0];
         const latest = goalText.lastIndexOf("GOAL_TABLE") > goalText.lastIndexOf("GOAL_CLICK") ? "table" : "click";
         if (latest === "table" && goalText.includes("GOAL_TABLE")) {
           if (!/\bextract_table[: ]/.test(done)) {
