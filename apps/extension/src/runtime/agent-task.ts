@@ -103,6 +103,12 @@ export interface AgentTaskOptions {
   signal: AbortSignal;
   hooks: AgentTaskHooks;
   /**
+   * The Space this task belongs to, fixed when it starts. The task, its
+   * helpers and everything they remember stay in it, even if the person
+   * switches Space while it runs.
+   */
+  spaceId: string;
+  /**
    * Extra guidance for the model only (About me, a matching Skill). It is
    * not part of the task, so memory, history and learned Skills stay clean.
    */
@@ -111,7 +117,7 @@ export interface AgentTaskOptions {
 
 export async function runAgentTask(
   task: string,
-  { agentPrimary, agentFallback, session, signal, hooks, context = "" }: AgentTaskOptions
+  { agentPrimary, agentFallback, session, spaceId, signal, hooks, context = "" }: AgentTaskOptions
 ): Promise<BrowserEngineResult> {
   let usedFallback = false;
   // Helpers run side by side, but the person answers one approval at a time.
@@ -221,6 +227,7 @@ export async function runAgentTask(
                           workerSessionId,
                         session_title:
                           workerSessionTitle,
+                        space_id: spaceId,
                         approval_granted: workerExecution?.approvalGranted
                       }),
                     mode,
@@ -250,9 +257,11 @@ export async function runAgentTask(
                       observation
                     ) =>
                       (
+                        // Helpers recall from the parent task's Space only.
                         await searchTaskMemoryHybrid(
                           `${subtask} ${safeHostname(observation.url)}`,
-                          3
+                          3,
+                          spaceId
                         )
                       ).map(
                         (hit) => hit.episode
@@ -375,6 +384,7 @@ export async function runAgentTask(
           input,
           session_id: session.id,
           session_title: session.title,
+          space_id: spaceId,
           approval_granted: execution?.approvalGranted
         });
       },
@@ -389,7 +399,8 @@ export async function runAgentTask(
         (
           await searchTaskMemoryHybrid(
             `${browserTask} ${safeHostname(observation.url)}`,
-            3
+            3,
+            spaceId
           )
         ).map((hit) => hit.episode),
       recallProcedures: (
@@ -449,7 +460,8 @@ export async function runAgentTask(
   );
 
   await saveTaskEpisodeMemory(
-    result.session_evidence
+    result.session_evidence,
+    spaceId
   )
     .then(async (episode) => {
       await indexTaskEpisodeMemory(episode).catch(

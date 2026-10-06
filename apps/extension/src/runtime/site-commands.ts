@@ -4,7 +4,7 @@
 // CLI runs it with `browserharness-bridge site <name>`.
 import type { SiteSkillParameterType, SiteSkillRecipe } from "./site-skill";
 import { listSiteSkillFamilies, type SiteSkillFamilyRecord } from "./site-skill-store";
-import { loadSkills } from "./skills";
+import { loadAllSkills } from "./skills";
 import { BUILT_IN_COMMANDS } from "./slash-commands";
 
 export interface SiteCommandParameter {
@@ -279,7 +279,8 @@ export async function loadSiteCommands(): Promise<SiteCommand[]> {
   const [families, names, skills] = await Promise.all([
     listSiteSkillFamilies(),
     loadCommandNames(),
-    loadSkills().catch(() => [])
+    // Every Space's Skills, so a site command never takes a /name used anywhere.
+    loadAllSkills().catch(() => [])
   ]);
   return buildSiteCommands(families, names, [
     ...BUILT_IN_COMMANDS.map((command) => command.name),

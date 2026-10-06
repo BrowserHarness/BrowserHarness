@@ -2,7 +2,7 @@
 // them ("answer briefly", "prices in rupees", "never buy anything over ₹5,000
 // without asking"). They go with every chat, task and scheduled run, and can
 // be saved to or loaded from a file (INSTRUCTIONS.md).
-import { spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
 // Each Space has its own instructions (see spaces.ts).
 const KEY = SPACE_SCOPED_KEYS.instructions;
@@ -10,8 +10,9 @@ const KEY = SPACE_SCOPED_KEYS.instructions;
 const SECRET_VALUE = /\b(password|passcode|passwd|pin|otp|cvv|api key|token|secret)\s*(is|:|=)\s*\S+|\d[\d -]{10,}\d|\b\d{6,}\b/i;
 export const MAX_INSTRUCTIONS = 2000;
 
-export async function loadInstructions(): Promise<string> {
-  const key = await spaceKey(KEY);
+/** Pass the Space a task started in, so switching mid-task never changes what it follows. */
+export async function loadInstructions(spaceId?: string): Promise<string> {
+  const key = spaceId ? keyForSpace(KEY, spaceId) : await spaceKey(KEY);
   const value = (await chrome.storage.local.get(key))[key];
   return typeof value === "string" ? value : "";
 }

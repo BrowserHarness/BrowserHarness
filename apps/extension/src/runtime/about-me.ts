@@ -3,7 +3,7 @@
 // up plain statements from their requests ("my name is…", "I prefer…").
 // Everything stays on this device and can be edited or deleted.
 
-import { spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
 export interface AboutMeFact {
   id: string;
@@ -32,15 +32,20 @@ export function isStorableFact(text: string): boolean {
   return value.length >= 3 && !SENSITIVE.test(value);
 }
 
-export async function loadAboutMe(): Promise<AboutMeFact[]> {
-  const key = await spaceKey(KEY);
+/** The key for these facts: the given Space (a running task's), else the one in use. */
+async function factsKey(spaceId?: string): Promise<string> {
+  return spaceId ? keyForSpace(KEY, spaceId) : spaceKey(KEY);
+}
+
+export async function loadAboutMe(spaceId?: string): Promise<AboutMeFact[]> {
+  const key = await factsKey(spaceId);
   const stored = await chrome.storage.local.get(key);
   const value = stored[key];
   return Array.isArray(value) ? (value as AboutMeFact[]) : [];
 }
 
-async function store(facts: AboutMeFact[]): Promise<void> {
-  await chrome.storage.local.set({ [await spaceKey(KEY)]: facts.slice(0, MAX_FACTS) });
+async function store(facts: AboutMeFact[], spaceId?: string): Promise<void> {
+  await chrome.storage.local.set({ [await factsKey(spaceId)]: facts.slice(0, MAX_FACTS) });
 }
 
 /**
@@ -64,8 +69,8 @@ export function factTopic(text: string): string | undefined {
  * Adds facts that are new and safe to keep; a fact on the same topic as an
  * older one replaces it. Returns the ones added.
  */
-export async function addFacts(texts: string[], source: AboutMeFact["source"]): Promise<AboutMeFact[]> {
-  let facts = await loadAboutMe();
+export async function addFacts(texts: string[], source: AboutMeFact["source"], spaceId?: string): Promise<AboutMeFact[]> {
+  let facts = await loadAboutMe(spaceId);
   const known = new Set(facts.map((fact) => fact.text.toLowerCase()));
   const added: AboutMeFact[] = [];
   for (const text of texts) {
@@ -82,7 +87,7 @@ export async function addFacts(texts: string[], source: AboutMeFact["source"]): 
       ...(topic ? { topic } : {})
     });
   }
-  if (added.length) await store([...added, ...facts]);
+  if (added.length) await store([...added, ...facts], spaceId);
   return added;
 }
 

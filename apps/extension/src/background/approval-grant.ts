@@ -6,6 +6,8 @@ export interface ApprovalMessageSender {
 
 export interface ToolExecutionOptions {
   approvalGranted?: boolean;
+  /** The Space of the task asking; memory and Skills tools answer from it only. */
+  spaceId?: string;
 }
 
 const RISKY_TRUSTED_ACTION =

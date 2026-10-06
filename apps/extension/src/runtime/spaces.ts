@@ -35,6 +35,16 @@ export const SPACE_SCOPED_KEYS = {
   history: "browserharness.taskHistory"
 } as const;
 
+/**
+ * Stores shared by every Space whose records each carry the Space they
+ * belong to (space_id; none means the first Space). Deleting a Space removes
+ * its records from these too, and nothing else.
+ */
+export const SPACE_TAGGED_KEYS = {
+  skills: "browserharness.skills",
+  episodes: "browserharness.taskEpisodes.v1"
+} as const;
+
 const KEY = SPACES_STORAGE_KEY;
 
 export function defaultSpace(): Space {
@@ -143,9 +153,24 @@ export async function switchSpace(id: string): Promise<void> {
 export async function deleteSpace(id: string): Promise<void> {
   const state = await loadState();
   await chrome.storage.local.remove(Object.values(SPACE_SCOPED_KEYS).map((base) => keyForSpace(base, id)));
+  await removeTaggedRecords(id);
   if (id === DEFAULT_SPACE_ID) return;
   const spaces = state.spaces.filter((space) => space.id !== id);
   await storeState({ spaces, active: state.active === id ? DEFAULT_SPACE_ID : state.active });
+}
+
+/** Removes one Space's own records from the shared stores; shared-with-everyone ones stay. */
+async function removeTaggedRecords(id: string): Promise<void> {
+  for (const key of Object.values(SPACE_TAGGED_KEYS)) {
+    const value = (await chrome.storage.local.get(key))[key];
+    if (!Array.isArray(value)) continue;
+    const kept = value.filter((record: { space_id?: string; visibility?: string }) => {
+      // Skills from before Spaces had a say carry no tag and are shared by every Space.
+      if (record?.visibility === "all" || (key === SPACE_TAGGED_KEYS.skills && !record?.space_id)) return true;
+      return (record?.space_id || DEFAULT_SPACE_ID) !== id;
+    });
+    if (kept.length !== value.length) await chrome.storage.local.set({ [key]: kept });
+  }
 }
 
 /** Everything a Space keeps, as one file people can save and bring back later. */

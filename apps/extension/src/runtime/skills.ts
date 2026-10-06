@@ -4,6 +4,7 @@
 import { renderIntentPrompt, workflowToIntentSkill } from "./intent-skill";
 import type { BrowserTaskSessionEvidence } from "./session-evidence";
 import type { SavedWorkflow } from "./workflows";
+import { recordSpace, resolveSpace, withinSpace } from "./memory-scope";
 
 export interface UserSkill {
   id: string;
@@ -24,6 +25,13 @@ export interface UserSkill {
   last_run_at?: string;
   /** What went wrong before, newest first; given to the agent on the next run. */
   lessons: string[];
+  /** The Space the Skill was made or learned in. It is only offered there. */
+  space_id?: string;
+  /**
+   * "space" (the default for new Skills): only in its own Space. "all": in
+   * every Space; Skills saved before Spaces had a say keep working everywhere.
+   */
+  visibility?: "space" | "all";
 }
 
 const KEY = "browserharness.skills";
@@ -57,21 +65,53 @@ function uniqueSlug(base: string, taken: string[], ownId?: string, skills: UserS
   }
 }
 
-export async function loadSkills(): Promise<UserSkill[]> {
+/** A Skill saved before Skills belonged to a Space was shared by every Space, and still is. */
+function normalizeSkill(skill: UserSkill): UserSkill {
+  return skill.space_id || skill.visibility ? skill : { ...skill, visibility: "all" };
+}
+
+/** Every Skill in every Space. Only for keeping slugs unique and for storage. */
+export async function loadAllSkills(): Promise<UserSkill[]> {
   const stored = await chrome.storage.local.get(KEY);
   const value = stored[KEY];
-  return Array.isArray(value) ? (value as UserSkill[]) : [];
+  return Array.isArray(value) ? (value as UserSkill[]).map(normalizeSkill) : [];
+}
+
+/**
+ * The Skills this Space may use: its own plus any shared with every Space.
+ * Pass the Space a task started in; without one, the Space in use now.
+ */
+export async function loadSkills(spaceId?: string): Promise<UserSkill[]> {
+  return withinSpace(await loadAllSkills(), await resolveSpace(spaceId));
+}
+
+/** True when the Skill was made in this Space only (not shared with every Space). */
+export function ownedBySpace(skill: UserSkill, spaceId: string): boolean {
+  return skill.visibility !== "all" && recordSpace(skill) === spaceId;
 }
 
 async function store(skills: UserSkill[]): Promise<void> {
   await chrome.storage.local.set({ [KEY]: skills.slice(0, MAX_SKILLS) });
 }
 
-/** Adds or replaces a Skill; the slug is made unique among the others. */
-export async function saveSkill(skill: UserSkill, reserved: string[] = []): Promise<UserSkill> {
-  const skills = await loadSkills();
+/**
+ * Adds or replaces a Skill; the slug is made unique among the others (in
+ * every Space, so a /command never means two things). A new Skill belongs
+ * to the given Space, or the one in use now.
+ */
+export async function saveSkill(skill: UserSkill, reserved: string[] = [], spaceId?: string): Promise<UserSkill> {
+  const skills = await loadAllSkills();
+  const existing = skills.find((item) => item.id === skill.id);
+  const scope =
+    existing?.space_id || existing?.visibility
+      ? { space_id: existing.space_id, visibility: existing.visibility }
+      : skill.space_id || skill.visibility
+        ? { space_id: skill.space_id, visibility: skill.visibility }
+        : { space_id: await resolveSpace(spaceId), visibility: "space" as const };
   const next: UserSkill = {
     ...skill,
+    ...(scope.space_id ? { space_id: scope.space_id } : {}),
+    ...(scope.visibility ? { visibility: scope.visibility } : {}),
     instructions: skill.instructions.slice(0, MAX_INSTRUCTIONS),
     slug: uniqueSlug(skillSlug(skill.slug || skill.name), reserved, skill.id, skills),
     updated_at: new Date().toISOString()
@@ -80,15 +120,18 @@ export async function saveSkill(skill: UserSkill, reserved: string[] = []): Prom
   return next;
 }
 
-export async function deleteSkill(id: string): Promise<void> {
-  await store((await loadSkills()).filter((skill) => skill.id !== id));
+/** Deletes a Skill this Space can see; Skills of other Spaces are never touched. */
+export async function deleteSkill(id: string, spaceId?: string): Promise<void> {
+  const visible = new Set((await loadSkills(spaceId)).map((skill) => skill.id));
+  if (!visible.has(id)) return;
+  await store((await loadAllSkills()).filter((skill) => skill.id !== id));
 }
 
-export async function renameSkill(id: string, name: string, reserved: string[] = []): Promise<UserSkill | null> {
-  const skill = (await loadSkills()).find((item) => item.id === id);
+export async function renameSkill(id: string, name: string, reserved: string[] = [], spaceId?: string): Promise<UserSkill | null> {
+  const skill = (await loadSkills(spaceId)).find((item) => item.id === id);
   const clean = name.replace(/\s+/g, " ").trim().slice(0, 80);
   if (!skill || !clean) return null;
-  return saveSkill({ ...skill, name: clean, slug: skillSlug(clean) }, reserved);
+  return saveSkill({ ...skill, name: clean, slug: skillSlug(clean) }, reserved, spaceId);
 }
 
 /** Counts a run. A failure leaves a lesson the agent reads next time. */
@@ -97,7 +140,7 @@ export async function recordSkillRun(
   outcome: "worked" | "failed",
   lesson?: string
 ): Promise<UserSkill | null> {
-  const skills = await loadSkills();
+  const skills = await loadAllSkills();
   const skill = skills.find((item) => item.id === id);
   if (!skill) return null;
   const note = lesson?.replace(/\s+/g, " ").trim().slice(0, 240);

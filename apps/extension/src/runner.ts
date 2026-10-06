@@ -1,7 +1,7 @@
 // The page a scheduled task runs in. The service worker opens it in a
 // background tab when the task's alarm fires; it closes itself when done.
 import { saveTaskHistoryEntry } from "./runtime/history";
-import { pinSpace } from "./runtime/spaces";
+import { activeSpaceId, pinSpace } from "./runtime/spaces";
 import { runScheduledTask, runUnattendedTask } from "./runtime/scheduled-run";
 import { deliveryText, describeSchedule, loadSchedules, recordScheduledRun } from "./runtime/schedules";
 
@@ -43,6 +43,9 @@ async function runRemote(id: string, keep: boolean) {
   const { [id]: _done, ...rest } = stored;
   await chrome.storage.session.set({ [key]: rest });
   const source = CHAT_APPS[request.from] || "your phone";
+  // A message from a chat app works in the Space in use when it arrived, and
+  // stays there (history included) even if the person switches meanwhile.
+  pinSpace(await activeSpaceId());
   document.title = `Running: ${request.text}`;
   title.textContent = `Running a task from ${source}: ${request.text}`;
   const outcome = await runUnattendedTask(request.text, `From ${source}`, log);
