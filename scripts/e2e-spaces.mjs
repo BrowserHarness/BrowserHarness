@@ -212,8 +212,9 @@ try {
 
   // 5b. Something said for all Spaces is known in every Space; Work's own notes still stay in Work.
   await ask(side, "/remember Across all Spaces, keep answers concise");
-  await waitText(side, "(in every Space)", 5000);
-  check("a fact said for all Spaces is kept for every Space", ((await storage("browserharness.aboutMe.global")) || []).some((fact) => fact.text === "Keep answers concise"));
+  await waitText(side, "I'll follow this from now on: Keep answers concise (in every Space)", 5000);
+  // It is a standing wish, not a fact about you (Phase 6), kept for every Space.
+  check("a wish said for all Spaces is kept as a standing wish for every Space", (await storage("browserharness.instructions.global")) === "Keep answers concise");
   await openMenu();
   await side.getByTestId("space-switcher").click();
   await side.getByRole("menuitem", { name: "Work" }).click();

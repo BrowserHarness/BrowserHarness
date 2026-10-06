@@ -9,6 +9,7 @@
 // Spaces" goes to every Space; nothing else is promoted on its own.
 
 import { resolveSpace } from "./memory-scope";
+import { isSafeToRemember } from "./memory-write/sensitivity";
 import { keyForSpace, loadSpaces, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
 /** Where a remembered thing came from. Only what is actually known is filled in. */
@@ -20,6 +21,14 @@ export interface Provenance {
   at: string;
   /** The chat it was said in, when there was one. */
   chat_id?: string;
+  /**
+   * How it reached memory (Phase 6 write pipeline): the person's command or
+   * screen, their message, or the AI reading their message. Missing on
+   * records saved before; never guessed for them.
+   */
+  origin?: "explicit_user" | "user_message" | "model_extraction";
+  /** Offered by BrowserHarness from the origin above, then kept because the person tapped "Keep it". */
+  accepted?: boolean;
 }
 
 export type FactStatus = "current" | "superseded" | "historical";
@@ -41,6 +50,8 @@ export interface AboutMeFact {
   superseded_by?: string;
   /** Said for this Space on purpose ("In this Space I am based in Delhi"), so a fact for every Space never replaces it. */
   explicit_scope?: boolean;
+  /** A preference ("I prefer aisle seats") informs choices; a fact says how things are. Missing on older records. */
+  kind?: "fact" | "preference";
   provenance?: Provenance;
 }
 
@@ -55,17 +66,15 @@ const MAX_FACTS = 60;
 const MAX_EARLIER = 100;
 const MAX_FACT = 200;
 
-/** Never stored, whoever asks. */
-const SENSITIVE =
-  /(password|passcode|passwd|otp|one[- ]time|\bpin\b|cvv|card number|credit card|debit card|ssn|social security|aadhaar|pan number|bank account|routing number|iban|api key|secret|token)|\d{6,}/i;
 
 function clean(text: string): string {
   return text.replace(/\s+/g, " ").trim().replace(/[.,;:!]+$/, "").slice(0, MAX_FACT);
 }
 
+/** Long enough to mean something and not a secret (the one shared check in memory-write/sensitivity.ts). */
 export function isStorableFact(text: string): boolean {
   const value = clean(text);
-  return value.length >= 3 && !SENSITIVE.test(value);
+  return value.length >= 3 && isSafeToRemember(value);
 }
 
 /** True while a fact is still true (facts saved before history was kept count as true). */
@@ -138,13 +147,27 @@ export function factTopic(text: string): string | undefined {
   if (favourite) return `favourite:${favourite[1].trim()}`;
   const setting = /^my (currency|budget|timezone|time zone|language) is\b/.exec(value);
   if (setting) return setting[1].replace(" ", "");
+  // Things a person has one of at a time: "I drive a Creta" replaces "I drive a Swift".
+  if (/^i drive\b/.test(value)) return "car";
+  if (/^i work as\b/.test(value)) return "role";
+  if (/^i bank with\b/.test(value)) return "bank";
+  const single = new RegExp(`^my (${SINGLE_VALUED.join("|")}) is\\b`).exec(value);
+  if (single) return single[1] === "job" || single[1] === "job title" ? "role" : single[1].replace(/^employer$/, "work").replace(/^mobile$/, "phone");
   return undefined;
 }
+
+/** "My … is" that can only have one answer at a time. */
+const SINGLE_VALUED = ["car", "phone", "mobile", "laptop", "bank", "employer", "job title", "job", "role", "email", "email address", "phone number", "birthday", "gym", "doctor", "dentist", "manager"];
 
 export interface AddFactOptions {
   /** Said for this Space on purpose; see AboutMeFact.explicit_scope. */
   explicit?: boolean;
   chatId?: string;
+  kind?: AboutMeFact["kind"];
+  origin?: Provenance["origin"];
+  accepted?: boolean;
+  /** A current fact at this level the new one replaces though it has no known topic ("I don't eat meat" after "I eat meat"). */
+  replaces?: string;
 }
 
 /**
@@ -184,12 +207,16 @@ export async function addFacts(
       status: "current",
       valid_from: now,
       ...(scope === "space" && options.explicit ? { explicit_scope: true } : {}),
-      provenance: { by: source, space_id: saidIn, at: now, ...(options.chatId ? { chat_id: options.chatId } : {}) }
+      ...(options.kind ? { kind: options.kind } : {}),
+      provenance: { by: source, space_id: saidIn, at: now, ...(options.chatId ? { chat_id: options.chatId } : {}), ...(options.origin ? { origin: options.origin } : {}), ...(options.accepted ? { accepted: true } : {}) }
     };
     const replaced = topic ? facts.find((item) => isCurrent(item) && topicOf(item) === topic) : undefined;
     if (replaced) {
       fact.supersedes = replaced.id;
       facts = facts.map((item) => (isCurrent(item) && topicOf(item) === topic ? supersede(item, fact) : item));
+    } else if (options.replaces && facts.some((item) => item.id === options.replaces && isCurrent(item))) {
+      fact.supersedes = options.replaces;
+      facts = facts.map((item) => (item.id === options.replaces ? supersede(item, fact) : item));
     }
     added.push(fact);
   }
@@ -443,6 +470,7 @@ const PATTERNS: Array<[RegExp, (match: RegExpExecArray) => string]> = [
   [/\bcall me ([\p{L}][\p{L}'’ -]{0,30}?)(?=[,.;!?]|\band\b|\bbut\b|$)/iu, (m) => `I like to be called ${m[1]}`],
   [/\bi live in ([\p{L}][\p{L}0-9'’ ,-]{1,50}?)(?=[.;!?]|\band\b|\bbut\b|$)/iu, (m) => `I live in ${m[1].replace(/\s+(now|these days)$/i, "")}`],
   [/\bi(?:'m| am) based in ([\p{L}][\p{L}'’ ,-]{1,50}?)(?=[.;!?]|\band\b|\bbut\b|$)/iu, (m) => `I live in ${m[1]}`],
+  [/\bi(?: have|'ve)? (?:just |recently )?moved to ([\p{L}][\p{L}'’ ,-]{1,50}?)(?=[.;!?]|\band\b|\bbut\b|\b(?:last|this|a few|recently|in \d)|$)/iu, (m) => `I live in ${m[1].trim()}`],
   [/\bi (?:usually |always )?prefer ([^.;!?\n]{3,100})/iu, (m) => `I prefer ${m[1]}`],
   [/\bi always ([^.;!?\n]{3,100})/iu, (m) => `I always ${m[1]}`],
   [/\bi never ([^.;!?\n]{3,100})/iu, (m) => `I never ${m[1]}`],
@@ -453,30 +481,43 @@ const PATTERNS: Array<[RegExp, (match: RegExpExecArray) => string]> = [
   [/\bremember (my [^?\n]{3,180})/iu, (m) => m[1].replace(/^my/, "My")]
 ];
 
-/** Plain statements about the person in a request, worth remembering. */
-export function factsInMessage(text: string): string[] {
-  const found: string[] = [];
+/** A statement about the person found in a message, with the sentence it was in. */
+export interface FoundStatement {
+  text: string;
+  sentence: string;
+  /** Said with "remember that…": the person asked for it to be kept. */
+  explicit: boolean;
+}
+
+const REMEMBER_PATTERNS = new Set([PATTERNS.length - 2, PATTERNS.length - 1]);
+
+/** Plain statements about the person in a message, before any safety check (the write pipeline checks them). */
+export function statementsInMessage(text: string): FoundStatement[] {
+  const found: FoundStatement[] = [];
   for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
-    for (const [pattern, render] of PATTERNS) {
+    PATTERNS.forEach(([pattern, render], index) => {
       const match = pattern.exec(sentence);
-      if (!match) continue;
+      if (!match) return;
       const fact = clean(render(match));
-      if (isStorableFact(fact) && !found.includes(fact)) found.push(fact);
-    }
+      if (fact.length >= 3 && !found.some((item) => item.text === fact)) found.push({ text: fact, sentence, explicit: REMEMBER_PATTERNS.has(index) });
+    });
   }
   return found.slice(0, 5);
+}
+
+/** Plain statements about the person in a request, worth remembering. */
+export function factsInMessage(text: string): string[] {
+  return statementsInMessage(text)
+    .map((item) => item.text)
+    .filter(isStorableFact);
 }
 
 /** The facts in a message, each with the level it belongs at (see factScopeIn). */
 export function scopedFactsInMessage(text: string): Array<{ text: string; scope: FactScope; explicit?: boolean }> {
   const found: Array<{ text: string; scope: FactScope; explicit?: boolean }> = [];
-  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
-    for (const [pattern, render] of PATTERNS) {
-      const match = pattern.exec(sentence);
-      if (!match) continue;
-      const fact = withoutScopeWords(render(match));
-      if (isStorableFact(fact) && !found.some((item) => item.text === fact)) found.push({ text: fact, scope: factScopeIn(fact, sentence), ...(saidForThisSpace(fact, sentence) ? { explicit: true } : {}) });
-    }
+  for (const { text: raw, sentence } of statementsInMessage(text)) {
+    const fact = withoutScopeWords(raw);
+    if (isStorableFact(fact) && !found.some((item) => item.text === fact)) found.push({ text: fact, scope: factScopeIn(fact, sentence), ...(saidForThisSpace(fact, sentence) ? { explicit: true } : {}) });
   }
   return found.slice(0, 5);
 }

@@ -16,11 +16,10 @@ import { DeleteIcon, EditIcon } from "./icons";
 import { Note, ScreenFrame, SettingsCard, ToggleSetting, useConfirm } from "./kit";
 import { useSaved } from "./feedback";
 import { SpaceNote, useSpaces } from "./spaces-ui";
+import { admitMemory, refusalMessage } from "../runtime/memory-write";
 import {
-  addFacts,
   clearAboutMe,
   clearGlobalAboutMe,
-  isStorableFact,
   loadAboutMe,
   loadEarlierFacts,
   loadGlobalAboutMe,
@@ -34,7 +33,6 @@ import { loadPreferences, updatePreferences } from "../settings/preferences";
 import {
   currentDecisions,
   earlierDecisions,
-  recordDecision,
   removeDecision,
   reverseDecision,
   type Decision
@@ -231,9 +229,18 @@ function DecisionsCard() {
   }, [active.id]);
 
   const add = async () => {
-    const result = await recordDecision({ subject, value, rationale: why, scope: everySpace ? "global" : "space", by: "you" });
-    if (!result.ok) {
-      setError(result.error);
+    // Through the one write pipeline: same safety check, same duplicate and history rules as everywhere else.
+    const result = await admitMemory({
+      id: crypto.randomUUID(),
+      text: `${subject}: ${value}`,
+      proposed_type: "decision",
+      explicit: true,
+      requested_scope: everySpace ? "global" : "space",
+      decision: { subject, value, ...(why.trim() ? { rationale: why } : {}) },
+      source: { kind: "explicit_user", space_id: active.id }
+    });
+    if (result.action === "rejected" || result.action === "ignored") {
+      setError(result.sensitive ? refusalMessage(result.sensitive) : !subject.trim() || !value.trim() ? "Say what it's about and what you chose, like “code home: GitHub”." : result.reason);
       return;
     }
     setError("");
@@ -241,7 +248,7 @@ function DecisionsCard() {
     setValue("");
     setWhy("");
     await refresh();
-    saved(result.replaced ? `Saved. “${result.replaced.value}” is kept as what you used before` : "Decision saved");
+    saved(result.action === "duplicate" ? "Already decided" : result.action === "superseded" ? `Saved. ${result.reason.replace(/^replaces (.*) \(kept as history\)$/, "“$1” is kept as what you used before")}` : "Decision saved");
   };
 
   const row = (decision: Decision, earlierOne: boolean) => (
@@ -371,16 +378,24 @@ export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?
 
   const add = async () => {
     if (!draft.trim()) return;
-    if (!isStorableFact(draft)) {
-      setError(NOT_SAVED);
+    // Through the one write pipeline. Added here without the tick: chosen for this Space, so a fact for every Space won't replace it.
+    const result = await admitMemory({
+      id: crypto.randomUUID(),
+      text: draft,
+      proposed_type: "fact",
+      explicit: true,
+      requested_scope: draftEverywhere ? "global" : "space",
+      explicit_scope: !draftEverywhere,
+      source: { kind: "explicit_user", space_id: active.id }
+    });
+    if (result.action === "rejected" || result.action === "ignored") {
+      setError(result.sensitive ? NOT_SAVED : result.reason);
       return;
     }
     setError("");
-    // Added here without the tick: chosen for this Space, so a fact for every Space won't replace it.
-    await addFacts([draft], "you", undefined, draftEverywhere ? "global" : "space", { explicit: !draftEverywhere });
     setDraft("");
     await refresh();
-    saved(draftEverywhere ? "Fact saved for every Space" : "Fact saved");
+    saved(result.action === "duplicate" ? "Already saved" : draftEverywhere ? "Fact saved for every Space" : "Fact saved");
   };
 
   const saveEdit = async () => {

@@ -1,3 +1,4 @@
+import { SECRET_FIELD_NAME } from "./memory-write/sensitivity";
 import type {
   RecordedWorkflowStep,
   SavedWorkflow,
@@ -20,7 +21,8 @@ export interface IntentSkill {
   dropped_steps: number;
 }
 
-const SECRET_NAME = /(password|passcode|secret|token|otp|pin|cvv|card)/i;
+// One list of secret field names, shared with the memory safety check.
+const SECRET_NAME = SECRET_FIELD_NAME;
 
 function label(locator: WorkflowLocator | undefined): string {
   const name =

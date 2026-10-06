@@ -1,6 +1,7 @@
 // Skills the person keeps: saved from a finished chat task, from a recording,
 // or imported as a SKILL.md file. Each one is plain instructions the agent
 // follows by intent, plus lessons it picks up from earlier runs.
+import { SECRET_FIELD_NAME } from "./memory-write/sensitivity";
 import { renderIntentPrompt, workflowToIntentSkill } from "./intent-skill";
 import type { BrowserTaskSessionEvidence } from "./session-evidence";
 import type { SavedWorkflow } from "./workflows";
@@ -40,7 +41,8 @@ const MAX_LESSONS = 8;
 const MAX_INSTRUCTIONS = 8000;
 
 /** Words that must never be stored as a remembered value. */
-const SECRET = /(password|passcode|secret|token|otp|\bpin\b|cvv|card number)/i;
+// One list of secret field names, shared with the memory safety check.
+const SECRET = SECRET_FIELD_NAME;
 
 export function skillSlug(name: string): string {
   const slug = name

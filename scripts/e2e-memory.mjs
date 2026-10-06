@@ -38,6 +38,10 @@ const server = http
         prompts.push(all);
         const user = String(body.messages.at(-1).content?.[0]?.text ?? body.messages.at(-1).content ?? "");
         if (user.startsWith("EXTRACT_FACTS")) {
+          // For a short stay the model wrongly reads a new home; BrowserHarness must not keep it.
+          if (user.includes("Goa")) return reply(res, '["I live in Goa"]');
+          // A friend's words: the AI wrongly reads them as the person's home.
+          if (user.includes("Delhi")) return reply(res, '["I live in Delhi"]');
           return reply(res, user.includes("Infosys") ? '["I work at Infosys", "I have two kids", "My card is 4111111111111111"]' : "[]");
         }
         const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1];
@@ -141,6 +145,8 @@ try {
         .map((fact) => fact.text);
     });
 
+  const savedInstructions = () => side.evaluate(async () => (await chrome.storage.local.get("browserharness.instructions"))["browserharness.instructions"] || "");
+
   // 1. A question about earlier work is answered from past conversations.
   await ask("what did I find last week about kettles?");
   await waitText("RECALL_OK");
@@ -185,6 +191,49 @@ try {
   await side.waitForTimeout(1500);
   known = await facts();
   check("a changed fact replaces the old one", known.includes("I live in Mumbai") && !known.includes("I live in Pune") && known.includes("My name is Priya"), known.join("; "));
+
+  // 6b. A short stay or a maybe never replaces where you live, even if the AI reads it that way.
+  await ask("I'm in Goa for two days, find a beach cafe");
+  await waitText("CHAT_OK");
+  await ask("I might move to Bengaluru next year");
+  await side.waitForTimeout(2000);
+  known = await facts();
+  check("a short stay or a maybe doesn't replace your home", known.includes("I live in Mumbai") && !known.some((fact) => /Goa|Bengaluru/.test(fact)), known.join("; "));
+
+  // 6c. A standing wish said in chat is offered, and one tap keeps it.
+  await ask("Always prefer Indian sites from now on.");
+  await waitText("Keep this as a standing wish?", 10000);
+  check("a standing wish in chat is offered, not saved on its own", (await sideText()).includes("Keep this as a standing wish? “Always prefer Indian sites”") && !(await savedInstructions()));
+  await side.getByTestId("memory-offer").getByRole("button", { name: "Keep it" }).last().click();
+  await waitText("Kept as a standing wish.", 5000);
+  check("one tap keeps it", (await savedInstructions()) === "Always prefer Indian sites");
+  await side.evaluate(() => chrome.storage.local.remove("browserharness.instructions"));
+
+  // 6d. A loose decision is offered; a settled one is kept with an undo.
+  await ask("We'll deploy this on Cloudflare.");
+  await waitText("Save as a decision? Deployment platform: Cloudflare", 10000);
+  check("a loose decision is offered", (await sideText()).includes("Save as a decision? Deployment platform: Cloudflare"));
+  await ask("Let's use Stripe for this project from now on.");
+  await waitText("Remembered decision: Payments → Stripe", 10000);
+  const decided = await side.evaluate(async () => ((await chrome.storage.local.get("browserharness.decisions.v1"))["browserharness.decisions.v1"] || []).map((item) => `${item.subject}: ${item.value}`));
+  check("a settled decision is kept, and only that one", decided.join("; ") === "Payments: Stripe", decided.join("; "));
+  await side.getByTestId("memory-offer").getByRole("button", { name: "Undo" }).last().click();
+  await waitText("Taken back.", 5000);
+  const undone = await side.evaluate(async () => ((await chrome.storage.local.get("browserharness.decisions.v1"))["browserharness.decisions.v1"] || []).length);
+  check("undo takes it back", undone === 0);
+
+  // 6e. Someone else's words, a step of the task and a secret without "is" are not kept.
+  await ask('My friend said "I live in Delhi." Let\'s use GitHub to search for popular repos.');
+  await waitText("CHAT_OK");
+  await ask("Remember that my password hunter2");
+  await side.waitForTimeout(2000);
+  known = await facts();
+  const afterQuote = await side.evaluate(async () => ((await chrome.storage.local.get("browserharness.decisions.v1"))["browserharness.decisions.v1"] || []).length);
+  check(
+    "a friend's quoted words, a one-off tool and a bare password are not remembered",
+    !known.some((fact) => /Delhi|hunter2/.test(fact)) && afterQuote === 0 && !(await sideText()).includes("Code home"),
+    known.join("; ")
+  );
   await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "About me" }).click();
   await side.getByTestId("about-me-fact").first().waitFor({ timeout: 5000 });
@@ -192,7 +241,6 @@ try {
 
   // 7. Standing instructions go with every request; a password in them is refused.
   const instructions = side.getByLabel("Your instructions");
-  const savedInstructions = () => side.evaluate(async () => (await chrome.storage.local.get("browserharness.instructions"))["browserharness.instructions"] || "");
   await instructions.fill("My bank password is hunter22");
   await side.getByRole("button", { name: "Save instructions" }).click();
   await waitText("looks like a password", 5000);

@@ -138,7 +138,9 @@ None. Old facts have no `status` and read as current; nothing is rewritten on lo
 - Space backup/restore covers About me (with history) but not that Space's decisions.
 - History questions were matched by words only (Phase 5 adds topic words and, with an embedding model, meaning; see 3d).
 
-## 3d. Phase 5: the Context Compiler (Phase 5 PR)
+## 3d. Phase 5: the Context Compiler (PR #41, merged at main eb974fc)
+
+Final merged state: 586 unit tests pass, typecheck and `validate:mvp` pass, all real-Chromium smokes green.
 
 ### What it replaced
 Before, `App.tsx` built `task + chatContextPrompt + userMemoryPrompt + recallPrompt + skillHint` and `scheduled-run.ts` built its own version of it (no chat, its own Skill matching). Each piece was added whole: every fact, every decision, all instructions, up to 6000 characters of chat, whatever the model. Now the side panel (chat and browser tasks), scheduled tasks and chat-app (phone) tasks all call `contextFor()` (`runtime/context/index.ts`) with the request, the Space fixed at task start, the chat so far and the model, and send `task + compiled text`. Each task fixes one `MemorySource` when it starts, next to its Space: the side panel and scheduled/phone runs pick it once, pass it to `contextFor` (`source`) and to `runAgentTask` (`memorySource`, required). The browser agent's per-step recall of past tasks and every helper's recall read through that same source, in the same Space; `agent-task.ts` no longer imports `localMemorySource` at all. `userMemoryPrompt` is now a thin overview over the compiler (used by tests and checks, not by tasks).
@@ -231,12 +233,120 @@ Each compile records: the Space, provider/model, intent, budget (final target, u
 - `runtime/remote-tasks.test.ts`: a phone task compiles exactly the same context as the side panel for the same words in the same Space; with an LM Studio backup, a phone chat and a phone browser task are both budgeted for the backup, a backup that failed browser control is not counted for a browser task, the agent gets the same memory source, and stored diagnostics hold no keys or addresses.
 - Real-Chromium learning check: "Summarize this page for me" carries no name; "draft an introduction for me" carries it.
 
+## 3e. Phase 6: the Memory Write Pipeline (Phase 6 PR)
+
+The Context Compiler is the read side ("send only what helps"). Phase 6 is the write side: **remember only what is durable, grounded in the person's own words, safe, correctly scoped and worth using again.** It sits on top of the Phase 4 stores and does not replace them.
+
+### Every memory writer before Phase 6, and where each goes now
+| Writer | Before | Now |
+|---|---|---|
+| `/remember` (App) | own secret check + `rememberFacts`, always a fact | **pipeline** (`rememberCommand`): fact, preference, standing wish or decision, at the right level, duplicates caught |
+| Pattern pick-up from the person's message (`scopedFactsInMessage`) | straight to `rememberFacts` | **pipeline** (`learnFromMessage`): only clear, lasting statements; maybes and short stays ignored |
+| Model `EXTRACT_FACTS` (background) | `parseExtractedFacts` → `rememberFacts`, trusted as given | **pipeline** (`learnFromExtraction`): every fact must be found in the person's message; certainty judged on their own words |
+| About you → Add | `isStorableFact` + `addFacts` | **pipeline** (explicit, proposed type fact) |
+| About you → Edit, Move, Delete | `updateFact`, `moveFact`, `removeFact` | unchanged (they correct or move a record; Phase 4 lineage rules); edit uses the shared safety check |
+| Standing instructions box (both levels) | own `SECRET_VALUE` regex | `saveInstructions` with the **shared safety check**, per line (the box saves the whole text the person typed; nothing to classify) |
+| `/decide` | `recordDecision` | `recordDecision` with the **shared safety check** (explicit command, parsed deterministically) |
+| Decisions screen → Save | `recordDecision` | **pipeline** (explicit, proposed type decision) |
+| Instructions file load, Space restore | fills the box / restores a backup | unchanged; saving still goes through the shared check |
+| Automatic Skill creation, lessons, Save as Skill, recordings → Skill, SKILL.md import | Skill store | **specialized, unchanged**: experience → candidate Skill → evaluation → promotion. Secret fields use the shared `SECRET_FIELD_NAME` list (replacing two private lists) |
+| Site skills (candidate revisions, evaluations, promotion) | site-skill store | specialized, unchanged |
+| Procedural memory | derived from site skills/recordings for search | specialized, unchanged (no new writes) |
+| Recordings (`saveWorkflow`) | workflow store | specialized, unchanged |
+| Task episodes (`saveTaskEpisodeMemory` from `agent-task`) | called directly | **through the task's `MemoryWriter.recordTaskEpisode`**, marked `trust: "observed"` with `provenance { origin: "task", space_id, at }` |
+| Helper (worker) findings | inside the parent episode's `delegations` | same place, now with `parent_session_id` and `trust: "observed"`; never promoted to anything about the person |
+| Task history (side panel, phone, scheduled) | `saveTaskHistoryEntry` | specialized, unchanged (a log of request and answer) |
+| Agent `memory` tool | reads and deletes episodes only | unchanged (it cannot write memory) |
+
+### MemoryCandidate (`runtime/memory-write/types.ts`)
+Every candidate has a known origin before anything decides to keep it: `{ id, text, proposed_type?, source: { kind, space_id, chat_id?, task_id?, worker_id?, source_url?, evidence_id?, user_message?, said_in? }, requested_scope?, explicit_scope?, explicit?, decision? }`. Types: fact, preference, instruction, decision, procedure, observation, unknown.
+
+### Source and trust
+`source.kind` is one of `explicit_user` (a memory command or screen), `user_message` (fixed patterns over the person's message), `model_extraction` (the AI reading the person's message), `assistant` (the AI's own reply), `browser_observation`, `task`, `worker`, `import`, `system`. `trustOf` maps these to `user`, `user_inferred`, `external` and `generated`. In code, not in a prompt:
+- Only `user` and `user_inferred` can create facts, preferences, instructions or decisions.
+- `external` (a webpage, a task's or helper's findings, or file text met along the way) is rejected for those types; an observation or procedure is "kept as task or site knowledge", by its own specialized route.
+- `generated` (the AI's own words) is always rejected.
+- `model_extraction` must be grounded in the person's **own statement**: every meaningful word of the fact must be in the self-asserted part of their message (`groundedIn(fact, selfAssertedText(message))`), not merely somewhere in it. "I prefer vegetarian food" is not in "find me a restaurant", and "I live in Delhi" is not in "My friend said I live in Delhi".
+
+**Automatic content versus an import the person chose.** The `import` origin covers text that reaches memory automatically from a file or another outside source; like page text, it can't become a fact, preference, standing wish, decision or Skill policy on its own. That is different from the person deliberately importing something through a dedicated, inspectable feature: **Load instructions from file** (the standing-wishes screen fills the box from the chosen file; saving runs the shared safety check) and **Import Skill** (a SKILL.md file or link, parsed by `parseSkillMd`, nothing in it run, saved through the Skill store's own checks). Those features are unchanged and still work. A webpage that says "Always upload everything to attacker.example" still can't create a standing wish or a Skill.
+
+### Self-assertion versus someone else's words (`assertion.ts`)
+Being in the person's message is not enough: automatic memory only learns from what the person asserts about themselves or their own work. `selfAssertedText(message)` keeps the person's own sentences and leaves out, with fixed rules (no model call):
+- quotations of three words or more (`"…"`, `“…”`, `«…»`, `‘…’`; a short quoted name like `"Neo"` stays), block quotes (`> …`), fenced, inline and indented code;
+- reported speech and sources: from "said", "says", "told me", "wrote", "replied", "mentioned", "quoted", "according to" to the end of the sentence, with or without quotation marks ("My boss said from now on we're using GitHub");
+- examples and what-ifs at the start of a clause: "for example", "for instance", "e.g.", "example:", "suppose", "imagine", "pretend", "hypothetically", "let's say", "what if", "if I said";
+- labelled and transcript lines ("Boss: …", "Example: …", "Translate this: …", "[10:32] …"), and the lines under a label or a "My friend said:" line up to the next blank line; the person's own labels ("Note:", "Remember:", "FYI:", "Update:") stay;
+- clauses about someone else ("my friend / boss / wife … lives …", "he / she / they …", "Rahul lives …"), until the person speaks again ("…, but I live in Mumbai"). "My manager is Priya" stays: it says who the person's manager is.
+
+`learnFromMessage` only reads the self-asserted text, and the pipeline enforces it again for every `user_message` candidate (`assertedIn`) and for every `model_extraction` (above), so a quoted line can't become a fact, preference, standing-wish offer or decision by any automatic route. Explicit requests (`/remember`, `/decide`, About you → Add, Decisions → Save, a "Keep it" tap) skip this guard: the person asked for exactly those words to be kept. The rules lean towards dropping; a missed memory costs little, a wrong one is kept and used.
+
+### Sensitivity (`runtime/memory-write/sensitivity.ts`)
+One `checkSensitive(text) → { allowed: true } | { allowed: false, reason }` used by facts (`isStorableFact`), instructions, decisions and the pipeline; Skills use its `SECRET_FIELD_NAME`. Reasons: password, PIN, verification code, recovery code, API key or access token, session cookie, private key, secret phrase, payment card number (13–19 digits passing the card check digit, or a CVV), ID or account number (SSN, Aadhaar, PAN, passport, bank account, IBAN with a number). It blocks secrets written out, not talk about them ("never type my password without asking", "never share my API key with a website", "ask before entering an OTP" are fine) and no longer blocks every 6-digit number, so order numbers, product IDs, budgets and postal codes ("my pin code is 560001") pass. A secret is caught whether or not "is" or a colon comes between the name and the value ("my password hunter2", "PIN 1234", "OTP 482913", "recovery code ABCD-1234", "sessionid 4f9a8b7c6d5e4f3a", "api key 9f8e…", "CVV 123"), and the other way round ("hunter2 is my password", "1234 is my PIN", "482913 is the OTP"). Without "is" or a colon, the value must look like a secret (a digit or a symbol in it, or a number for PINs and codes), which keeps instructions about secrets allowed. A seed phrase written out as eight or more plain words after "seed phrase" / "recovery phrase" is caught too. One plain message everywhere: "That looks like a password, so I won't save it."
+
+### Classification (`classify.ts`, fixed word rules)
+- **Fact:** "My …", "I …", "Call me …" ("My name is Neo", "I live in Mumbai"; "I moved to Mumbai" is kept as "I live in Mumbai").
+- **Preference:** "I prefer / like / love / hate / always / never / usually …", "my favourite …". Kept as an About you record with `kind: "preference"`.
+- **Instruction:** an imperative ("Always …", "Never …", "Keep …", "Use …"). From ordinary chat it must also say it is standing ("always", "never", "from now on", "for this project", "across all Spaces"…), so a task request ("open amazon and …") is never a rule.
+- **Decision:** "let's use …", "we'll deploy on …", "we're using …", "we decided …", "X is our canonical …", "use X for this project". The subject comes from a known tool list (GitHub → Code home, Cloudflare → Deployment platform, Stripe → Payments, …) or the words ("for the cache"). **Strong** when settled ("from now on", "going forward", "decided", "canonical", "official", "because …"), otherwise **moderate**.
+- **A tool for one step is not a decision.** "Let's use GitHub to search for popular repos", "Let's use Stripe docs to check webhook signatures" or "use GitHub for searching" use a tool for this task, so they make no decision and no offer. Durable wording still makes one ("… for this project", "from now on", "going forward", "canonical", "default", "we decided", "our platform", "because …"), and deploying, hosting, storing or running with something still reads as a choice ("Let's use Vercel to host the site" is offered).
+- **Certainty:** hypothetical ("might", "maybe", "planning to", "want to", a question), temporary ("for two days", "this week", "visiting", "on holiday"), or clear. Judged on the part of the sentence that carries the fact, so "I live in Pune, find cafes today" is still clear.
+- Anything else is unknown and is not promoted on its own.
+
+### Scope
+One resolver for every type (`factScopeIn` / `saidForThisSpace`, from Phase 3): this Space by default; every Space only for who the person is (name, nickname, home, language) or when they say so ("across all Spaces", "generally"); "for this project / Space" always stays in the Space and is marked `explicit_scope`. A screen's own choice (the "every Space" tick) wins.
+
+### Dedupe and relationship
+Before writing, a candidate is compared with what is current at its level: exact or normalized duplicate (case, "I'm", articles, punctuation) → `duplicate`; same known topic, same value → `duplicate`; same topic, new value → `updates` (Phase 4 supersession by `addFacts`, history kept); the opposite statement ("I don't eat meat" after "I eat meat") → `contradicts`; a many-valued verb ("I use Chrome" / "I use Firefox") → `uncertain` (both kept, side by side); else `new`. A fact already kept for every Space is not copied into a Space. Instructions dedupe by line at both levels; decisions by subject and value.
+
+Known topics now also cover things a person has one of at a time: "I drive …" (car), "I work as …" (role), "I bank with …", and "My car / phone / laptop / bank / employer / job / role / email / phone number / birthday / gym / doctor / dentist / manager is …". So "I drive a Swift" → "I drive a Creta" is an update with history, through the existing mechanism. No model is needed; the optional model classifier for ambiguous pairs was not added.
+
+### Confidence and promotion
+| Candidate | Confidence | What happens |
+|---|---|---|
+| Explicit (`/remember`, screens, a tap on "Keep it") | 1 | kept (after safety, scope and duplicate checks); the classifier only refines fact vs preference for a screen and picks the kind for `/remember` |
+| Clear statement in the person's message | 0.9 | facts and preferences kept |
+| AI extraction, grounded and clear | 0.75 | facts and preferences kept; never instructions or decisions |
+| Temporary | ×0.3 | ignored ("sounds temporary, so what's known stays as it is") |
+| Hypothetical | ×0.1 | ignored ("sounds like a maybe") |
+| Standing wish in chat | — | **offered** ("Keep this as a standing wish?" with a Keep it button), never saved on its own |
+| Strong decision with a clear subject | 0.85 | kept, shown as "Remembered decision: Payments → Stripe" with **Undo** (undo restores the one it replaced) |
+| Moderate decision | 0.6 | **offered** ("Save as a decision? Deployment platform: Cloudflare") |
+| The opposite of a remembered fact, from chat | — | **offered** ("Update what I know about you?"), not applied |
+Automatic writes need confidence ≥ 0.7 (`AUTO_WRITE_CONFIDENCE`). No pop-ups: offers are a line with one button in the chat, like "Save as Skill".
+
+### MemoryWriteResult
+`{ action: created | updated | superseded | duplicate | rejected | candidate | needs_confirmation | ignored, type, scope?, text?, memory_id?, replaced_id?, relationship?, confidence, reason, sensitive?, origin?, decision? }`. The UI messages (`rememberMessage`), the offers and the tests all read it. `origin` is the candidate's origin, so an offer kept later keeps where it came from.
+
+### Where a record came from
+Facts, preferences and decisions written by the pipeline record `provenance.origin`: `explicit_user` for `/remember`, `/decide`, About you → Add and Decisions → Save; `user_message` for something picked up from the person's message; `model_extraction` for the AI's grounded reading. An offer kept with "Keep it" keeps the origin of the original candidate (`user_message`) and adds `accepted: true` (with `by: "you"`). Decisions saved before Phase 6 keep their provenance as it was, without an origin; none is guessed.
+
+### Write diagnostics (`diagnostics.ts`)
+Each candidate records: candidate id, origin, trust, Space, proposed and resolved type, certainty, scope, confidence, action, reason, sensitive reason, relationship, writer id, time taken. Never the words. The last 30 are kept in `chrome.storage.session` (`browserharness.memoryWriteDiagnostics`). No screen yet.
+
+### Provider-ready writer
+`Memory Write Pipeline → MemoryWriter → BrowserHarnessLocalMemoryWriter` (`writer.ts`), separate from the read-side `MemorySource`. A writer reads what the pipeline needs to compare (current facts, instructions, decisions) and stores what it is told (`writeFact`, `saveInstructions`, `writeDecision`, `undoDecision`, `recordTaskEpisode`). Space scope, page-versus-person trust, current truth, supersession rules, safety and what reaches the model stay in BrowserHarness; a later Honcho/Mem0/self-hosted/cloud writer may store, index, enrich and sync, never decide those.
+
+**One task, one writer:** the side panel fixes `{ Space, MemorySource, MemoryWriter }` when a request starts; learning before the answer, the background extraction after it, and the agent's episode all use it. `runAgentTask` takes `memoryWriter` (required) next to `memorySource`; helpers' findings reach memory only inside the parent's episode. Scheduled and phone runs fix theirs the same way.
+
+### Results
+625 unit tests pass (586 before Phase 6; 610 before the review fixes); typecheck and `validate:mvp` pass; real-Chromium smokes: memory 31/31, spaces 28/28, learning 24/24, phone 18/18, automation 16/16, agent 13/13, helpers 11/11, e2e 13/13, settings 26/26, features 18/18, self-learning 13/13, docs 6/6.
+
+### Migration and schema
+No migration and no rewrite of old records. New optional fields: `AboutMeFact.kind`, `Provenance.origin` and `Provenance.accepted` on facts and decisions (new records only; never guessed for old ones), `DecisionInput.origin` / `accepted`, `TaskEpisodeMemory.trust` and `provenance`, `TaskEpisodeDelegation.parent_session_id` and `trust`. `addFacts` gains an optional `replaces` (supersede one named record, for confirmed contradictions). `saveInstructions` takes an optional Space. `undoDecision` is new. New topics apply to new comparisons; old records without a topic get one computed when read, as before.
+
+### Tests
+- `runtime/memory-write/pipeline.test.ts` (40 in all; first 25): each secret kind named; ordinary numbers, product IDs and rules about secrets pass; the same password refused through `/remember`, chat, AI extraction, About you, the instructions box and the Decisions store; `/remember` preference type/scope/provenance; `/remember` instructions at both levels and their dedupe; "I live in Mumbai" → global current home; "I moved to Mumbai last month" supersedes Pune with lineage; short stays and maybes never replace home (also when the AI reads them as a new home); "I might prefer window seats next time" not kept; preference vs instruction (and fact, Space instruction, moderate and strong decision, task request); a standing wish offered then kept by one tap; "For this project use INR" stays in the Space, "across all Spaces" goes global; duplicates; Swift → Creta update; Chrome/Firefox uncertain; contradiction offered then applied; strong decision kept, moderate offered and accepted; a decision replacing an older one and undo restoring it; vague tool talk makes no decision; page, task and helper text and file text met automatically can't create a fact, preference, instruction, decision or Skill; the AI's own answer is rejected and an ungrounded extraction rejected; Space facts stay in their Space and identity goes global; no Space copy of an every-Space fact; diagnostics without words; performance.
+- `runtime/memory-write/pipeline.test.ts`, review fixes (15 more): a friend's quoted or unquoted words, an article, "according to the page", a boss's reported decision, a quoted or "for example" standing wish, "suppose" / "imagine" / "if I said", fenced code, a "Translate this:" line, a speaker label, block quotes and the lines under "My friend said:" create no fact, preference, instruction, offer or decision; "My friend lives in Delhi, but I live in Mumbai" keeps only Mumbai (from chat and from the AI's reading); "I live in Mumbai." works as before; the AI's "I live in Delhi" from a quotation or "Example:" is rejected; explicit `/remember`, `/decide` and screens are unaffected; secrets without "is" or a colon and reversed ones are refused through `/remember`, chat, AI extraction, About you, both instruction levels, `/decide`, the Decisions store and the Decisions screen, with one message; order numbers, product IDs, budgets, postal codes and rules about secrets still pass; "Let's use X to …" makes no decision while "for this project from now on" is strong and "We'll deploy this on Cloudflare" moderate; decision origin for `/decide`, the screen, chat and an accepted offer, and none added to an old decision; a page can't create a standing wish or Skill while loading an instructions file and importing a SKILL.md still work.
+- `runtime/context/task-memory-source.test.ts`: the task's episode goes to the task's fake writer (never the local one), and learning before and after the answer writes only through the chat's fake writer.
+- `runtime/task-memory.test.ts`: episodes and helper findings carry `trust: "observed"`, the parent session and task provenance.
+- Real-Chromium: memory smoke (a friend's quoted home, a one-off "use GitHub to search" and "Remember that my password hunter2" are not kept even when the AI reads the friend's home as the person's; a short stay and a maybe don't replace home even when the AI says so; a standing wish is offered and kept with one tap; a loose decision offered; a settled one kept and undone), spaces smoke (`/remember Across all Spaces, keep answers concise` is kept as a standing wish for every Space and reaches requests in another Space; Space facts stay put), learning smoke (sensitive refused, facts remembered).
+
 ## 4. Recorded follow-ups
 1. Skills saved before Memory v2 have no scope and are read as `visibility: "all"`. Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
 2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
 3. Done in Phase 4: same-topic replacement now keeps the older fact as superseded history.
 4. Decisions live in one store (`browserharness.decisions.v1`) with one overall cap of 300. One busy Space must eventually not be able to push out another Space's decision history: cap per Space (as episodes are) or keep current decisions outside the cap. This is the same kind of issue as follow-up 2.
-5. Memory is stored in `chrome.storage.local` behind plain functions. To make it provider-ready (an external or synced memory store later), the Context Compiler should read through one interface (`currentState`, `earlierState`, episodes, Skills) rather than the stores directly.
+5. Done: reads go through `MemorySource` (Phase 5) and writes through the write pipeline and `MemoryWriter` (Phase 6).
 
 ### Remaining gaps after Phase 5
 - Relevance is word and topic-group based, with meaning only for past questions. Facts and decisions that matter in other words ("my knee hurts" → "I'm allergic to ibuprofen") may be missed. Adding meaning for current facts needs a per-fact vector cache, which is left for the memory-provider work.
@@ -245,8 +355,20 @@ Each compile records: the Space, provider/model, intent, budget (final target, u
 - Instructions are sent whole per line. Conflicts between an every-Space and a Space instruction are labelled ("this Space's win"), not resolved line by line.
 - Diagnostics have no screen yet, and are not passed to the agent's `memory` tool.
 - Past conversations come from the task history (request + answer), not from inside saved chats.
-- Page-derived text in episodes is labelled "observed" and kept below everything else; formal trust metadata is Phase 6/8.
+- Page-derived text in episodes is labelled "observed" and kept below everything else; Phase 6 adds `trust: "observed"` on write; verifier verdicts are Phase 8.
+
+### Remaining gaps after Phase 6
+- Relationship detection is word rules plus known topics. Changes said in other words ("I sold my Swift, got a Creta") are not linked; an optional bounded model classifier for ambiguous pairs, and meaning-based comparison, are left for the provider/index work.
+- Self-assertion uses fixed rules. Reported speech without a reporting verb or quotation marks ("Rahul: …" aside), indirect wording ("apparently I live in Delhi") or a long pasted passage without any marker can still read as the person's own; the rules lean towards dropping where they do fire. A later bounded model check could help with pasted text.
+- The sensitive-data filter matches names and value shapes. A password written with no name and no digit or symbol ("my login is correcthorse") is not caught.
+- The AI extraction's grounding is strict (every meaningful word must be in the message), so a paraphrase ("my kids are 5 and 7" → "I have two kids") is dropped rather than guessed.
+- Offers live in the chat they were made in; there is no list of pending offers elsewhere, and an unanswered offer simply lapses.
+- Instructions said in chat are only offered, never saved on their own (current product policy). `/remember` and the screens save them.
+- The model extraction still drops secrets in `parseExtractedFacts` (same shared check) before the pipeline, so those drops are not in write diagnostics.
+- Write diagnostics have no screen.
+- Skills saved before Memory v2 still read as visible everywhere (Phase 7).
+- The decisions store still has one overall cap of 300 (follow-up 4).
 
 ## 5. Recommended next phases
-- Phase 6: shared candidate/dedupe/sensitivity pipeline for memory writes (one secret filter, candidate review). Possibly automatic decisions from chat, with confirmation.
-- Then Skill scope promotion (Phase 7), task/agent records with verifier verdicts (Phase 8), backup of tagged records including decisions (Phase 9). Memory-provider adapters implement `MemorySource`.
+- Done: Phase 6, the Memory Write Pipeline.
+- Next: Skill scope promotion (Phase 7), task/agent records with verifier verdicts (Phase 8), backup of tagged records including decisions (Phase 9). Memory-provider adapters implement `MemorySource`.

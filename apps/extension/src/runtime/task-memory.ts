@@ -33,6 +33,10 @@ export interface TaskEpisodeDelegation {
     title: string;
   }>;
   tools_used: string[];
+  /** Whose work it was: the parent task's session (Phase 6). Missing on older records. */
+  parent_session_id?: string;
+  /** What a helper found on web pages: an observation, never the person's own words. */
+  trust?: "observed";
 }
 
 export interface TaskEpisodeMemory {
@@ -60,6 +64,13 @@ export interface TaskEpisodeMemory {
    * too. Episodes saved before Spaces have none and count as the first Space.
    */
   space_id?: string;
+  /**
+   * What the task saw and did, as observed on websites (Phase 6). It is
+   * task knowledge, never a fact, preference, instruction or decision of the
+   * person's. Missing on older records.
+   */
+  trust?: "observed";
+  provenance?: { origin: "task"; space_id: string; at: string };
 }
 
 function bounded(value: string, max = MAX_TEXT): string {
@@ -161,7 +172,9 @@ function delegations(
           tools_used: unique(
             worker.tools_used,
             20
-          )
+          ),
+          parent_session_id: evidence.session_id,
+          trust: "observed"
         })
       )
     )
@@ -229,7 +242,9 @@ export function taskEpisodeFromSession(
       ? { boundary_action_id: evidence.boundary_action_id }
       : {}),
     sensitive_payloads_removed: true,
-    ...(spaceId ? { space_id: spaceId } : {})
+    ...(spaceId ? { space_id: spaceId } : {}),
+    trust: "observed",
+    ...(spaceId ? { provenance: { origin: "task" as const, space_id: spaceId, at: recordedAt } } : {})
   };
 }
 

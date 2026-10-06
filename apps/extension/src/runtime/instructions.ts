@@ -2,6 +2,7 @@
 // them ("answer briefly", "prices in rupees", "never buy anything over ₹5,000
 // without asking"). They go with every chat, task and scheduled run, and can
 // be saved to or loaded from a file (INSTRUCTIONS.md).
+import { checkSensitive, refusalMessage, type SensitiveReason } from "./memory-write/sensitivity";
 import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
 // Each Space has its own instructions (see spaces.ts). Instructions for every
@@ -9,8 +10,6 @@ import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 // disagree, this Space's own instructions win.
 const KEY = SPACE_SCOPED_KEYS.instructions;
 const GLOBAL_KEY = "browserharness.instructions.global";
-/** A secret written out ("my password is …", a card or account number), not a rule about secrets. */
-const SECRET_VALUE = /\b(password|passcode|passwd|pin|otp|cvv|api key|token|secret)\s*(is|:|=)\s*\S+|\d[\d -]{10,}\d|\b\d{6,}\b/i;
 export const MAX_INSTRUCTIONS = 2000;
 
 /** Pass the Space a task started in, so switching mid-task never changes what it follows. */
@@ -26,22 +25,30 @@ export async function loadGlobalInstructions(): Promise<string> {
   return typeof value === "string" ? value : "";
 }
 
-function checked(text: string): { ok: true; value: string } | { ok: false; error: string } {
+/**
+ * Refuses a secret written out ("my password is …", a card or account
+ * number), not a rule about secrets ("never type my password"), with the one
+ * shared check (memory-write/sensitivity.ts).
+ */
+function checked(text: string): { ok: true; value: string } | { ok: false; error: string; sensitive: SensitiveReason } {
   const value = text.trim().slice(0, MAX_INSTRUCTIONS);
-  if (SECRET_VALUE.test(value)) return { ok: false, error: "A line looks like a password, card or ID number, so nothing was saved." };
+  for (const line of value.split("\n")) {
+    const safety = checkSensitive(line);
+    if (!safety.allowed) return { ok: false, error: refusalMessage(safety.reason, "A line"), sensitive: safety.reason };
+  }
   return { ok: true, value };
 }
 
-/** Saves this Space's instructions; refuses text that looks like a password, card or ID number. */
-export async function saveInstructions(text: string): Promise<{ ok: boolean; error?: string }> {
+/** Saves a Space's instructions (the task's, or the one in use); refuses secrets. */
+export async function saveInstructions(text: string, spaceId?: string): Promise<{ ok: boolean; error?: string; sensitive?: SensitiveReason }> {
   const result = checked(text);
   if (!result.ok) return result;
-  await chrome.storage.local.set({ [await spaceKey(KEY)]: result.value });
+  await chrome.storage.local.set({ [spaceId ? keyForSpace(KEY, spaceId) : await spaceKey(KEY)]: result.value });
   return { ok: true };
 }
 
 /** Saves the instructions for every Space, with the same check. */
-export async function saveGlobalInstructions(text: string): Promise<{ ok: boolean; error?: string }> {
+export async function saveGlobalInstructions(text: string): Promise<{ ok: boolean; error?: string; sensitive?: SensitiveReason }> {
   const result = checked(text);
   if (!result.ok) return result;
   await chrome.storage.local.set({ [GLOBAL_KEY]: result.value });
