@@ -262,6 +262,20 @@ function recordedAttributes(
   return attributes;
 }
 
+// Shows the planner what a text box already holds, so it can tell its typing
+// worked. Secrets stay out: passwords, card fields and one-time codes.
+const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "number"]);
+function shareableValue(element: HTMLElement): string | undefined {
+  const field =
+    element instanceof HTMLTextAreaElement ||
+    (isInputElement(element) && TEXT_INPUT_TYPES.has(element.type.toLowerCase()));
+  if (!field) return undefined;
+  const autocomplete = (element.getAttribute("autocomplete") || "").toLowerCase();
+  if (/cc-|password|one-time-code/.test(autocomplete)) return undefined;
+  const value = (element as HTMLInputElement | HTMLTextAreaElement).value.trim();
+  return value ? value.slice(0, 120) : undefined;
+}
+
 function locatorFor(element: HTMLElement): WorkflowLocator {
   const risk = riskForElement(element);
   return {
@@ -619,6 +633,7 @@ function observe(tabId: number) {
       disabled:
         "disabled" in element &&
         Boolean((element as HTMLButtonElement | HTMLInputElement).disabled),
+      ...(shareableValue(element) ? { value: shareableValue(element) } : {}),
       ...riskForElement(element)
     };
     });

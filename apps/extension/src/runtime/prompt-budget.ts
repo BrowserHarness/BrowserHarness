@@ -46,7 +46,8 @@ function elementLine(element: InteractiveElement): string {
   ]
     .filter(Boolean)
     .join(",");
-  return `${element.element_id} ${element.role}${name} <${element.tag}>${flags ? ` [${flags}]` : ""}`;
+  const value = element.value ? ` value="${clip(element.value.replace(/\s+/g, " "), 60)}"` : "";
+  return `${element.element_id} ${element.role}${name} <${element.tag}>${flags ? ` [${flags}]` : ""}${value}`;
 }
 
 /**

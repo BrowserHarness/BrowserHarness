@@ -151,6 +151,7 @@ Rules:
 - Use only element_id values from the current page list. Never invent one.
 - After a tool fails, read the error in RECENT EXECUTION EVIDENCE and try a different action.
 - Do not repeat the same action on an unchanged page.
+- To search, type the words into the search box, then press_key Enter on that same box. Searching is always allowed.
 - When the goal is done, or the answer is in the page text, reply with kind "final".
 - Google Docs (adapter "google-docs"): write with {"kind":"tool","tool":"type","input":{"element_id":"bc-google-doc-editor","text":"all the text, \\n between lines"}} in one step; do not click the document first.
 - Never submit, buy, send, delete or change account settings unless the user asked for it.`;

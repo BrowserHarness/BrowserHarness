@@ -55,6 +55,8 @@ export interface InteractiveElement {
   /** Set for elements inside a same-origin iframe or a shadow root. */
   inside?: "frame" | "shadow";
   disabled: boolean;
+  /** What a text box holds now (never passwords, card numbers or codes). */
+  value?: string;
   requires_approval?: boolean;
   approval_reason?: string;
   enter_requires_approval?: boolean;
