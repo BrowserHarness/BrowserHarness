@@ -20,7 +20,8 @@ export const TEXT_SIZES: Record<TextSize, number> = {
 };
 
 const BRAND = "#4F46E5";
-const HEADING = '"Poppins", system-ui, sans-serif';
+/** Poppins for headings; Inter for body text, buttons and every other element. */
+export const HEADING = '"Poppins", system-ui, sans-serif';
 
 export function createBrowserHarnessTheme(mode: PaletteMode, textSize: TextSize = "normal") {
   const dark = mode === "dark";

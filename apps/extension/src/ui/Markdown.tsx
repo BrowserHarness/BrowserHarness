@@ -1,4 +1,5 @@
 import { Box, Link, Typography } from "@mui/material";
+import { HEADING } from "./theme";
 import type { ReactNode } from "react";
 import {
   parseMarkdown,
@@ -39,7 +40,7 @@ function block(node: BlockNode, index: number): ReactNode {
   switch (node.type) {
     case "heading":
       return (
-        <Typography key={index} variant={node.level === 1 ? "subtitle1" : "subtitle2"} sx={{ fontWeight: 600, mt: 1 }}>
+        <Typography key={index} variant={node.level === 1 ? "subtitle1" : "subtitle2"} sx={{ fontWeight: 600, mt: 1, fontFamily: HEADING }}>
           {inline(node.inline)}
         </Typography>
       );
