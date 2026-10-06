@@ -29,7 +29,8 @@ Only accounts you allow this way can use the bot; everyone else gets a
 ## 4. Use it
 Message the bot a task. It replies "On it", then the result. You can also run
 a saved Skill: `/find-red-shoes size 9`. Every task also appears in
-BrowserHarness → History.
+BrowserHarness → History. Voice notes work too once you choose a
+speech-to-text service: see "Voice notes" in [CHAT-APPS.md](CHAT-APPS.md).
 
 ## Commands
 - `browserharness-bridge telegram status`: the bot and the allowed accounts

@@ -25,6 +25,7 @@ import { createMattermostRelay, mattermostApi } from "./mattermost.mjs";
 import { createMatrixRelay, matrixApi } from "./matrix.mjs";
 import { createEmailRelay, hostPort, openImap, providerFor, sendSmtp } from "./email.mjs";
 import { CHAT_APP_NAMES } from "./chat-relay.mjs";
+import { createTranscriber, silentWav, voiceServiceUrl } from "./voice.mjs";
 import {
   detectAgents,
   findOnPath,
@@ -455,9 +456,17 @@ async function restartIfRunning(config) {
 function startChatApps(config, runTask) {
   const log = (line) => process.stderr.write(`${line}\n`);
   const relays = [];
+  let transcribe = null;
+  if (config.voice?.model) {
+    try {
+      transcribe = createTranscriber({ url: config.voice.url, model: config.voice.model, apiKey: config.voice.key || "", language: config.voice.language || "" });
+    } catch (error) {
+      log(`voice notes: ${error.message}`);
+    }
+  }
   const { telegram, discord, slack, signal } = config;
   if (telegram?.token) {
-    relays.push(createTelegramRelay({ token: telegram.token, allowedUserIds: telegram.allowed_user_ids || [], apiBase: telegram.api_base, runTask, log }));
+    relays.push(createTelegramRelay({ token: telegram.token, allowedUserIds: telegram.allowed_user_ids || [], apiBase: telegram.api_base, runTask, transcribe, log }));
   }
   if (discord?.token) {
     relays.push(
@@ -468,6 +477,7 @@ function startChatApps(config, runTask) {
         apiBase: discord.api_base,
         gatewayUrl: discord.gateway_url,
         runTask,
+        transcribe,
         log
       })
     );
@@ -480,12 +490,21 @@ function startChatApps(config, runTask) {
         allowedUserIds: slack.allowed_user_ids || [],
         apiBase: slack.api_base,
         runTask,
+        transcribe,
         log
       })
     );
   }
   if (signal?.number) {
-    relays.push(createSignalRelay({ number: signal.number, command: signal.command, allowedUserIds: signal.allowed_user_ids || [], runTask, log }));
+    relays.push(createSignalRelay({
+        number: signal.number,
+        command: signal.command,
+        dataDir: signal.data_dir,
+        allowedUserIds: signal.allowed_user_ids || [],
+        runTask,
+        transcribe,
+        log
+      }));
   }
   const { mattermost, matrix, email } = config;
   if (mattermost?.token) {
@@ -497,13 +516,22 @@ function startChatApps(config, runTask) {
         botName: mattermost.bot,
         allowedUserIds: mattermost.allowed_user_ids || [],
         runTask,
+        transcribe,
         log
       })
     );
   }
   if (matrix?.token) {
     relays.push(
-      createMatrixRelay({ homeserver: matrix.homeserver, token: matrix.token, botId: matrix.bot, allowedUserIds: matrix.allowed_user_ids || [], runTask, log })
+      createMatrixRelay({
+        homeserver: matrix.homeserver,
+        token: matrix.token,
+        botId: matrix.bot,
+        allowedUserIds: matrix.allowed_user_ids || [],
+        runTask,
+        transcribe,
+        log
+      })
     );
   }
   if (email?.password) {
@@ -695,6 +723,41 @@ async function chatCommand(app, config, args) {
   }
 }
 
+const VOICE_USAGE = "voice setup --url <speech-to-text service, like https://api.example.com/v1> --model <its model> [--key <API key>] [--language en]";
+
+/** `voice setup …`, `voice off`, `voice status`: turning voice notes into tasks. */
+async function voiceCommand(config, mode) {
+  const current = config.voice || {};
+  if (mode === "setup") {
+    const given = option("url");
+    const model = option("model") || (given ? "" : current.model);
+    if (!(given || current.url) || !model) throw new Error(`Usage: browserharness-bridge ${VOICE_USAGE}`);
+    const url = voiceServiceUrl(given || current.url);
+    // A saved key is kept only for the same service.
+    const key = option("key") ?? (url === current.url ? current.key || "" : "");
+    const language = option("language") ?? current.language ?? "";
+    // One second of silence checks the address, model and key without recording anything.
+    await createTranscriber({ url, model, apiKey: key, language })(silentWav());
+    const next = { ...config, voice: { url, model, ...(key ? { key } : {}), ...(language ? { language } : {}) } };
+    await saveConfig(next);
+    print({
+      voice: true,
+      url,
+      model,
+      chat_apps: Object.keys(CHAT_APPS).filter((app) => app !== "email" && isChatAppSetUp(config[app] || {})),
+      next: "Send your bot a voice note. Its words run as the task, and the bot says what it heard.",
+      restarted: await restartIfRunning(next)
+    });
+  } else if (mode === "off") {
+    const { voice: _removed, ...next } = config;
+    await saveConfig(next);
+    print({ voice: false, restarted: await restartIfRunning(next) });
+  } else {
+    // Never prints the key.
+    print({ voice: Boolean(current.model), url: current.url, model: current.model, language: current.language, setup: current.model ? undefined : `browserharness-bridge ${VOICE_USAGE}` });
+  }
+}
+
 /** Every chat app at a glance. */
 function chatsCommand(config) {
   print({
@@ -707,6 +770,7 @@ function chatsCommand(config) {
         allowed: (current.allowed_user_ids || []).length
       };
     }),
+    voice_notes: config.voice?.model ? `on (${config.voice.model})` : `off: browserharness-bridge ${VOICE_USAGE}`,
     setup: Object.values(CHAT_APPS).map((spec) => `browserharness-bridge ${spec.usage}`)
   });
 }
@@ -901,6 +965,8 @@ try {
   } else if (command in CHAT_APPS) {
     const valueFlags = new Set(["--token", "--bot-token", "--app-token", "--number", "--command", "--server", "--homeserver", "--address", "--password", "--imap", "--smtp"]);
     await chatCommand(command, config, process.argv.slice(3).filter((arg, index, all) => !arg.startsWith("--") && !valueFlags.has(all[index - 1])));
+  } else if (command === "voice") {
+    await voiceCommand(config, process.argv[3]);
   } else if (command === "chats") {
     chatsCommand(config);
   } else if (command === "skills") {
@@ -931,7 +997,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|voice|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {

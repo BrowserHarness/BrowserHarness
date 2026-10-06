@@ -62,6 +62,7 @@ const bridge = (file, ...args) => {
 // Stand-ins for Telegram's Bot API, Discord, Slack and for a model, so the chat paths run end to end.
 const { WebSocketServer } = require("ws");
 const telegram = { queue: [], sent: [], nextId: 1 };
+const stt = { calls: [] };
 const discord = { sockets: new Set(), sent: [] };
 const slack = { sockets: new Set(), sent: [], envelopes: 0 };
 const discordGateway = new WebSocketServer({ port: 0, host: "127.0.0.1" });
@@ -107,6 +108,22 @@ const bridgeAsync = (file, ...args) =>
   });
 
 const page = http.createServer((req, res) => {
+  // A stand-in speech-to-text service: the voice note "says" a task, silence says nothing.
+  if (req.url === "/stt/v1/audio/transcriptions") {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("latin1");
+      stt.calls.push({ auth: req.headers.authorization, model: /name="model"\r\n\r\n([^\r]*)/.exec(raw)?.[1] });
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ text: raw.includes("OggS-e2e") ? `TG_TASK open ${pageUrl} and tell me the button` : "" }));
+    });
+    return;
+  }
+  if (req.method === "GET" && req.url === "/tg/file/bot123:abc/voice/note.oga") {
+    res.setHeader("content-type", "audio/ogg");
+    return res.end(Buffer.from("OggS-e2e voice note"));
+  }
   if (req.url.startsWith("/discord/")) {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
@@ -158,6 +175,7 @@ const page = http.createServer((req, res) => {
         res.end(JSON.stringify({ ok: true, result }));
       };
       if (method === "getMe") return answer({ id: 1, is_bot: true, username: "my_harness_bot" });
+      if (method === "getFile") return answer({ file_id: body.file_id, file_path: "voice/note.oga" });
       if (method === "sendMessage") {
         telegram.sent.push(body);
         return answer({ message_id: telegram.sent.length });
@@ -368,6 +386,36 @@ try {
   const history = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.taskHistory"))["browserharness.taskHistory"] || []);
   check("phone tasks are in history", history.some((entry) => entry.task.startsWith("From Telegram: TG_TASK")));
 
+  // A voice note runs as a task once a speech-to-text service is set up.
+  const voiceNote = () =>
+    telegram.queue.push({ update_id: telegram.nextId++, message: { chat: { id: 9042 }, from: { id: 42, first_name: "Ada" }, voice: { file_id: "V1", mime_type: "audio/ogg", duration: 2 } } });
+  const sentAfter = async (start, pattern, timeout) => {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+      const found = telegram.sent.slice(start).find((item) => item.chat_id === 9042 && pattern.test(item.text));
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return null;
+  };
+  let mark = telegram.sent.length;
+  voiceNote();
+  check("a voice note says how to turn voice notes on", Boolean(await sentAfter(mark, /voice notes aren't turned on/, 10_000)) && stt.calls.length === 0);
+  const voiceSetup = await bridgeAsync(installed, "voice", "setup", "--url", `${pageUrl}stt/v1`, "--model", "stt-e2e", "--key", "stt-key");
+  check(
+    "voice setup checks the service with the chosen model and restarts the Bridge",
+    voiceSetup.json?.voice === true && voiceSetup.json?.restarted === true && stt.calls[0]?.model === "stt-e2e" && stt.calls[0]?.auth === "Bearer stt-key",
+    voiceSetup.stderr?.trim() || JSON.stringify(stt.calls)
+  );
+  const voiceStatus = await bridgeAsync(installed, "voice", "status");
+  check("voice status never prints the key", voiceStatus.json?.voice === true && !JSON.stringify(voiceStatus.json).includes("stt-key"));
+  await reconnected();
+  mark = telegram.sent.length;
+  voiceNote();
+  const heard = await sentAfter(mark, /^On it \(from your voice note\): TG_TASK open/, 20_000);
+  const voiceDone = await sentAfter(mark, /^Done\n\nTG_DONE Greet/, 60_000);
+  check("a Telegram voice note runs in Chrome and the result comes back", Boolean(heard && voiceDone), JSON.stringify(telegram.sent.slice(mark)));
+
   // The same from Discord, Slack and Signal.
   const waitFor = async (find, timeout) => {
     const end = Date.now() + timeout;
@@ -498,7 +546,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   const listedChats = Object.fromEntries((chats.json?.chats || []).map((chat) => [chat.app, chat.on && chat.allowed === 1]));
   check(
     "chats shows the five apps set up, without tokens or passwords",
-    ["telegram", "discord", "slack", "signal", "email"].every((app) => listedChats[app]) && !/xoxb-e2e|xapp-e2e|discord-token|123:abc|secret/.test(JSON.stringify(chats.json)),
+    ["telegram", "discord", "slack", "signal", "email"].every((app) => listedChats[app]) && !/xoxb-e2e|xapp-e2e|discord-token|123:abc|secret|stt-key/.test(JSON.stringify(chats.json)),
     JSON.stringify(chats.json)
   );
   const allHistory = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.taskHistory"))["browserharness.taskHistory"] || []);

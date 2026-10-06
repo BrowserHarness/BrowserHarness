@@ -4,6 +4,7 @@
 // wait for you at the computer.
 
 import { CHAT_HELP, clipMessage, createChatRelay, pause } from "./chat-relay.mjs";
+import { downloadVoice } from "./voice.mjs";
 
 const DEFAULT_API = "https://api.telegram.org";
 const MAX_MESSAGE = 3900;
@@ -28,6 +29,8 @@ export function telegramApi(token, apiBase = DEFAULT_API, fetchImpl = globalThis
     getMe: () => call("getMe"),
     getUpdates: (offset, timeout = 30) =>
       call("getUpdates", { offset, timeout, allowed_updates: ["message"] }, (timeout + 10) * 1000),
+    getFile: (fileId) => call("getFile", { file_id: fileId }),
+    fileUrl: (filePath) => `${apiBase}/file/bot${token}/${filePath}`,
     sendMessage: (chatId, text) =>
       call("sendMessage", { chat_id: chatId, text: clipMessage(text, MAX_MESSAGE) })
   };
@@ -44,22 +47,31 @@ export function createTelegramRelay({
   apiBase = DEFAULT_API,
   fetchImpl = globalThis.fetch,
   runTask,
+  transcribe = null,
   pollTimeoutSeconds = 30,
   log = () => undefined
 }) {
   const api = telegramApi(token, apiBase, fetchImpl);
-  const relay = createChatRelay({ app: "telegram", allowedUserIds, runTask, send: (chatId, text) => api.sendMessage(chatId, text) });
+  const relay = createChatRelay({ app: "telegram", allowedUserIds, runTask, transcribe, send: (chatId, text) => api.sendMessage(chatId, text) });
   let offset = 0;
   let stopped = false;
 
   async function handle(update) {
     const message = update.message;
-    if (!message?.chat?.id || typeof message.text !== "string") return;
+    const audio = message?.voice || message?.audio;
+    if (!message?.chat?.id || (typeof message.text !== "string" && !audio?.file_id)) return;
     await relay.handle({
       chatId: message.chat.id,
       userId: message.from?.id,
       userName: message.from?.first_name || "",
-      text: message.text
+      text: message.text || "",
+      voice: audio?.file_id
+        ? async () => {
+            if (audio.file_size > 20 * 1024 * 1024) throw new Error("it is too long (20 MB at most)");
+            const file = await api.getFile(audio.file_id);
+            return downloadVoice(api.fileUrl(file.file_path), { type: audio.mime_type || "audio/ogg", name: file.file_path.split("/").pop() || "voice.ogg", fetchImpl });
+          }
+        : null
     });
   }
 

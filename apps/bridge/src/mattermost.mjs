@@ -3,6 +3,7 @@
 // for the people you allowed on this computer.
 import { WebSocket } from "ws";
 import { clipMessage, createChatRelay, pause } from "./chat-relay.mjs";
+import { downloadVoice } from "./voice.mjs";
 
 const MAX_MESSAGE = 3900;
 
@@ -22,6 +23,7 @@ export function mattermostApi({ server, token, fetchImpl = globalThis.fetch }) {
   return {
     getMe: () => call("GET", "/users/me"),
     directChannel: (botId, userId) => call("POST", "/channels/direct", [botId, userId]),
+    fileUrl: (fileId) => `${base}/api/v4/files/${encodeURIComponent(fileId)}`,
     sendMessage: (channelId, text) => call("POST", "/posts", { channel_id: channelId, message: clipMessage(text, MAX_MESSAGE) }),
     socketUrl: () => `${base.replace(/^http/, "ws")}/api/v4/websocket`
   };
@@ -47,10 +49,11 @@ export function mattermostTask(event, botId, botName = "") {
     if (!mentions.includes(botId)) return null;
   }
   const text = botName ? post.message.replace(new RegExp(`@${botName}\\b`, "gi"), "").trim() : post.message;
-  return { channelId: post.channel_id, userId: post.user_id, text };
+  const audio = (post.metadata?.files || []).find((file) => String(file.mime_type || "").startsWith("audio/")) || null;
+  return { channelId: post.channel_id, userId: post.user_id, text, ...(audio ? { audio } : {}) };
 }
 
-export function createMattermostRelay({ server, token, botId: knownBotId = "", botName = "", allowedUserIds = [], fetchImpl = globalThis.fetch, runTask, log = () => undefined }) {
+export function createMattermostRelay({ server, token, botId: knownBotId = "", botName = "", allowedUserIds = [], fetchImpl = globalThis.fetch, runTask, transcribe = null, log = () => undefined }) {
   const api = mattermostApi({ server, token, fetchImpl });
   let botId = knownBotId;
   let name = botName;
@@ -60,6 +63,7 @@ export function createMattermostRelay({ server, token, botId: knownBotId = "", b
     app: "mattermost",
     allowedUserIds,
     runTask,
+    transcribe,
     send: (channelId, text) => api.sendMessage(channelId, text),
     targetFor: async (userId) => (await api.directChannel(botId, userId)).id
   });
@@ -67,7 +71,15 @@ export function createMattermostRelay({ server, token, botId: knownBotId = "", b
   async function handle(event) {
     const message = mattermostTask(event, botId, name);
     if (!message) return;
-    await relay.handle({ chatId: message.channelId, userId: message.userId, text: message.text });
+    const { audio } = message;
+    await relay.handle({
+      chatId: message.channelId,
+      userId: message.userId,
+      text: message.text,
+      voice: audio?.id
+        ? () => downloadVoice(api.fileUrl(audio.id), { headers: { authorization: `Bearer ${token}` }, type: audio.mime_type, name: audio.name || "voice.m4a", fetchImpl })
+        : null
+    });
   }
 
   async function connect() {
