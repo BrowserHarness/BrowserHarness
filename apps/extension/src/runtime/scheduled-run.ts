@@ -1,7 +1,8 @@
 // Runs one scheduled task with nobody watching: its own background tab,
 // no questions (anything that needs approval stops and waits for the
 // person), and a short result for history and the notification.
-import { contextFor } from "./context";
+import { contextFor, localMemorySource } from "./context";
+import { agentRoute, chatRoute } from "./route";
 import { autoApproves } from "./approval-mode";
 import { approvalQuestionFor, extensionMessage, runAgentTask } from "./agent-task";
 import { directChatWithFallback } from "./model-router";
@@ -62,10 +63,14 @@ export async function runUnattendedTask(
   const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
   const preferences = await loadPreferences();
   // What goes with the task: compiled for this Space and model, like a chat request.
+  // One memory source for the whole task: its context, the agent and its helpers.
+  const memorySource = localMemorySource;
   const { compiled, text: context } = await contextFor({
     request: taskText,
     spaceId,
     connection: primary,
+    fallback,
+    source: memorySource,
     skill,
     autoSkills: preferences.autoSkills,
     recall: !skill
@@ -78,27 +83,20 @@ export async function runUnattendedTask(
     const hinted = skill ? null : compiled.skill;
     if (compiled.intent === "chat") {
       log("Asking the model");
+      const route = chatRoute(primary, fallback);
       const routed = await directChatWithFallback(
-        primary,
-        fallback?.chatHealth.status === "healthy" ? fallback : null,
+        route.primary,
+        route.fallback,
         task + context,
         controller.signal
       );
       return { status: "worked", message: routed.result };
     }
 
-    const agentPrimary =
-      primary.agentHealth.status !== "failed"
-        ? primary
-        : fallback?.agentHealth.status === "healthy"
-          ? fallback
-          : null;
+    const { primary: agentPrimary, fallback: agentFallback } = agentRoute(primary, fallback);
     if (!agentPrimary) {
       return { status: "failed", message: `${primary.model} did not pass the browser-control check. Pick another model.` };
     }
-    const agentFallback =
-      agentPrimary.id === primary.id && fallback?.agentHealth.status === "healthy" ? fallback : null;
-
     const session = {
       id: crypto.randomUUID(),
       title: `${label}: ${taskText.length > 36 ? `${taskText.slice(0, 35)}…` : taskText}`
@@ -124,6 +122,7 @@ export async function runUnattendedTask(
       agentFallback,
       session,
       spaceId,
+      memorySource,
       signal: controller.signal,
       hooks: {
         addActivity: (text) => {

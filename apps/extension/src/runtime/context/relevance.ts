@@ -19,8 +19,14 @@ const CONCEPTS: Array<{ words: string[]; topics: string[]; subjects: string[] }>
   {
     // Words and language.
     words: "write writing translate reply answer answers email letter message language speak post caption".split(" "),
-    topics: ["language", "name", "nickname"],
+    topics: ["language"],
     subjects: ["language", "tone", "style", "format"]
+  },
+  {
+    // Speaking as the person or about them: their name goes on it.
+    words: "email emails letter letters bio biography introduce introduc introduction intro signature sign form forms fill profile cv resume cover application apply register registration signup invitation invite greet".split(" "),
+    topics: ["name", "nickname"],
+    subjects: []
   },
   {
     // Work and code.
@@ -36,8 +42,12 @@ const CONCEPTS: Array<{ words: string[]; topics: string[]; subjects: string[] }>
   }
 ];
 
-/** Who the person is, short enough to always come along. */
-export const ALWAYS_USEFUL_TOPICS = new Set(["name", "nickname", "language"]);
+/**
+ * Shapes every reply, so it always comes along. A name does not: it goes only
+ * with requests that speak as or about the person (an email or letter from
+ * them, a bio, an introduction, a form to fill), by the identity group above.
+ */
+export const ALWAYS_USEFUL_TOPICS = new Set(["language"]);
 
 function conceptsIn(words: Set<string>): typeof CONCEPTS {
   return CONCEPTS.filter((concept) => concept.words.some((word) => words.has(word) || words.has(word.replace(/s$/, ""))));
@@ -58,7 +68,7 @@ const HOW_TO_ANSWER = /\b(answers?|repl(y|ies)|respon(d|ses?)|tone|concise|brief
 
 /** How useful a current fact is for a request (0 = leave it out), and why. */
 export function factUsefulness(request: string, text: string, topic?: string): { score: number; reason: string } {
-  if (topic && ALWAYS_USEFUL_TOPICS.has(topic)) return { score: 0.9, reason: "who you are (always useful, short)" };
+  if (topic && ALWAYS_USEFUL_TOPICS.has(topic)) return { score: 0.9, reason: "the language you use (always useful)" };
   if (HOW_TO_ANSWER.test(text)) return { score: 0.8, reason: "how you like answers (always useful)" };
   const words = contentWords(request);
   const byWords = overlap(request, text);

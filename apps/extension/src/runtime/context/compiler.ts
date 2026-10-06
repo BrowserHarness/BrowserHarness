@@ -18,8 +18,7 @@ import { classifyTaskIntent } from "../intent";
 import { looksBack } from "../recall";
 import type { UserSkill } from "../skills";
 import type { TaskEpisodeMemory } from "../task-memory";
-import type { ProviderConnection } from "../../settings/provider-store";
-import { budgetFor, estimateTokens, SECTION_SHARE } from "./budget";
+import { budgetForRoute, estimateTokens, SECTION_SHARE, type RouteInput } from "./budget";
 import { localMemorySource, type MemorySource } from "./memory-source";
 import { decisionUsefulness, factUsefulness, isFollowUp, overlap } from "./relevance";
 import {
@@ -28,7 +27,8 @@ import {
   type ContextExclusion,
   type ContextItem,
   type ContextSection,
-  type ExclusionReason
+  type ExclusionReason,
+  type InspectedCount
 } from "./types";
 
 export interface ChatTurn {
@@ -44,8 +44,14 @@ export interface CompileInput {
   /** This chat so far, oldest first, not including the new request. */
   conversation?: ChatTurn[];
   chatId?: string;
-  /** The model that will read it, for the budget. */
-  connection?: Pick<ProviderConnection, "provider" | "model" | "baseUrl"> | null;
+  /** The main AI, for the budget. */
+  connection?: RouteInput["primary"];
+  /**
+   * The backup AI. It counts toward the budget only when it may receive this
+   * request (passed the chat check for a chat, the browser-control check for
+   * a browser task), so the context fits every model that may read it.
+   */
+  fallback?: RouteInput["fallback"];
   /** A Skill the person ran by name; it always comes along. */
   skill?: UserSkill | null;
   /** Offer a saved Skill that looks like this request (the "Use my Skills automatically" setting). */
@@ -89,7 +95,7 @@ const topicOf = (fact: AboutMeFact) => fact.topic ?? factTopic(fact.text);
 interface Gathered {
   items: ContextItem[];
   excluded: ContextExclusion[];
-  inspected: Record<string, number>;
+  inspected: Record<string, InspectedCount>;
   skill: UserSkill | null;
 }
 
@@ -99,7 +105,7 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
   const wants = (section: ContextSection) => !input.only || input.only.includes(section);
   const items: ContextItem[] = [];
   const excluded: ContextExclusion[] = [];
-  const inspected: Record<string, number> = {};
+  const inspected: Record<string, InspectedCount> = {};
 
   items.push(
     item({
@@ -117,7 +123,7 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
   );
 
   const turns = (input.conversation ?? []).filter((turn) => turn.text.trim());
-  inspected.conversation = turns.length;
+  inspected.conversation = { turns: turns.length };
   if (wants("conversation")) {
     turns.forEach((turn, index) => {
       const text = turn.text.trim();
@@ -141,8 +147,8 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
   }
 
   const current = await source.currentState(spaceId);
-  inspected.facts = current.facts.space.length + current.facts.global.length;
-  inspected.decisions = current.decisions.length;
+  inspected.facts = { current_records: current.facts.space.length + current.facts.global.length };
+  inspected.decisions = { current_records: current.decisions.length };
   for (const [what, count] of Object.entries(current.walled)) {
     if (count) excluded.push({ ref: `${what}:other-spaces`, section: what === "decisions" ? "decisions" : "facts", reason: "another Space", count });
   }
@@ -218,7 +224,7 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
   // Replaced facts and decisions: only for a question about the past.
   if (wants("earlier")) {
     const earlier = await source.earlierState(request, spaceId);
-    inspected.earlier = current.earlierCount;
+    inspected.earlier = { stored_records: current.earlierCount };
     const found = earlier.facts.length + earlier.decisions.length;
     if (current.earlierCount > found) {
       excluded.push({
@@ -272,7 +278,7 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
       excluded.push({ ref: `skill:${skill.id}`, section: "skills", reason: "duplicate", duplicate_of: "request" });
     } else if (input.autoSkills !== false) {
       const found = await source.relevantSkills(request, spaceId, 1);
-      inspected.skills = found.inspected;
+      inspected.skills = { records_scanned: found.inspected };
       if (found.walled) excluded.push({ ref: "skills:other-spaces", section: "skills", reason: "another Space", count: found.walled });
       const best = found.skills[0];
       if (best) {
@@ -291,7 +297,7 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
       excluded.push({ ref: "history:follow-up", section: "history", reason: "the current chat already covers this" });
     } else {
       const found = await source.relevantHistory(request, spaceId, MAX_HISTORY);
-      inspected.history = found.inspected;
+      inspected.history = { records_scanned: found.inspected };
       found.entries.forEach((entry: TaskHistoryEntry) =>
         items.push(
           item({
@@ -319,7 +325,8 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
       excluded.push({ ref: "episodes:follow-up", section: "episodes", reason: "the current chat already covers this" });
     } else {
       const found = await source.relevantEpisodes(request, spaceId, MAX_EPISODES);
-      inspected.episodes = found.episodes.length;
+      // A search result count, not how many past tasks the search looked through.
+      inspected.episodes = { search_results: found.episodes.length };
       if (found.walled) excluded.push({ ref: "episodes:other-spaces", section: "episodes", reason: "another Space", count: found.walled });
       for (const episode of found.episodes) {
         const score = overlap(request, `${episode.title} ${episode.task}`);
@@ -535,8 +542,11 @@ export async function compileContext(input: CompileInput): Promise<CompiledConte
   items = selectRelevant(items, excluded, input.request);
   items = dedupeAndConflicts(items, excluded);
 
-  const budget = budgetFor(input.connection);
-  if (input.budgetTarget) budget.target = input.budgetTarget;
+  const budget = budgetForRoute({ primary: input.connection, fallback: input.fallback, intent });
+  if (input.budgetTarget) {
+    budget.target = input.budgetTarget;
+    if (budget.route) budget.route.limited_by = "fixed target";
+  }
   const fitted = fitBudget(items, excluded, budget.target);
   budget.used = fitted.used;
 

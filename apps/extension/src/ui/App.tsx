@@ -102,7 +102,8 @@ import {
   withoutScopeWords
 } from "../runtime/about-me";
 import { loadTaskHistory } from "../runtime/history";
-import { contextFor } from "../runtime/context";
+import { contextFor, localMemorySource } from "../runtime/context";
+import { agentRoute, chatRoute } from "../runtime/route";
 import { decideCommand } from "../runtime/decisions";
 import { recallAnswer } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
@@ -1159,6 +1160,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
 
     // What goes with the request (this chat, wishes, facts, decisions, past
     // conversations, a matching Skill): compiled for this Space and model.
+    // One memory source for the whole task: its context, the agent and its helpers.
+    const memorySource = localMemorySource;
     const compiledContext = await contextFor({
       request: typed,
       spaceId,
@@ -1167,6 +1170,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         ? []
         : messages.filter((item) => !item.problem).map((item) => ({ role: item.role, text: item.text })),
       connection: primary,
+      fallback,
+      source: memorySource,
       skill: skillRun,
       autoSkills,
       recall: !skillRun
@@ -1215,11 +1220,10 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         requestAbort.current = controller;
 
         try {
+          const route = chatRoute(primary, fallback);
           const routed = await directChatWithFallback(
-            primary,
-            fallback?.chatHealth.status === "healthy"
-              ? fallback
-              : null,
+            route.primary,
+            route.fallback,
             task + context,
             controller.signal
           );
@@ -1245,22 +1249,11 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         }
       }
 
-      const agentPrimary =
-        primary.agentHealth.status !== "failed"
-          ? primary
-          : fallback?.agentHealth.status === "healthy"
-            ? fallback
-            : null;
+      const { primary: agentPrimary, fallback: agentFallback } = agentRoute(primary, fallback);
 
       if (!agentPrimary) {
         throw new CantUseBrowserError(primary.model);
       }
-
-      const agentFallback =
-        agentPrimary.id === primary.id &&
-        fallback?.agentHealth.status === "healthy"
-          ? fallback
-          : null;
 
       const controller = new AbortController();
       requestAbort.current = controller;
@@ -1276,6 +1269,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         agentFallback,
         session: { id: taskSessionId, title: taskSessionTitle },
         spaceId,
+        memorySource,
         signal: controller.signal,
         hooks: {
           addActivity,

@@ -225,13 +225,21 @@ try {
   await side.waitForFunction(() => document.body.innerText.includes("TASK_OK"), null, { timeout: 20000 }).catch(() => {});
   const memoryPrompt = prompts.slice(beforeMemory).join("\n");
   check(
-    "browser tasks get who you are, not facts unrelated to the request",
-    memoryPrompt.includes("ABOUT ME") && memoryPrompt.includes("My name is Priya") && !memoryPrompt.includes("I live in Pune")
+    "a page summary gets no facts it doesn't need, not even your name",
+    memoryPrompt.length > 0 && !memoryPrompt.includes("My name is Priya") && !memoryPrompt.includes("I live in Pune"),
+    memoryPrompt.slice(0, 200)
   );
   const beforeChat = prompts.length;
   await ask("any tips for getting good seats on a long flight?");
   await side.waitForFunction(() => document.body.innerText.includes("CHAT_OK"), null, { timeout: 20000 }).catch(() => {});
   check("chat answers get the facts that help them", prompts.slice(beforeChat).some((text) => text.includes("ABOUT ME") && text.includes("I prefer window seats")));
+  // Speaking as you: your name goes along.
+  const beforeIntro = prompts.length;
+  const answersBefore = await count("CHAT_OK");
+  await ask("draft an introduction for me");
+  for (let wait = 0; wait < 100 && (await count("CHAT_OK")) === answersBefore; wait += 1) await side.waitForTimeout(200);
+  const introPrompt = prompts.slice(beforeIntro).join("\n");
+  check("an introduction from you gets your name", introPrompt.includes("ABOUT ME") && introPrompt.includes("My name is Priya"), introPrompt.slice(0, 200));
   // Where you live is kept for every Space, so a plain /forget leaves it and says how.
   await ask("/forget pune");
   await waitText("remembered in every Space");

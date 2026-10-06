@@ -6,7 +6,7 @@ import type { CompiledContext } from "./types";
 
 export { compileContext, type ChatTurn, type CompileInput } from "./compiler";
 export { renderContext } from "./render";
-export { budgetFor, contextWindowFor, estimateTokens } from "./budget";
+export { budgetFor, budgetForRoute, contextWindowFor, estimateTokens, modelBudgetFor, providerBudgetCap, GROQ_REQUEST_BUDGET } from "./budget";
 export { BrowserHarnessLocalMemorySource, localMemorySource, type MemorySource, type CurrentMemory } from "./memory-source";
 export { CONTEXT_DIAGNOSTICS_KEY, loadContextDiagnostics, recordContextDiagnostics } from "./diagnostics";
 export * from "./types";

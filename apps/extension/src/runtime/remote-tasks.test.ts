@@ -2,7 +2,19 @@
 // the message arrived, even if the person switches Space before it runs.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const agentCalls: Array<{ task: string; spaceId: string; context: string }> = [];
+const agentCalls: Array<{ task: string; spaceId: string; context: string; memorySource?: unknown }> = [];
+const chatCalls: Array<{ primary: string; fallback: string | null }> = [];
+
+vi.mock("./model-router", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./model-router")>();
+  return {
+    ...original,
+    directChatWithFallback: vi.fn(async (primary: { model: string }, fallback: { model: string } | null) => {
+      chatCalls.push({ primary: primary.model, fallback: fallback?.model ?? null });
+      return { result: "Here you go.", usedFallback: false };
+    })
+  };
+});
 
 vi.mock("./agent-task", async (importOriginal) => {
   const original = await importOriginal<typeof import("./agent-task")>();
@@ -12,8 +24,8 @@ vi.mock("./agent-task", async (importOriginal) => {
     extensionMessage: vi.fn(async () => ({ ok: true, data: { tab_id: 7 } })),
     // Stands in for the browser run; records what it was given and, like the
     // real one, saves the episode in the Space it was handed.
-    runAgentTask: vi.fn(async (task: string, options: { spaceId: string; context?: string }) => {
-      agentCalls.push({ task, spaceId: options.spaceId, context: options.context ?? "" });
+    runAgentTask: vi.fn(async (task: string, options: { spaceId: string; context?: string; memorySource?: unknown }) => {
+      agentCalls.push({ task, spaceId: options.spaceId, context: options.context ?? "", memorySource: options.memorySource });
       const evidence = {
         version: 1,
         session_id: "remote-session",
@@ -62,8 +74,8 @@ import { saveInstructions } from "./instructions";
 import { loadTaskHistory, saveTaskHistoryEntry } from "./history";
 import { loadSkills, saveSkill, type UserSkill } from "./skills";
 import { listTaskEpisodeMemory } from "./task-memory";
-import { compileContext, renderContext } from "./context";
-import { loadActiveConnection } from "../settings/provider-store";
+import { compileContext, CONTEXT_DIAGNOSTICS_KEY, localMemorySource, renderContext } from "./context";
+import { loadActiveConnection, loadFallbackConnection } from "../settings/provider-store";
 
 let local: Record<string, unknown>;
 let session: Record<string, unknown>;
@@ -87,6 +99,7 @@ beforeEach(() => {
   local = {};
   session = {};
   agentCalls.length = 0;
+  chatCalls.length = 0;
   pinSpace(null);
   Object.defineProperty(globalThis, "chrome", {
     configurable: true,
@@ -171,6 +184,43 @@ describe("tasks from chat apps", () => {
     expect((await loadSkills(A)).find((item) => item.id === shopSkill.id)?.runs).toBe(1);
     expect((await loadSkills(B)).every((item) => item.runs === 0)).toBe(true);
     expect(session[REMOTE_TASKS_KEY]).toEqual({});
+  });
+
+  it("compile the context for every model that may receive it, and give the agent the same memory source", async () => {
+    const backup = {
+      id: "local",
+      label: "Gemma on this computer",
+      provider: "lm-studio",
+      model: "gemma-4-e2b",
+      baseUrl: "http://localhost:1234/v1",
+      chatHealth: { status: "healthy" },
+      agentHealth: { status: "healthy" },
+      embeddingHealth: { status: "unknown" }
+    };
+    const routeOf = () => (session[CONTEXT_DIAGNOSTICS_KEY] as Array<{ budget: { target: number; route?: Record<string, unknown> } }>)[0].budget;
+
+    // A chat-only request: the backup passed the chat check, so it limits the budget.
+    vi.mocked(loadFallbackConnection).mockResolvedValueOnce(backup as never);
+    const chatId = await enqueueRemoteTask("what is a good kettle wattage?", "telegram");
+    expect((await runRemoteTask((await takeRemoteTask(chatId))!)).status).toBe("worked");
+    expect(chatCalls).toEqual([{ primary: "test", fallback: "gemma-4-e2b" }]);
+    expect(routeOf()).toMatchObject({ target: 1024, route: { intent: "chat", limited_by: "fallback", fallback: { model: "gemma-4-e2b" } } });
+
+    // A browser task: the same backup passed browser control too, so it limits this budget as well.
+    vi.mocked(loadFallbackConnection).mockResolvedValueOnce(backup as never);
+    const browserId = await enqueueRemoteTask("open amazon.in and compare kettle prices", "telegram");
+    expect((await runRemoteTask((await takeRemoteTask(browserId))!)).status).toBe("worked");
+    expect(routeOf()).toMatchObject({ target: 1024, route: { intent: "browser", limited_by: "fallback" } });
+    // The agent reads the same memory the context was compiled from.
+    expect(agentCalls.at(-1)?.memorySource).toBe(localMemorySource);
+
+    // A backup that failed the browser-control check never gets a browser task, so it doesn't shrink it.
+    vi.mocked(loadFallbackConnection).mockResolvedValueOnce({ ...backup, agentHealth: { status: "failed" } } as never);
+    const againId = await enqueueRemoteTask("open amazon.in and compare kettle prices", "telegram");
+    await runRemoteTask((await takeRemoteTask(againId))!);
+    expect(routeOf()).toMatchObject({ route: { limited_by: "primary", fallback: null, fallback_not_counted: "backup did not pass the browser-control check" } });
+    // Models are named, never their keys or addresses.
+    expect(JSON.stringify(session[CONTEXT_DIAGNOSTICS_KEY])).not.toMatch(/apiKey|localhost|127\.0\.0\.1/);
   });
 
   it("falls back to the Space in use for a message queued before Spaces were recorded", async () => {

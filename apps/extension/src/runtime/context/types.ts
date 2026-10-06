@@ -97,14 +97,63 @@ export interface ContextExclusion {
   count?: number;
 }
 
+/** One model's share of the budget: its window, any provider cap, and what is left. */
+export interface ModelBudget {
+  provider?: string;
+  model?: string;
+  /** The model's context window (known, a provider default, or a safe guess). Never a rate limit. */
+  model_window: number;
+  window_source: "known model" | "provider default" | "unknown, conservative";
+  /** A quarter of the window, never tiny, never huge. */
+  context_target_before_provider_cap: number;
+  /** A provider's per-request budget, kept apart from the window (for example Groq's per-minute limits). */
+  provider_budget_cap?: number;
+  provider_budget_reason?: string;
+  /** What this model may be sent. */
+  final_target: number;
+}
+
+/** Every model the request may reach, and which one sets the limit. */
+export interface RouteBudget {
+  intent: "chat" | "browser";
+  primary: ModelBudget | null;
+  fallback: ModelBudget | null;
+  /** Why a configured backup was not counted (it would never receive this request). */
+  fallback_not_counted?: "no backup set" | "backup did not pass the chat check" | "backup did not pass the browser-control check";
+  /** Set when the backup takes over a browser task, so the main AI never receives it. */
+  main_not_counted?: "main AI did not pass the browser-control check; the backup does the task";
+  limited_by: "primary" | "fallback" | "fixed target";
+  /** The smallest final target across the models counted. */
+  safe_target: number;
+}
+
 export interface ContextBudget {
-  /** Tokens the compiled context may use (request and chat included). */
+  /** Tokens the compiled context may use (request and chat included): safe for every model that may receive it. */
   target: number;
   used: number;
-  /** How the model's window was found. */
-  window: number;
-  window_source: "known model" | "provider default" | "unknown, conservative";
+  /** The window of the model that limits the budget. */
+  model_window: number;
+  window_source: ModelBudget["window_source"];
+  context_target_before_provider_cap: number;
+  provider_budget_cap?: number;
+  provider_budget_reason?: string;
+  route?: RouteBudget;
   counting: "estimated" | "exact";
+}
+
+/**
+ * turns: chat turns given to the compiler. current_records: records in force
+ * in this Space, all read. stored_records: replaced records kept as history,
+ * counted (read only for a question about the past). records_scanned: every
+ * stored record that was scored. search_results: only what a search returned,
+ * not how many records the search looked through.
+ */
+export interface InspectedCount {
+  turns?: number;
+  current_records?: number;
+  stored_records?: number;
+  records_scanned?: number;
+  search_results?: number;
 }
 
 export interface ContextDiagnostics {
@@ -113,8 +162,8 @@ export interface ContextDiagnostics {
   model?: string;
   intent: "chat" | "browser";
   budget: ContextBudget;
-  /** How many stored records were looked at, per source. */
-  inspected: Record<string, number>;
+  /** What each source handed the compiler, under names that say what was counted. Counts are never estimated. */
+  inspected: Record<string, InspectedCount>;
   considered: number;
   included: Array<{ ref: string; section: ContextSection; authority: AuthorityLevel; scope: ContextItem["scope"]; temporal: ContextItem["temporal"]; relevance: number; cost: number; reason: string }>;
   excluded: ContextExclusion[];
