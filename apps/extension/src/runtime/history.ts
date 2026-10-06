@@ -1,5 +1,5 @@
 import { loadPreferences } from "../settings/preferences";
-import { spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
 
 export interface TaskHistoryEntry {
   id: string;
@@ -13,27 +13,36 @@ export interface TaskHistoryEntry {
 const HISTORY_KEY = SPACE_SCOPED_KEYS.history;
 const MAX_HISTORY = 500;
 
-export async function loadTaskHistory(): Promise<TaskHistoryEntry[]> {
-  const key = await spaceKey(HISTORY_KEY);
+async function historyKey(spaceId?: string): Promise<string> {
+  return spaceId ? keyForSpace(HISTORY_KEY, spaceId) : spaceKey(HISTORY_KEY);
+}
+
+/** Pass the Space a task started in; without one, the Space in use right now. */
+export async function loadTaskHistory(spaceId?: string): Promise<TaskHistoryEntry[]> {
+  const key = await historyKey(spaceId);
   const stored = await chrome.storage.local.get(key);
   const value = stored[key];
   return Array.isArray(value) ? (value as TaskHistoryEntry[]) : [];
 }
 
 export async function saveTaskHistoryEntry(
-  entry: Omit<TaskHistoryEntry, "id" | "timestamp">
+  entry: Omit<TaskHistoryEntry, "id" | "timestamp">,
+  spaceId?: string
 ): Promise<void> {
   const preferences = await loadPreferences();
   if (!preferences.retainTaskHistory) return;
 
-  const previous = await loadTaskHistory();
+  // Resolved once, so the read and the write land in the same Space.
+  const key = await historyKey(spaceId);
+  const stored = (await chrome.storage.local.get(key))[key];
+  const previous = Array.isArray(stored) ? (stored as TaskHistoryEntry[]) : [];
   const next: TaskHistoryEntry = {
     ...entry,
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString()
   };
   await chrome.storage.local.set({
-    [await spaceKey(HISTORY_KEY)]: [next, ...previous].slice(0, MAX_HISTORY)
+    [key]: [next, ...previous].slice(0, MAX_HISTORY)
   });
 }
 

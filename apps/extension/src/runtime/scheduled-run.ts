@@ -11,6 +11,7 @@ import { loadSkills, recordSkillRun, skillTask } from "./skills";
 import { loadTaskHistory } from "./history";
 import { recallFor, recallPrompt } from "./recall";
 import { applyLearningPlan, matchSkill, planLearning, skillHint } from "./skill-learning";
+import { activeSpaceId } from "./spaces";
 import { BUILT_IN_COMMANDS, parseSlashCommand } from "./slash-commands";
 import type { ScheduledTask } from "./schedules";
 import { loadPreferences } from "../settings/preferences";
@@ -46,8 +47,11 @@ export async function runUnattendedTask(
     return { status: "failed", message: "No AI model is connected. Open BrowserHarness and connect one." };
   }
   const fallback = await loadFallbackConnection();
+  // Fixed once: a schedule's own Space (pinned by the runner page), or the
+  // Space in use when a phone message arrived. Every read and write below uses it.
+  const spaceId = await activeSpaceId();
 
-  const skills = await loadSkills();
+  const skills = await loadSkills(spaceId);
   const command = parseSlashCommand(taskText, skills);
   if (command.kind === "builtin" || command.kind === "unknown") {
     return {
@@ -61,9 +65,9 @@ export async function runUnattendedTask(
   const skill = command.kind === "skill" ? command.skill : null;
   const task = skill ? skillTask(skill, command.kind === "skill" ? command.args : "") : taskText;
   const aboutMe =
-    instructionsPrompt(await loadInstructions().catch(() => "")) +
-    aboutMePrompt(await loadAboutMe().catch(() => [])) +
-    (skill ? "" : recallPrompt(recallFor(await loadTaskHistory().catch(() => []), taskText)));
+    instructionsPrompt(await loadInstructions(spaceId).catch(() => "")) +
+    aboutMePrompt(await loadAboutMe(spaceId).catch(() => [])) +
+    (skill ? "" : recallPrompt(recallFor(await loadTaskHistory(spaceId).catch(() => []), taskText)));
   const preferences = await loadPreferences();
 
   const controller = new AbortController();
@@ -118,6 +122,7 @@ export async function runUnattendedTask(
       agentPrimary,
       agentFallback,
       session,
+      spaceId,
       signal: controller.signal,
       hooks: {
         addActivity: (text) => {
@@ -155,7 +160,8 @@ export async function runUnattendedTask(
           used: skill ?? hinted,
           autoSkills: preferences.autoSkills
         }),
-        BUILT_IN_COMMANDS.map((item) => item.name)
+        BUILT_IN_COMMANDS.map((item) => item.name),
+        spaceId
       ).catch(() => null);
     if (result.status === "completed") {
       const saved = await learning("completed");

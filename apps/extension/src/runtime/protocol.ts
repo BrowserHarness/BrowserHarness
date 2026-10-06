@@ -76,6 +76,8 @@ export type BrowserToolRequest = {
   input?: Record<string, unknown>;
   session_id?: string;
   session_title?: string;
+  /** The Space of the task sending it, so memory and Skills answers stay inside it. */
+  space_id?: string;
   approval_granted?: boolean;
 };
 

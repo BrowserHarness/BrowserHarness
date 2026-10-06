@@ -4,6 +4,7 @@ import {
   searchTaskEpisodeMemory,
   type TaskEpisodeMemory
 } from "./task-memory";
+import { resolveSpace } from "./memory-scope";
 import {
   loadEmbeddingConnection,
   type ProviderConnection
@@ -231,17 +232,25 @@ function lexicalHits(
   );
 }
 
+/**
+ * Past tasks like the query, from one Space only. Both the word search and
+ * the meaning search start from that Space's episodes, so a close match in
+ * another Space can never be found, however similar it is.
+ */
 export async function searchTaskMemoryHybrid(
   query: string,
-  limit = 10
+  limit = 10,
+  spaceId?: string
 ): Promise<TaskMemorySearchHit[]> {
+  const space = await resolveSpace(spaceId);
   const boundedLimit = Math.min(
     Math.max(Math.round(Number(limit) || 10), 1),
     25
   );
   const lexical = await searchTaskEpisodeMemory(
     query,
-    Math.min(25, Math.max(boundedLimit * 3, 10))
+    Math.min(25, Math.max(boundedLimit * 3, 10)),
+    space
   );
 
   const connection = await loadEmbeddingConnection();
@@ -255,7 +264,8 @@ export async function searchTaskMemoryHybrid(
 
   try {
     source = await listTaskEpisodeMemory(
-      INDEX_SOURCE_LIMIT
+      INDEX_SOURCE_LIMIT,
+      space
     );
     index = await loadIndex();
     index = await indexEpisodes(

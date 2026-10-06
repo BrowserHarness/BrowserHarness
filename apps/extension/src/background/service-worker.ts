@@ -142,6 +142,7 @@ import {
   type ToolExecutionOptions
 } from "./approval-grant";
 import { runExternalMcpTool } from "./mcp-tools";
+import { enqueueRemoteTask } from "../runtime/remote-queue";
 import {
   goBackAndWait,
   reloadAndWait,
@@ -239,8 +240,8 @@ chrome.notifications.onClicked.addListener((notificationId) => {
     .catch(() => undefined);
 });
 
-async function skillsTool(input: Record<string, unknown>): Promise<ToolResult> {
-  const skills = await loadSkills();
+async function skillsTool(input: Record<string, unknown>, spaceId?: string): Promise<ToolResult> {
+  const skills = await loadSkills(spaceId);
   const name =
     typeof input.name === "string"
       ? input.name.trim().replace(/^\//, "").toLowerCase()
@@ -715,7 +716,7 @@ async function runTool(
   }
 
   if (tool === "skills") {
-    return skillsTool(input);
+    return skillsTool(input, options.spaceId);
   }
 
   if (tool === "site_commands") {
@@ -1059,7 +1060,8 @@ async function runTool(
 
       const hits = await searchTaskMemoryHybrid(
         input.query,
-        Number(input.limit ?? 10)
+        Number(input.limit ?? 10),
+        options.spaceId
       );
       return {
         ok: true,
@@ -1100,7 +1102,8 @@ async function runTool(
         ok: true,
         data: {
           episodes: await listTaskEpisodeMemory(
-            Number(input.limit ?? 50)
+            Number(input.limit ?? 50),
+            options.spaceId
           )
         }
       };
@@ -1117,7 +1120,7 @@ async function runTool(
         };
       }
 
-      const episode = await getTaskEpisodeMemory(input.id);
+      const episode = await getTaskEpisodeMemory(input.id, options.spaceId);
       return episode
         ? { ok: true, data: { episode } }
         : {
@@ -1141,7 +1144,8 @@ async function runTool(
       }
 
       const deleted = await deleteTaskEpisodeMemory(
-        input.id
+        input.id,
+        options.spaceId
       );
       if (deleted) {
         await deleteTaskEpisodeVector(input.id).catch(
@@ -3035,7 +3039,6 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "screenshot"
 ]);
 
-const REMOTE_TASKS_KEY = "browserharness.remoteTasks";
 
 /**
  * "/schedule every weekday at 8am check prices" from a chat app: saves the
@@ -3120,14 +3123,8 @@ async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResul
   if (/^\/schedule\b/i.test(text)) return scheduleFromChat(text.replace(/^\/schedule\s*/i, ""), from);
   const reply = await chatCommandReply(text, from);
   if (reply !== null) return { ok: true, data: { id: crypto.randomUUID(), reply } };
-  const id = crypto.randomUUID();
-  const stored = (await chrome.storage.session.get(REMOTE_TASKS_KEY))[REMOTE_TASKS_KEY] || {};
-  await chrome.storage.session.set({
-    [REMOTE_TASKS_KEY]: {
-      ...stored,
-      [id]: { text, from: typeof args.from === "string" ? args.from : "phone", created_at: new Date().toISOString() }
-    }
-  });
+  // The Space is captured now, as the message arrives, not when the runner starts.
+  const id = await enqueueRemoteTask(text, from);
   const tab = await chrome.tabs.create({
     url: chrome.runtime.getURL(`runner.html?remote=${encodeURIComponent(id)}`),
     active: false
@@ -3380,7 +3377,10 @@ chrome.runtime.onMessage.addListener(
               request.input,
               request.session_id,
               request.session_title,
-              { approvalGranted }
+              {
+                approvalGranted,
+                spaceId: request.space_id || undefined
+              }
             )
           );
           return;

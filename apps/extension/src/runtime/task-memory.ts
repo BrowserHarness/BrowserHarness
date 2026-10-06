@@ -2,8 +2,10 @@ import type {
   BrowserSessionPageContext,
   BrowserTaskSessionEvidence
 } from "./session-evidence";
+import { resolveSpace, withinSpace } from "./memory-scope";
 
 const KEY = "browserharness.taskEpisodes.v1";
+/** Kept per Space. */
 const MAX_EPISODES = 500;
 const MAX_TEXT = 1000;
 const MAX_TARGETS = 40;
@@ -53,6 +55,11 @@ export interface TaskEpisodeMemory {
   delegations?: TaskEpisodeDelegation[];
   boundary_action_id?: string;
   sensitive_payloads_removed: true;
+  /**
+   * The Space the task ran in. Helpers' findings (delegations) belong to it
+   * too. Episodes saved before Spaces have none and count as the first Space.
+   */
+  space_id?: string;
 }
 
 function bounded(value: string, max = MAX_TEXT): string {
@@ -163,7 +170,8 @@ function delegations(
 
 export function taskEpisodeFromSession(
   evidence: BrowserTaskSessionEvidence,
-  recordedAt = new Date().toISOString()
+  recordedAt = new Date().toISOString(),
+  spaceId?: string
 ): TaskEpisodeMemory {
   const delegated = delegations(evidence);
   const tools = unique(
@@ -220,11 +228,12 @@ export function taskEpisodeFromSession(
     ...(evidence.boundary_action_id
       ? { boundary_action_id: evidence.boundary_action_id }
       : {}),
-    sensitive_payloads_removed: true
+    sensitive_payloads_removed: true,
+    ...(spaceId ? { space_id: spaceId } : {})
   };
 }
 
-async function loadEpisodes(): Promise<TaskEpisodeMemory[]> {
+async function loadAllEpisodes(): Promise<TaskEpisodeMemory[]> {
   const stored = await chrome.storage.local.get(KEY);
   return Array.isArray(stored[KEY])
     ? (stored[KEY] as TaskEpisodeMemory[]).filter(
@@ -236,35 +245,57 @@ async function loadEpisodes(): Promise<TaskEpisodeMemory[]> {
     : [];
 }
 
+/** Only the episodes of one Space: the wall is applied before anything is searched. */
+async function loadEpisodes(spaceId?: string): Promise<TaskEpisodeMemory[]> {
+  return withinSpace(await loadAllEpisodes(), await resolveSpace(spaceId));
+}
+
 export async function saveTaskEpisodeMemory(
-  evidence: BrowserTaskSessionEvidence
+  evidence: BrowserTaskSessionEvidence,
+  spaceId?: string
 ): Promise<TaskEpisodeMemory> {
-  const episode = taskEpisodeFromSession(evidence);
-  const current = await loadEpisodes();
-  const next = [
+  const episode = taskEpisodeFromSession(
+    evidence,
+    undefined,
+    await resolveSpace(spaceId)
+  );
+  const space = episode.space_id!;
+  const current = (await loadAllEpisodes()).filter(
+    (item) => item.id !== episode.id
+  );
+  // The limit is per Space: a busy Space never pushes out another's episodes.
+  const own = [
     episode,
-    ...current.filter((item) => item.id !== episode.id)
-  ].slice(0, MAX_EPISODES);
+    ...withinSpace(current, space)
+  ];
+  const dropped = new Set(
+    own.slice(MAX_EPISODES).map((item) => item.id)
+  );
+  const next = [episode, ...current].filter(
+    (item) => !dropped.has(item.id)
+  );
   await chrome.storage.local.set({ [KEY]: next });
   return structuredClone(episode);
 }
 
 export async function listTaskEpisodeMemory(
-  limit = 50
+  limit = 50,
+  spaceId?: string
 ): Promise<TaskEpisodeMemory[]> {
   const boundedLimit = Math.min(
     Math.max(Math.round(Number(limit) || 50), 1),
     100
   );
-  return (await loadEpisodes())
+  return (await loadEpisodes(spaceId))
     .slice(0, boundedLimit)
     .map((item) => structuredClone(item));
 }
 
 export async function getTaskEpisodeMemory(
-  id: string
+  id: string,
+  spaceId?: string
 ): Promise<TaskEpisodeMemory | null> {
-  const found = (await loadEpisodes()).find(
+  const found = (await loadEpisodes(spaceId)).find(
     (item) => item.id === id
   );
   return found ? structuredClone(found) : null;
@@ -327,14 +358,15 @@ function searchScore(
 
 export async function searchTaskEpisodeMemory(
   query: string,
-  limit = 10
+  limit = 10,
+  spaceId?: string
 ): Promise<TaskEpisodeMemory[]> {
   const boundedLimit = Math.min(
     Math.max(Math.round(Number(limit) || 10), 1),
     25
   );
 
-  return (await loadEpisodes())
+  return (await loadEpisodes(spaceId))
     .map((episode) => ({
       episode,
       score: searchScore(episode, query)
@@ -351,11 +383,17 @@ export async function searchTaskEpisodeMemory(
     .map((item) => structuredClone(item.episode));
 }
 
+/** Deletes an episode of this Space only; the same id in another Space is never touched. */
 export async function deleteTaskEpisodeMemory(
-  id: string
+  id: string,
+  spaceId?: string
 ): Promise<boolean> {
-  const current = await loadEpisodes();
-  const next = current.filter((item) => item.id !== id);
+  const space = await resolveSpace(spaceId);
+  const current = await loadAllEpisodes();
+  const next = current.filter(
+    (item) =>
+      !(item.id === id && withinSpace([item], space).length)
+  );
   if (next.length === current.length) return false;
   await chrome.storage.local.set({ [KEY]: next });
   return true;

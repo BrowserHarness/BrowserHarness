@@ -3,9 +3,11 @@
 // saved Skill gets that Skill's steps as a hint, and each run either confirms,
 // shortens or teaches the Skill a lesson.
 import type { BrowserTaskSessionEvidence } from "./session-evidence";
+import { resolveSpace } from "./memory-scope";
 import {
   deleteSkill,
-  loadSkills,
+  loadAllSkills,
+  ownedBySpace,
   recordSkillRun,
   refreshSkillSteps,
   saveSkill,
@@ -155,15 +157,21 @@ export function autoSkillsToPrune(skills: UserSkill[]): string[] {
   return idle.slice(MAX_AUTO_SKILLS).map((skill) => skill.id);
 }
 
-/** Carries out a plan; returns the Skill it saved, if any. */
-export async function applyLearningPlan(plan: LearningPlan, reserved: string[] = []): Promise<UserSkill | null> {
+/**
+ * Carries out a plan in the Space the task ran in; returns the Skill it
+ * saved, if any. A learned Skill belongs to that Space, and only that
+ * Space's own unused Skills make room for it.
+ */
+export async function applyLearningPlan(plan: LearningPlan, reserved: string[] = [], spaceId?: string): Promise<UserSkill | null> {
+  const space = await resolveSpace(spaceId);
   if (plan.kind === "learn") {
-    const saved = await saveSkill(plan.skill, reserved);
-    for (const id of autoSkillsToPrune(await loadSkills())) await deleteSkill(id);
+    const saved = await saveSkill(plan.skill, reserved, space);
+    const own = (await loadAllSkills()).filter((skill) => ownedBySpace(skill, space));
+    for (const id of autoSkillsToPrune(own)) await deleteSkill(id, space);
     return saved;
   }
   if (plan.kind === "improve") {
-    const saved = await saveSkill(plan.skill, reserved);
+    const saved = await saveSkill(plan.skill, reserved, space);
     await recordSkillRun(saved.id, "worked");
     return saved;
   }

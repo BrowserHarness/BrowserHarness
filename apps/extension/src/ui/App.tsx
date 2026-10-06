@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Sidebar, type SidebarScreen } from "./Sidebar";
 import { SpaceBadge, saveTextFile, useSpaces } from "./spaces-ui";
+import { activeSpaceId, SPACES_STORAGE_KEY } from "../runtime/spaces";
 import {
   chatContextPrompt,
   chatFileName,
@@ -442,7 +443,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       changes: Record<string, chrome.storage.StorageChange>,
       area: string
     ) => {
-      if (area === "local" && changes[SKILLS_STORAGE_KEY]) {
+      // Each Space has its own Skills, so switching Space changes the list too.
+      if (area === "local" && (changes[SKILLS_STORAGE_KEY] || changes[SPACES_STORAGE_KEY])) {
         void loadSkills().then(setSkills).catch(() => undefined);
       }
       if (
@@ -490,8 +492,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
   };
 
   /** What a finished task taught: a new Skill, a shorter one, a run count or a lesson. */
-  const applyLearning = async (plan: ReturnType<typeof planLearning>, messageId: string) => {
-    const saved = await applyLearningPlan(plan, RESERVED_COMMANDS);
+  const applyLearning = async (plan: ReturnType<typeof planLearning>, messageId: string, spaceId: string) => {
+    const saved = await applyLearningPlan(plan, RESERVED_COMMANDS, spaceId);
     if (plan.kind === "learn" && saved) {
       setMessages((items) =>
         items.map((item) =>
@@ -1090,9 +1092,13 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     const typed = (textOverride ?? prompt).trim();
     if (!typed || running) return;
     const attachmentNote = describeAttachmentsForPrompt(attachments);
+    // The Space this chat belongs to, fixed now: everything this task reads
+    // or remembers stays in it, even if the person switches Space meanwhile.
+    if (!chatSpace.current) chatSpace.current = await activeSpaceId();
+    const spaceId = chatSpace.current;
 
     // Slash commands: built-ins answer right away; a Skill runs as a task.
-    const savedSkills = await loadSkills().catch(() => []);
+    const savedSkills = await loadSkills(spaceId).catch(() => []);
     const command = parseSlashCommand(typed, savedSkills, await loadSiteCommands().catch(() => []));
     if (command.kind === "builtin" || command.kind === "unknown" || command.kind === "site") {
       setPrompt("");
@@ -1129,7 +1135,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       autoSkills = preferences.autoSkills;
       learnAboutMe = preferences.learnAboutMe && !skillRun;
       if (preferences.learnAboutMe && !skillRun) {
-        const learned = await addFacts(factsInMessage(typed), "learned");
+        const learned = await addFacts(factsInMessage(typed), "learned", spaceId);
         if (learned.length) {
           addActivity(
             `Remembered about you: ${learned.map((fact) => fact.text).join("; ")}`,
@@ -1137,13 +1143,13 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           );
         }
       }
-      aboutMe = instructionsPrompt(await loadInstructions()) + aboutMePrompt(await loadAboutMe());
+      aboutMe = instructionsPrompt(await loadInstructions(spaceId)) + aboutMePrompt(await loadAboutMe(spaceId));
     } catch {
       aboutMe = "";
     }
 
     // Past conversations the request refers back to (or closely repeats).
-    const recalledEntries = skillRun ? [] : recallFor(await loadTaskHistory().catch(() => []), typed);
+    const recalledEntries = skillRun ? [] : recallFor(await loadTaskHistory(spaceId).catch(() => []), typed);
     const recalled = recallPrompt(recalledEntries);
     if (recalledEntries.length) {
       addActivity(
@@ -1157,8 +1163,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     const learnFactsInBackground = (model: ProviderConnection) => {
       if (!learnAboutMe || !mightStateFacts(typed)) return;
       void (async () => {
-        const reply = await directChatWithFallback(model, null, factExtractionPrompt(typed, await loadAboutMe()));
-        const added = await addFacts(parseExtractedFacts(reply.result), "learned");
+        const reply = await directChatWithFallback(model, null, factExtractionPrompt(typed, await loadAboutMe(spaceId)));
+        const added = await addFacts(parseExtractedFacts(reply.result), "learned", spaceId);
         if (added.length) {
           addActivity(`Remembered about you: ${added.map((fact) => fact.text).join("; ")}`, "done");
         }
@@ -1198,7 +1204,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           }
 
           addAssistantMessage(routed.result);
-          await saveHistory(typed, routed.result);
+          await saveHistory(typed, routed.result, spaceId);
           learnFactsInBackground(primary);
           return;
         } catch (error) {
@@ -1239,6 +1245,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         agentPrimary,
         agentFallback,
         session: { id: taskSessionId, title: taskSessionTitle },
+        spaceId,
         signal: controller.signal,
         hooks: {
           addActivity,
@@ -1287,11 +1294,12 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
             used: usedSkill,
             autoSkills
           }),
-          messageId
+          messageId,
+          spaceId
         ).catch(() => undefined);
       }
       if (result.status === "completed") {
-        await saveHistory(typed, result.message);
+        await saveHistory(typed, result.message, spaceId);
       }
       learnFactsInBackground(primary);
       return;
@@ -1321,12 +1329,15 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     }
   };
 
-  const saveHistory = async (task: string, result: string) => {
-    await saveTaskHistoryEntry({
-      task,
-      result,
-      url: tab?.url
-    });
+  const saveHistory = async (task: string, result: string, spaceId: string) => {
+    await saveTaskHistoryEntry(
+      {
+        task,
+        result,
+        url: tab?.url
+      },
+      spaceId
+    );
   };
 
   const handleStop = () => {
