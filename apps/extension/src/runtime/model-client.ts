@@ -747,6 +747,39 @@ export async function fetchWithTimeout(
   }
 }
 
+/**
+ * Free plans, like Groq's, allow only so much text per minute. When the
+ * service says how long to wait and it is short, wait once and ask again.
+ */
+// The chat screen can wait a minute; Chrome may stop the background worker,
+// which runs scheduled tasks, after about 30 idle seconds.
+const MAX_RATE_LIMIT_WAIT_MS = typeof window === "undefined" ? 20_000 : 60_000;
+
+export async function rateLimitWaitMs(response: Response): Promise<number> {
+  let seconds = Number(response.headers.get("retry-after"));
+  if (!(seconds > 0)) {
+    const text = await response.clone().text().catch(() => "");
+    const match = text.match(/try again in (?:(\d+)m)?(\d+(?:\.\d+)?)s\b/i);
+    seconds = match ? Number(match[1] || 0) * 60 + Number(match[2]) : 0;
+  }
+  return seconds > 0 && seconds * 1000 <= MAX_RATE_LIMIT_WAIT_MS ? Math.ceil(seconds * 1000) + 250 : 0;
+}
+
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("Request was cancelled"));
+    const timer = globalThis.setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        globalThis.clearTimeout(timer);
+        reject(new Error("Request was cancelled"));
+      },
+      { once: true }
+    );
+  });
+}
+
 async function openAICompatibleRequest(
   config: ProviderConfig,
   body: Record<string, unknown>,
@@ -814,6 +847,12 @@ async function openAICompatibleRequest(
       messages: body.messages
     };
     response = await request(plain);
+  }
+
+  const wait = response.status === 429 ? await rateLimitWaitMs(response) : 0;
+  if (wait) {
+    await pause(wait, signal);
+    response = await request(body);
   }
 
   if (!response.ok) {
