@@ -36,4 +36,4 @@ BrowserHarness → History.
 - `browserharness-bridge telegram allow <id>`: allow another account
 - `browserharness-bridge telegram off`: turn the bot off and forget the token
 
-Discord, Slack and Signal work the same way: see [CHAT-APPS.md](CHAT-APPS.md).
+Discord, Slack, Signal, Mattermost, Matrix and email work the same way, and scheduled tasks can report here: see [CHAT-APPS.md](CHAT-APPS.md).

@@ -21,6 +21,9 @@ import { createTelegramRelay, telegramApi } from "./telegram.mjs";
 import { createDiscordRelay, discordApi, discordInviteUrl } from "./discord.mjs";
 import { createSlackRelay, slackApi } from "./slack.mjs";
 import { createSignalRelay, runSignalCli, SIGNAL_ID } from "./signal.mjs";
+import { createMattermostRelay, mattermostApi } from "./mattermost.mjs";
+import { createMatrixRelay, matrixApi } from "./matrix.mjs";
+import { createEmailRelay, hostPort, openImap, providerFor, sendSmtp } from "./email.mjs";
 import { CHAT_APP_NAMES } from "./chat-relay.mjs";
 import {
   detectAgents,
@@ -137,7 +140,13 @@ async function serve(config) {
     allowRemote: config.allow_remote === true,
     llmManager: createLlmAdapterManager(),
     mcpManager,
+    chatApps: () => chatApps.map((relay) => relay.app),
     onExtensionEvent: async (message) => {
+      if (message.type === "chat_notify") {
+        const relay = chatApps.find((candidate) => candidate.app === message.app);
+        await relay?.notify(message.text).catch((error) => process.stderr.write(`${message.app}: ${error.message}\n`));
+        return;
+      }
       for (const relay of chatApps) await relay.deliver(message.id, message).catch(() => undefined);
     }
   });
@@ -146,7 +155,7 @@ async function serve(config) {
   chatApps = startChatApps(config, (text, meta) =>
     bridge
       .sendCommand({ session: meta.from, title: CHAT_APP_NAMES[meta.from], action: "remote_task", args: { text, from: meta.from } })
-      .then((result) => (result.ok ? { ok: true, id: result.data.id } : result))
+      .then((result) => (result.ok ? { ok: true, id: result.data.id, reply: result.data.reply } : result))
       .catch((error) => ({ ok: false, error: { message: error.message } }))
   );
 
@@ -478,9 +487,52 @@ function startChatApps(config, runTask) {
   if (signal?.number) {
     relays.push(createSignalRelay({ number: signal.number, command: signal.command, allowedUserIds: signal.allowed_user_ids || [], runTask, log }));
   }
+  const { mattermost, matrix, email } = config;
+  if (mattermost?.token) {
+    relays.push(
+      createMattermostRelay({
+        server: mattermost.server,
+        token: mattermost.token,
+        botId: mattermost.bot_id,
+        botName: mattermost.bot,
+        allowedUserIds: mattermost.allowed_user_ids || [],
+        runTask,
+        log
+      })
+    );
+  }
+  if (matrix?.token) {
+    relays.push(
+      createMatrixRelay({ homeserver: matrix.homeserver, token: matrix.token, botId: matrix.bot, allowedUserIds: matrix.allowed_user_ids || [], runTask, log })
+    );
+  }
+  if (email?.password) {
+    relays.push(
+      createEmailRelay({
+        ...emailSettings(email),
+        allowedUserIds: email.allowed_user_ids || [],
+        pollSeconds: Math.max(5, Number(email.poll_seconds) || 30),
+        runTask,
+        log
+      })
+    );
+  }
   for (const relay of relays) relay.start();
   return relays;
 }
+
+/** Where an email bot reads and sends mail; plain connections only to this computer. */
+function emailSettings(email) {
+  const secure = email.secure !== false;
+  return {
+    address: email.address,
+    password: email.password,
+    imap: { ...hostPort(email.imap, 993), secure },
+    smtp: { ...hostPort(email.smtp, 465), secure }
+  };
+}
+
+const isChatAppSetUp = (current) => Boolean(current.token || current.bot_token || current.number || current.password);
 
 /** What each chat app needs: how to check it, what an account id looks like. */
 const CHAT_APPS = {
@@ -533,6 +585,62 @@ const CHAT_APPS = {
       };
     }
   },
+  mattermost: {
+    usage: "mattermost setup --server <https://your.mattermost.server> --token <bot access token>",
+    idPattern: /^[a-z0-9]{26}$/,
+    idHint: "your Mattermost user id (the bot tells you)",
+    async setup(current) {
+      const server = option("server") || current.server;
+      const token = option("token");
+      if (!server || !token) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+      const me = await mattermostApi({ server, token }).getMe();
+      return {
+        settings: { server, token, bot: me.username, bot_id: me.id },
+        report: { bot: `@${me.username}`, next: `Send @${me.username} a direct message in Mattermost. It will reply with the command that allows your account.` }
+      };
+    }
+  },
+  matrix: {
+    usage: "matrix setup --homeserver <https://matrix.example.org> --token <the bot account's access token>",
+    idPattern: /^@[^:\s]+:\S+$/,
+    idHint: "your Matrix id, like @you:matrix.org",
+    async setup(current) {
+      const homeserver = option("homeserver") || current.homeserver;
+      const token = option("token");
+      if (!homeserver || !token) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+      const me = await matrixApi({ homeserver, token }).whoami();
+      return {
+        settings: { homeserver, token, bot: me.user_id },
+        report: {
+          bot: me.user_id,
+          next: `Allow your Matrix id first (browserharness-bridge matrix allow @you:server), then invite ${me.user_id} to a room with encryption turned off.`
+        }
+      };
+    }
+  },
+  email: {
+    usage: "email setup --address <the bot's mailbox> --password <app password> [--imap host:993] [--smtp host:465]",
+    idPattern: /^[^@\s]+@[^@\s]+\.[^@\s]+$/,
+    idHint: "your email address",
+    async setup(current) {
+      const address = option("address") || current.address;
+      const password = option("password");
+      const known = providerFor(address);
+      const imap = option("imap") || current.imap || known?.imap;
+      const smtp = option("smtp") || current.smtp || known?.smtp;
+      if (!address || !password) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+      if (!imap || !smtp) throw new Error(`I don't know the mail servers for ${address}. Add --imap host:993 --smtp host:465 from your provider's help page.`);
+      const settings = { address, password, imap, smtp, ...(current.secure === false ? { secure: false } : {}) };
+      const check = emailSettings(settings);
+      const box = await openImap({ ...check.imap, user: address, password });
+      await box.close();
+      await sendSmtp({ ...check.smtp, user: address, password, checkOnly: true });
+      return {
+        settings,
+        report: { address, imap, smtp, next: `Allow your own address (browserharness-bridge email allow you@example.com), then email ${address} a task.` }
+      };
+    }
+  },
   signal: {
     usage: "signal setup --number <the bot's number, like +15551234567> [--command <path to signal-cli>]",
     idPattern: SIGNAL_ID,
@@ -552,11 +660,12 @@ const CHAT_APPS = {
 
 /** `<app> setup …`, `<app> allow <id>`, `<app> off`, `<app> status` for each chat app. */
 async function chatCommand(app, config, args) {
-  const [mode, value] = args;
+  const [mode, given] = args;
+  const value = app === "email" ? given?.toLowerCase() : given;
   const spec = CHAT_APPS[app];
   const current = config[app] || {};
   const name = CHAT_APP_NAMES[app];
-  const isSetUp = Boolean(current.token || current.bot_token || current.number);
+  const isSetUp = isChatAppSetUp(current);
   if (mode === "setup") {
     const { settings, report } = await spec.setup(current);
     const next = { ...config, [app]: { ...current, ...settings, allowed_user_ids: current.allowed_user_ids || [] } };
@@ -580,6 +689,7 @@ async function chatCommand(app, config, args) {
       [app]: isSetUp,
       bot: current.bot ? (app === "telegram" ? `@${current.bot}` : current.bot) : undefined,
       number: current.number,
+      address: current.address,
       allowed_user_ids: current.allowed_user_ids || []
     });
   }
@@ -592,8 +702,8 @@ function chatsCommand(config) {
       const current = config[app] || {};
       return {
         app,
-        on: Boolean(current.token || current.bot_token || current.number),
-        bot: current.bot || current.number,
+        on: isChatAppSetUp(current),
+        bot: current.bot || current.number || current.address,
         allowed: (current.allowed_user_ids || []).length
       };
     }),
@@ -789,7 +899,7 @@ try {
   } else if (command === "agents") {
     print({ agents: detectAgents(context(THIS_FILE)) });
   } else if (command in CHAT_APPS) {
-    const valueFlags = new Set(["--token", "--bot-token", "--app-token", "--number", "--command"]);
+    const valueFlags = new Set(["--token", "--bot-token", "--app-token", "--number", "--command", "--server", "--homeserver", "--address", "--password", "--imap", "--smtp"]);
     await chatCommand(command, config, process.argv.slice(3).filter((arg, index, all) => !arg.startsWith("--") && !valueFlags.has(all[index - 1])));
   } else if (command === "chats") {
     chatsCommand(config);
@@ -821,7 +931,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|telegram|discord|slack|signal|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {

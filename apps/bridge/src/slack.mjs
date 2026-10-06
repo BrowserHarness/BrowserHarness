@@ -118,7 +118,9 @@ export function createSlackRelay({
       stopped = true;
       socket?.close(1000);
     },
+    app: relay.app,
     deliver: relay.deliver,
+    notify: relay.notify,
     handle
   };
 }

@@ -77,10 +77,12 @@ import { loadTaskHistory } from "../runtime/history";
 import { recallAnswer, recallFor, recallPrompt } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
+  CHAT_APP_LABELS,
   describeSchedule,
   newScheduledTask,
   parseScheduleText,
-  saveScheduledTask
+  saveScheduledTask,
+  splitDelivery
 } from "../runtime/schedules";
 import {
   addGrant,
@@ -492,14 +494,15 @@ export function App() {
           addAssistantMessage("What should it do at that time? Add the task after the time.");
           return;
         }
-        const item = newScheduledTask(parsed.task, parsed.schedule);
+        const delivery = splitDelivery(parsed.task);
+        const item = { ...newScheduledTask(delivery.task || parsed.task, parsed.schedule), deliver_to: delivery.deliver_to };
         if (!item.next_run_at) {
           addAssistantMessage("That time has already passed. Pick a time in the future.");
           return;
         }
         await saveScheduledTask(item);
         addAssistantMessage(
-          `Scheduled: **${item.task}**\n\n${describeSchedule(item.schedule)}. Next run ${new Date(item.next_run_at).toLocaleString([], { weekday: "long", hour: "numeric", minute: "2-digit" })}. It runs in its own background tab while Chrome is open, and anything that needs your approval waits for you. See it under History → Scheduled.`
+          `Scheduled: **${item.task}**\n\n${describeSchedule(item.schedule)}. Next run ${new Date(item.next_run_at).toLocaleString([], { weekday: "long", hour: "numeric", minute: "2-digit" })}. It runs in its own background tab while Chrome is open, and anything that needs your approval waits for you.${item.deliver_to ? ` Each result also goes to ${CHAT_APP_LABELS[item.deliver_to]} (through the Bridge).` : ""} See it under History → Scheduled.`
         );
         return;
       }

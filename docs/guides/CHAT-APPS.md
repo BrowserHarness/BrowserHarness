@@ -1,4 +1,4 @@
-# Use BrowserHarness from Discord, Slack or Signal
+# Use BrowserHarness from Discord, Slack, Signal, Mattermost, Matrix or email
 
 Message your own bot, like "check my inbox for invoices", and BrowserHarness
 does it in Chrome on your computer and replies with the result. Anything that
@@ -20,6 +20,14 @@ Every app works the same way once it is set up:
 
 Tokens stay in `~/.browserharness-bridge/config.json` on your computer. Keep
 them private: anyone with a bot's token can read its messages.
+
+## Scheduled tasks that report to your chat
+Send your bot `/schedule every weekday at 8am check my inbox for invoices`.
+It saves the schedule on your computer and sends each result back to the same
+chat. In BrowserHarness you can also add "and send it to Telegram" (or
+Discord, Slack, Signal) to a `/schedule` request, or pick **Also send results
+to** under History → Scheduled. The task still runs in Chrome on your computer,
+so Chrome and the Bridge need to be running at that time.
 
 ## Discord
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications),
@@ -84,10 +92,51 @@ The bot answers one-to-one messages only, not groups. While the Bridge runs it
 uses signal-cli for that number, so don't run another signal-cli for the same
 number at the same time.
 
+## Mattermost
+1. In Mattermost, open **Integrations → Bot Accounts → Add Bot Account** (an
+   admin may need to turn bot accounts on), and copy its access token.
+2. On your computer:
+   ```
+   browserharness-bridge mattermost setup --server https://chat.example.com --token <the bot's token>
+   ```
+3. Send the bot a direct message and allow your account as described above.
+
+In a channel, mention the bot (`@harness check prices`).
+
+## Matrix (Element and other apps)
+1. Make a separate Matrix account for the bot and copy its access token (in
+   Element: **Settings → Help & About → Access Token**).
+2. On your computer:
+   ```
+   browserharness-bridge matrix setup --homeserver https://matrix.org --token <the bot's token>
+   browserharness-bridge matrix allow @you:matrix.org
+   ```
+3. Start a room with the bot **with encryption turned off** and invite it. It
+   joins only rooms that accounts you allowed invite it to, and it can't read
+   encrypted rooms.
+
+## Email
+Use a separate mailbox for the bot, because it marks the mail it reads as read
+and replies from it.
+1. Turn on two-step sign-in for that mailbox and make an **app password**
+   (Gmail: Google Account → Security → App passwords).
+2. On your computer:
+   ```
+   browserharness-bridge email setup --address mybot@gmail.com --password <app password>
+   browserharness-bridge email allow you@example.com
+   ```
+   Gmail, Outlook, iCloud, Yahoo, Fastmail and Zoho are known. For other
+   providers add `--imap host:993 --smtp host:465` (or `:587`).
+3. Email the bot a task. Mail that was already in the mailbox is never run.
+
+A From line is easy to fake, so the bot only acts on mail that your mail
+provider confirms really came from that address (it checks the provider's
+`Authentication-Results`). Mail from big providers passes; mail from a
+misconfigured domain is ignored and noted in `browserharness-bridge logs`.
+
 ## Not yet
 - **WhatsApp**: its official API sends messages to a public web address, which
   a computer at home doesn't have, and needs a Meta business account.
-- **Email**: planned; it needs a mail library the Bridge doesn't include yet.
 
 ## Commands
 - `browserharness-bridge chats`: every app at a glance (never shows tokens)
@@ -95,4 +144,4 @@ number at the same time.
 - `browserharness-bridge <app> allow <id>`: allow another account
 - `browserharness-bridge <app> off`: turn the bot off and forget its token
 
-`<app>` is `telegram`, `discord`, `slack` or `signal`.
+`<app>` is `telegram`, `discord`, `slack`, `signal`, `mattermost`, `matrix` or `email`.

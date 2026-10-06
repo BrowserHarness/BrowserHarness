@@ -5,7 +5,15 @@
 
 export const HEADINGS = { worked: "Done", failed: "Didn't finish", "needs you": "Needs you" };
 
-export const CHAT_APP_NAMES = { telegram: "Telegram", discord: "Discord", slack: "Slack", signal: "Signal" };
+export const CHAT_APP_NAMES = {
+  telegram: "Telegram",
+  discord: "Discord",
+  slack: "Slack",
+  signal: "Signal",
+  mattermost: "Mattermost",
+  matrix: "Matrix",
+  email: "email"
+};
 
 export const CHAT_HELP =
   "Send me a task, like “check my inbox for invoices” or “/your-skill size 9”, and I'll do it in Chrome on your computer and reply with the result. Anything that needs your approval waits for you there.";
@@ -20,9 +28,10 @@ export function clipMessage(text, max) {
  * send(chatId, text) sends a reply. runTask(text, { from, user }) resolves to
  * { ok, id } once Chrome accepted the task, or { ok: false, error }.
  * handle({ chatId, userId, userName, text }) takes one incoming message;
- * deliver(id, outcome) sends a finished task's result back.
+ * deliver(id, outcome) sends a finished task's result back; notify(text)
+ * reaches every allowed account, at targetFor(userId) (default: the id itself).
  */
-export function createChatRelay({ app, allowedUserIds = [], send, runTask, help = CHAT_HELP }) {
+export function createChatRelay({ app, allowedUserIds = [], send, runTask, help = CHAT_HELP, targetFor = async (userId) => userId }) {
   const allowed = new Set(allowedUserIds.map(String));
   const waiting = new Map();
 
@@ -45,6 +54,11 @@ export function createChatRelay({ app, allowedUserIds = [], send, runTask, help 
       await send(chatId, `I couldn't start that: ${accepted?.error?.message || "Chrome is not connected."}`);
       return;
     }
+    // Some requests (like /schedule) are answered at once.
+    if (accepted.reply) {
+      await send(chatId, accepted.reply);
+      return;
+    }
     waiting.set(accepted.id, chatId);
     await send(chatId, `On it: ${task}`);
   }
@@ -58,7 +72,17 @@ export function createChatRelay({ app, allowedUserIds = [], send, runTask, help 
     return true;
   }
 
-  return { handle, deliver };
+  /** Sends a message nobody asked for (a scheduled result) to every allowed account. */
+  async function notify(text) {
+    let sent = 0;
+    for (const userId of allowed) {
+      await send(await targetFor(userId), text);
+      sent += 1;
+    }
+    return sent;
+  }
+
+  return { app, handle, deliver, notify };
 }
 
 /** Waits, unless stopped first. */

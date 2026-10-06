@@ -27,6 +27,8 @@ export function discordApi(token, apiBase = DEFAULT_API, fetchImpl = globalThis.
   };
   return {
     getMe: () => call("GET", "/users/@me"),
+    /** The direct-message channel with a person, for messages they didn't ask for. */
+    openDm: (userId) => call("POST", "/users/@me/channels", { recipient_id: userId }),
     sendMessage: (channelId, text) => call("POST", `/channels/${channelId}/messages`, { content: clipMessage(text, MAX_MESSAGE) })
   };
 }
@@ -57,7 +59,13 @@ export function createDiscordRelay({
   log = () => undefined
 }) {
   const api = discordApi(token, apiBase, fetchImpl);
-  const relay = createChatRelay({ app: "discord", allowedUserIds, runTask, send: (channelId, text) => api.sendMessage(channelId, text) });
+  const relay = createChatRelay({
+    app: "discord",
+    allowedUserIds,
+    runTask,
+    send: (channelId, text) => api.sendMessage(channelId, text),
+    targetFor: async (userId) => (await api.openDm(userId)).id
+  });
   let botId = knownBotId;
   let socket = null;
   let stopped = false;
@@ -129,7 +137,9 @@ export function createDiscordRelay({
       stopped = true;
       socket?.close(1000);
     },
+    app: relay.app,
     deliver: relay.deliver,
+    notify: relay.notify,
     handle
   };
 }

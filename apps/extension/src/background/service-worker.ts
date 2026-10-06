@@ -22,9 +22,14 @@ import {
 import {
   ALARM_PREFIX,
   SCHEDULES_STORAGE_KEY,
+  describeSchedule,
+  isChatApp,
   loadSchedules,
   markScheduleStarted,
-  plannedAlarms
+  newScheduledTask,
+  parseScheduleText,
+  plannedAlarms,
+  saveScheduledTask
 } from "../runtime/schedules";
 import {
   QUICK_EXPLAIN_MENU_ID,
@@ -3002,12 +3007,43 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
 
 const REMOTE_TASKS_KEY = "browserharness.remoteTasks";
 
+/**
+ * "/schedule every weekday at 8am check prices" from a chat app: saves the
+ * schedule with results going back to that app, and answers at once.
+ */
+async function scheduleFromChat(words: string, from: string): Promise<ToolResult> {
+  const id = crypto.randomUUID();
+  const parsed = parseScheduleText(words);
+  const app = isChatApp(from) ? from : undefined;
+  if (!parsed || !parsed.task) {
+    return {
+      ok: true,
+      data: {
+        id,
+        reply: "Tell me when and what, like “/schedule every weekday at 8am check my inbox for invoices”."
+      }
+    };
+  }
+  const item = { ...newScheduledTask(parsed.task, parsed.schedule), deliver_to: app };
+  if (!item.next_run_at) return { ok: true, data: { id, reply: "That time has already passed. Pick a time in the future." } };
+  await saveScheduledTask(item);
+  return {
+    ok: true,
+    data: {
+      id,
+      reply: `Scheduled: ${item.task}\n${describeSchedule(item.schedule)}. ${app ? `I'll send each result here.` : ""} It runs while Chrome is open on your computer; turn it off under History → Scheduled.`
+    }
+  };
+}
+
 /** A task sent from a chat app (Telegram, Discord, Slack or Signal, via the Bridge). */
 async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResult> {
   const text = typeof args.text === "string" ? args.text.trim().slice(0, 4000) : "";
   if (!text) {
     return { ok: false, error: { code: "EMPTY_TASK", message: "The message had no task in it." } };
   }
+  const from = typeof args.from === "string" ? args.from : "phone";
+  if (/^\/schedules?\b/i.test(text)) return scheduleFromChat(text.replace(/^\/schedules?\s*/i, ""), from);
   const id = crypto.randomUUID();
   const stored = (await chrome.storage.session.get(REMOTE_TASKS_KEY))[REMOTE_TASKS_KEY] || {};
   await chrome.storage.session.set({
@@ -3153,6 +3189,14 @@ chrome.runtime.onMessage.addListener(
   ) => {
     void (async () => {
       try {
+        if (request.type === "CHAT_NOTIFY") {
+          if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL("runner.html")) || !isChatApp(request.app)) {
+            sendResponse({ ok: false });
+            return;
+          }
+          sendResponse({ ok: sendBridgeEvent({ type: "chat_notify", app: request.app, text: String(request.text || "").slice(0, 4000) }) });
+          return;
+        }
         if (request.type === "REMOTE_TASK_RESULT") {
           if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL("runner.html"))) {
             sendResponse({ ok: false });

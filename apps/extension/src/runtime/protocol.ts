@@ -111,9 +111,17 @@ export type RemoteTaskResult = {
   url?: string;
 };
 
+/** A scheduled task's result, for a chat app (via the Bridge). */
+export type ChatNotify = {
+  type: "CHAT_NOTIFY";
+  app: string;
+  text: string;
+};
+
 export type ExtensionRequest =
   | { type: "GET_CURRENT_TAB" }
   | RemoteTaskResult
+  | ChatNotify
   | BridgeLlmRequest
   | BrowserToolRequest
   | WatchRequest;

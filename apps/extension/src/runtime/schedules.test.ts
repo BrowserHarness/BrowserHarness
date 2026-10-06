@@ -6,8 +6,10 @@ import {
   nextRunAt,
   parseScheduleText,
   recordScheduledRun,
+  deliveryText,
   saveScheduledTask,
-  setScheduleEnabled
+  setScheduleEnabled,
+  splitDelivery
 } from "./schedules";
 
 let store: Record<string, unknown>;
@@ -85,5 +87,23 @@ describe("schedules", () => {
     });
     await setScheduleEnabled(daily.id, false, after);
     expect((await loadSchedules()).find((item) => item.id === daily.id)).toMatchObject({ enabled: false, next_run_at: undefined });
+  });
+});
+
+describe("sending scheduled results to a chat app", () => {
+  it("reads where to send results from the request", () => {
+    expect(splitDelivery("check gold prices and send it to Telegram")).toEqual({ task: "check gold prices", deliver_to: "telegram" });
+    expect(splitDelivery("check my inbox, send me the results on Slack.")).toEqual({ task: "check my inbox", deliver_to: "slack" });
+    expect(splitDelivery("list new invoices and message me on my Signal")).toEqual({ task: "list new invoices", deliver_to: "signal" });
+    expect(splitDelivery("send flowers to mum")).toEqual({ task: "send flowers to mum" });
+    expect(splitDelivery("check train times and email me the results")).toEqual({ task: "check train times", deliver_to: "email" });
+    expect(splitDelivery("check train times, send it to my e-mail")).toEqual({ task: "check train times", deliver_to: "email" });
+    expect(splitDelivery("summarize the news and send it to Matrix")).toEqual({ task: "summarize the news", deliver_to: "matrix" });
+    expect(splitDelivery("check the discord server rules")).toEqual({ task: "check the discord server rules" });
+  });
+
+  it("writes a short result message", () => {
+    expect(deliveryText("check prices", "worked", " Gold is ₹7,100 ")).toBe("Done: check prices\n\nGold is ₹7,100");
+    expect(deliveryText("pay rent", "needs you", "Approve the payment")).toBe("Needs you: pay rent\n\nApprove the payment");
   });
 });
