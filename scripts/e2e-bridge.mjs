@@ -527,6 +527,16 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     60_000
   );
   check("a scheduled run sends its result to the chat app", Boolean(delivered), JSON.stringify(telegram.sent.slice(sentBefore)));
+  // The panel is still on Settings from pairing; start from the chat.
+  await side.reload();
+  await side.getByRole("button", { name: "Task history" }).click();
+  await side.getByRole("tab", { name: "Scheduled" }).click();
+  const card = side.getByTestId("scheduled-task").filter({ hasText: "TG_TASK" });
+  await card.waitFor({ timeout: 10000 }).catch(() => {});
+  const cardText = await card.innerText().catch(() => "");
+  const offeredInForm = await side.getByLabel("Also send results to").isVisible().catch(() => false);
+  check("the Scheduled screen shows where results go and offers the chat apps", cardText.includes("results also go to Telegram") && offeredInForm, cardText.slice(0, 200));
+  if (process.env.SHOT_DIR) await side.screenshot({ path: path.join(process.env.SHOT_DIR, "scheduled-chat.png"), fullPage: true });
 
   // 4. Uninstall removes what install added.
   const removed = bridge(installed, "uninstall");
