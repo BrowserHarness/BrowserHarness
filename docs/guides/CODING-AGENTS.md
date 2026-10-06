@@ -59,6 +59,7 @@ Commands that fill and send a form still follow your approval rules.
 - `browserharness-bridge sites`: list the commands learned from websites
 - `browserharness-bridge site <name> [value | --param value | param=value]`: run one and print the result
 - `browserharness-bridge telegram setup --token <token>`: use BrowserHarness from your phone (see [TELEGRAM.md](TELEGRAM.md))
+- `browserharness-bridge discord|slack|signal setup …`: the same from Discord, Slack or Signal (see [CHAT-APPS.md](CHAT-APPS.md)); `browserharness-bridge chats` lists them
 - `browserharness-bridge uninstall`: remove everything the installer added (`--purge` also deletes the token)
 
 If `browserharness-bridge` is not found, use

@@ -20,7 +20,9 @@ const HEADINGS = {
   "needs you": "Needs you"
 } as const;
 
-/** A task sent from the person's phone; the result goes back the same way. */
+const CHAT_APPS: Record<string, string> = { telegram: "Telegram", discord: "Discord", slack: "Slack", signal: "Signal" };
+
+/** A task sent from a chat app; the result goes back the same way. */
 async function runRemote(id: string, keep: boolean) {
   const key = "browserharness.remoteTasks";
   const stored = ((await chrome.storage.session.get(key))[key] || {}) as Record<string, { text: string; from: string }>;
@@ -31,7 +33,7 @@ async function runRemote(id: string, keep: boolean) {
   }
   const { [id]: _done, ...rest } = stored;
   await chrome.storage.session.set({ [key]: rest });
-  const source = request.from === "telegram" ? "Telegram" : "your phone";
+  const source = CHAT_APPS[request.from] || "your phone";
   document.title = `Running: ${request.text}`;
   title.textContent = `Running a task from ${source}: ${request.text}`;
   const outcome = await runUnattendedTask(request.text, `From ${source}`, log);

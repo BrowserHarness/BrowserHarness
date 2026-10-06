@@ -3002,7 +3002,7 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
 
 const REMOTE_TASKS_KEY = "browserharness.remoteTasks";
 
-/** A task sent from the person's phone (Telegram, via the Bridge). */
+/** A task sent from a chat app (Telegram, Discord, Slack or Signal, via the Bridge). */
 async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResult> {
   const text = typeof args.text === "string" ? args.text.trim().slice(0, 4000) : "";
   if (!text) {

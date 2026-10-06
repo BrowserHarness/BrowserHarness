@@ -18,6 +18,10 @@ import {
 } from "./core.mjs";
 import { serveBrowserHarnessMcp } from "./mcp.mjs";
 import { createTelegramRelay, telegramApi } from "./telegram.mjs";
+import { createDiscordRelay, discordApi, discordInviteUrl } from "./discord.mjs";
+import { createSlackRelay, slackApi } from "./slack.mjs";
+import { createSignalRelay, runSignalCli, SIGNAL_ID } from "./signal.mjs";
+import { CHAT_APP_NAMES } from "./chat-relay.mjs";
 import {
   detectAgents,
   findOnPath,
@@ -125,7 +129,7 @@ async function waitForState(config, expectedRunning, timeoutMs = 5000) {
 async function serve(config) {
   await mkdir(LOG_DIR, { recursive: true });
   const mcpManager = createMcpClientManager();
-  let telegram = null;
+  let chatApps = [];
   const bridge = createBridgeServer({
     host: config.host,
     port: config.port,
@@ -134,26 +138,17 @@ async function serve(config) {
     llmManager: createLlmAdapterManager(),
     mcpManager,
     onExtensionEvent: async (message) => {
-      await telegram?.deliver(message.id, message).catch(() => undefined);
+      for (const relay of chatApps) await relay.deliver(message.id, message).catch(() => undefined);
     }
   });
   const address = await bridge.listen();
 
-  if (config.telegram?.token) {
-    telegram = createTelegramRelay({
-      token: config.telegram.token,
-      allowedUserIds: config.telegram.allowed_user_ids || [],
-      apiBase: config.telegram.api_base,
-      log: (line) => process.stderr.write(`${line}\n`),
-      runTask: async (text, meta) => {
-        const result = await bridge
-          .sendCommand({ session: "telegram", title: "Telegram", action: "remote_task", args: { text, from: meta.from } })
-          .catch((error) => ({ ok: false, error: { message: error.message } }));
-        return result.ok ? { ok: true, id: result.data.id } : result;
-      }
-    });
-    telegram.start();
-  }
+  chatApps = startChatApps(config, (text, meta) =>
+    bridge
+      .sendCommand({ session: meta.from, title: CHAT_APP_NAMES[meta.from], action: "remote_task", args: { text, from: meta.from } })
+      .then((result) => (result.ok ? { ok: true, id: result.data.id } : result))
+      .catch((error) => ({ ok: false, error: { message: error.message } }))
+  );
 
   await writeFile(PID_FILE, `${process.pid}\n`);
   await writeFile(
@@ -169,7 +164,7 @@ async function serve(config) {
   });
 
   const shutdown = async () => {
-    telegram?.stop();
+    for (const relay of chatApps) relay.stop();
     await bridge.close().catch(() => undefined);
     await Promise.all([
       rm(PID_FILE, { force: true }),
@@ -447,42 +442,163 @@ async function restartIfRunning(config) {
   return false;
 }
 
-/** `telegram setup --token …`, `telegram allow <id>`, `telegram off`, `telegram status`. */
-async function telegramCommand(config, args) {
+/** Starts a bot for each chat app that is set up. */
+function startChatApps(config, runTask) {
+  const log = (line) => process.stderr.write(`${line}\n`);
+  const relays = [];
+  const { telegram, discord, slack, signal } = config;
+  if (telegram?.token) {
+    relays.push(createTelegramRelay({ token: telegram.token, allowedUserIds: telegram.allowed_user_ids || [], apiBase: telegram.api_base, runTask, log }));
+  }
+  if (discord?.token) {
+    relays.push(
+      createDiscordRelay({
+        token: discord.token,
+        botId: discord.bot_id,
+        allowedUserIds: discord.allowed_user_ids || [],
+        apiBase: discord.api_base,
+        gatewayUrl: discord.gateway_url,
+        runTask,
+        log
+      })
+    );
+  }
+  if (slack?.bot_token && slack?.app_token) {
+    relays.push(
+      createSlackRelay({
+        botToken: slack.bot_token,
+        appToken: slack.app_token,
+        allowedUserIds: slack.allowed_user_ids || [],
+        apiBase: slack.api_base,
+        runTask,
+        log
+      })
+    );
+  }
+  if (signal?.number) {
+    relays.push(createSignalRelay({ number: signal.number, command: signal.command, allowedUserIds: signal.allowed_user_ids || [], runTask, log }));
+  }
+  for (const relay of relays) relay.start();
+  return relays;
+}
+
+/** What each chat app needs: how to check it, what an account id looks like. */
+const CHAT_APPS = {
+  telegram: {
+    usage: "telegram setup --token <token from @BotFather>",
+    idPattern: /^\d+$/,
+    idHint: "your Telegram user id",
+    async setup(current) {
+      const token = option("token") || process.argv[4];
+      if (!token || token.startsWith("--")) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+      const me = await telegramApi(token, current.api_base).getMe();
+      return {
+        settings: { token, bot: me.username },
+        report: { bot: `@${me.username}`, next: `Send any message to @${me.username}. It will reply with the command that allows your Telegram account.` }
+      };
+    }
+  },
+  discord: {
+    usage: "discord setup --token <bot token from the Discord Developer Portal>",
+    idPattern: /^\d+$/,
+    idHint: "your Discord user id",
+    async setup(current) {
+      const token = option("token") || process.argv[4];
+      if (!token || token.startsWith("--")) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+      const me = await discordApi(token, current.api_base).getMe();
+      return {
+        settings: { token, bot: me.username, bot_id: me.id },
+        report: {
+          bot: me.username,
+          invite: discordInviteUrl(me.id),
+          next: `Open the invite link to add ${me.username} to a server you own, then send it a direct message. It will reply with the command that allows your Discord account.`
+        }
+      };
+    }
+  },
+  slack: {
+    usage: "slack setup --bot-token <xoxb-…> --app-token <xapp-…>",
+    idPattern: /^[UW][A-Z0-9]+$/,
+    idHint: "your Slack member id",
+    async setup(current) {
+      const botToken = option("bot-token");
+      const appToken = option("app-token");
+      if (!botToken || !appToken) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+      const api = slackApi({ botToken, appToken, apiBase: current.api_base });
+      const me = await api.authTest();
+      await api.openConnection();
+      return {
+        settings: { bot_token: botToken, app_token: appToken, bot: me.user, team: me.team },
+        report: { bot: me.user, team: me.team, next: `Send ${me.user} a direct message in Slack. It will reply with the command that allows your Slack account.` }
+      };
+    }
+  },
+  signal: {
+    usage: "signal setup --number <the bot's number, like +15551234567> [--command <path to signal-cli>]",
+    idPattern: SIGNAL_ID,
+    idHint: "your phone number with country code, like +15551234567",
+    async setup(current) {
+      const number = option("number") || process.argv[4];
+      const command = option("command") || current.command || "signal-cli";
+      if (!number || !SIGNAL_ID.test(number) || !number.startsWith("+")) throw new Error(`Usage: browserharness-bridge ${this.usage}`);
+      const version = await runSignalCli(command, ["--version"]);
+      return {
+        settings: { number, command },
+        report: { number, signal_cli: version, next: `Send a Signal message to ${number}. It will reply with the command that allows your number.` }
+      };
+    }
+  }
+};
+
+/** `<app> setup …`, `<app> allow <id>`, `<app> off`, `<app> status` for each chat app. */
+async function chatCommand(app, config, args) {
   const [mode, value] = args;
-  const current = config.telegram || {};
+  const spec = CHAT_APPS[app];
+  const current = config[app] || {};
+  const name = CHAT_APP_NAMES[app];
+  const isSetUp = Boolean(current.token || current.bot_token || current.number);
   if (mode === "setup") {
-    const token = option("token") || value;
-    if (!token) throw new Error("Usage: browserharness-bridge telegram setup --token <token from @BotFather>");
-    const me = await telegramApi(token, current.api_base).getMe();
-    const next = { ...config, telegram: { ...current, token, bot: me.username, allowed_user_ids: current.allowed_user_ids || [] } };
+    const { settings, report } = await spec.setup(current);
+    const next = { ...config, [app]: { ...current, ...settings, allowed_user_ids: current.allowed_user_ids || [] } };
     await saveConfig(next);
-    const restarted = await restartIfRunning(next);
-    print({
-      telegram: true,
-      bot: `@${me.username}`,
-      restarted,
-      next: `Send any message to @${me.username}. It will reply with the command that allows your Telegram account.`
-    });
+    print({ [app]: true, ...report, restarted: await restartIfRunning(next) });
   } else if (mode === "allow") {
-    if (!current.token) throw new Error("Set up the bot first: browserharness-bridge telegram setup --token <token>");
-    if (!/^\d+$/.test(value || "")) throw new Error("Usage: browserharness-bridge telegram allow <your Telegram user id>");
+    if (!isSetUp) throw new Error(`Set up ${name} first: browserharness-bridge ${spec.usage}`);
+    if (!spec.idPattern.test(value || "")) throw new Error(`Usage: browserharness-bridge ${app} allow <${spec.idHint}>`);
     const ids = [...new Set([...(current.allowed_user_ids || []).map(String), value])];
-    const next = { ...config, telegram: { ...current, allowed_user_ids: ids } };
+    const next = { ...config, [app]: { ...current, allowed_user_ids: ids } };
     await saveConfig(next);
     const restarted = await restartIfRunning(next);
-    print({ telegram: true, allowed_user_ids: ids, restarted, note: restarted ? "Message the bot to try it." : "Start the Bridge to use it: browserharness-bridge start" });
+    print({ [app]: true, allowed_user_ids: ids, restarted, note: restarted ? "Message the bot to try it." : "Start the Bridge to use it: browserharness-bridge start" });
   } else if (mode === "off") {
-    const { telegram: _removed, ...next } = config;
+    const { [app]: _removed, ...next } = config;
     await saveConfig(next);
-    print({ telegram: false, restarted: await restartIfRunning(next) });
+    print({ [app]: false, restarted: await restartIfRunning(next) });
   } else {
+    // Never prints tokens.
     print({
-      telegram: Boolean(current.token),
-      bot: current.bot ? `@${current.bot}` : undefined,
+      [app]: isSetUp,
+      bot: current.bot ? (app === "telegram" ? `@${current.bot}` : current.bot) : undefined,
+      number: current.number,
       allowed_user_ids: current.allowed_user_ids || []
     });
   }
+}
+
+/** Every chat app at a glance. */
+function chatsCommand(config) {
+  print({
+    chats: Object.keys(CHAT_APPS).map((app) => {
+      const current = config[app] || {};
+      return {
+        app,
+        on: Boolean(current.token || current.bot_token || current.number),
+        bot: current.bot || current.number,
+        allowed: (current.allowed_user_ids || []).length
+      };
+    }),
+    setup: Object.values(CHAT_APPS).map((spec) => `browserharness-bridge ${spec.usage}`)
+  });
 }
 
 async function waitForExtension(config, timeoutMs) {
@@ -672,8 +788,11 @@ try {
     await uninstall(config);
   } else if (command === "agents") {
     print({ agents: detectAgents(context(THIS_FILE)) });
-  } else if (command === "telegram") {
-    await telegramCommand(config, process.argv.slice(3).filter((arg, index, all) => !arg.startsWith("--") && all[index - 1] !== "--token"));
+  } else if (command in CHAT_APPS) {
+    const valueFlags = new Set(["--token", "--bot-token", "--app-token", "--number", "--command"]);
+    await chatCommand(command, config, process.argv.slice(3).filter((arg, index, all) => !arg.startsWith("--") && !valueFlags.has(all[index - 1])));
+  } else if (command === "chats") {
+    chatsCommand(config);
   } else if (command === "skills") {
     await skillsCommand(config);
   } else if (command === "skill") {
@@ -702,7 +821,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|telegram|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|telegram|discord|slack|signal|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {

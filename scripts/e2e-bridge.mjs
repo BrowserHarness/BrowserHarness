@@ -59,8 +59,26 @@ const bridge = (file, ...args) => {
   }
 };
 
-// Stand-ins for Telegram's Bot API and for a model, so the phone path runs end to end.
+// Stand-ins for Telegram's Bot API, Discord, Slack and for a model, so the chat paths run end to end.
+const { WebSocketServer } = require("ws");
 const telegram = { queue: [], sent: [], nextId: 1 };
+const discord = { sockets: new Set(), sent: [] };
+const slack = { sockets: new Set(), sent: [], envelopes: 0 };
+const discordGateway = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+discordGateway.on("connection", (socket) => {
+  discord.sockets.add(socket);
+  socket.on("close", () => discord.sockets.delete(socket));
+  socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 30_000 } }));
+  socket.on("message", (raw) => {
+    if (JSON.parse(String(raw)).op === 2) socket.send(JSON.stringify({ op: 0, s: 1, t: "READY", d: { user: { id: "999", username: "harness" } } }));
+  });
+});
+const slackSocket = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+slackSocket.on("connection", (socket) => {
+  slack.sockets.add(socket);
+  socket.on("close", () => slack.sockets.delete(socket));
+  socket.send(JSON.stringify({ type: "hello" }));
+});
 const mockModel = (body, res) => {
   const user = String(body.messages.at(-1).content ?? "");
   const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1] || "";
@@ -89,6 +107,45 @@ const bridgeAsync = (file, ...args) =>
   });
 
 const page = http.createServer((req, res) => {
+  if (req.url.startsWith("/discord/")) {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      if (req.headers.authorization !== "Bot discord-token") {
+        res.statusCode = 401;
+        return res.end(JSON.stringify({ message: "401: Unauthorized" }));
+      }
+      if (req.url === "/discord/users/@me") return res.end(JSON.stringify({ id: "999", username: "harness" }));
+      const channel = /^\/discord\/channels\/(\w+)\/messages$/.exec(req.url)?.[1];
+      if (channel) {
+        discord.sent.push({ channel, text: JSON.parse(raw).content });
+        return res.end(JSON.stringify({ id: String(discord.sent.length) }));
+      }
+      res.statusCode = 404;
+      res.end("{}");
+    });
+    return;
+  }
+  if (req.url.startsWith("/slack/")) {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      const method = req.url.split("/").pop();
+      const token = req.headers.authorization;
+      if (method === "auth.test" && token === "Bearer xoxb-e2e") return res.end(JSON.stringify({ ok: true, user: "harness", user_id: "UBOT", team: "Home" }));
+      if (method === "apps.connections.open" && token === "Bearer xapp-e2e") {
+        return res.end(JSON.stringify({ ok: true, url: `ws://127.0.0.1:${slackSocket.address().port}` }));
+      }
+      if (method === "chat.postMessage" && token === "Bearer xoxb-e2e") {
+        slack.sent.push(JSON.parse(raw));
+        return res.end(JSON.stringify({ ok: true }));
+      }
+      res.end(JSON.stringify({ ok: false, error: "invalid_auth" }));
+    });
+    return;
+  }
   if (req.method === "POST") {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
@@ -311,6 +368,110 @@ try {
   const history = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.taskHistory"))["browserharness.taskHistory"] || []);
   check("phone tasks are in history", history.some((entry) => entry.task.startsWith("From Telegram: TG_TASK")));
 
+  // The same from Discord, Slack and Signal.
+  const waitFor = async (find, timeout) => {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+      const found = find();
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return null;
+  };
+  const chatConfig = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  const signalInbox = path.join(home, "signal-inbox.jsonl");
+  const signalSent = path.join(home, "signal-sent.jsonl");
+  const fakeSignal = path.join(home, "signal-cli");
+  // A stand-in for signal-cli: passes on what lands in its inbox, records what it is asked to send.
+  fs.writeFileSync(
+    fakeSignal,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+if (process.argv.includes("--version")) { console.log("signal-cli 0.13.0"); process.exit(0); }
+setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(signalInbox)})) return;
+  const lines = fs.readFileSync(${JSON.stringify(signalInbox)}, "utf8");
+  fs.rmSync(${JSON.stringify(signalInbox)});
+  process.stdout.write(lines);
+}, 200);
+require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => fs.appendFileSync(${JSON.stringify(signalSent)}, line + "\\n"));
+`
+  );
+  fs.chmodSync(fakeSignal, 0o755);
+  fs.writeFileSync(
+    configFile,
+    JSON.stringify({
+      ...chatConfig,
+      discord: { api_base: `http://127.0.0.1:${page.address().port}/discord`, gateway_url: `ws://127.0.0.1:${discordGateway.address().port}` },
+      slack: { api_base: `http://127.0.0.1:${page.address().port}/slack` }
+    })
+  );
+
+  const discordSetup = await bridgeAsync(installed, "discord", "setup", "--token", "discord-token");
+  check(
+    "discord setup checks the bot and gives an invite link",
+    discordSetup.json?.bot === "harness" && discordSetup.json?.invite?.includes("client_id=999") && discordSetup.json?.restarted === true,
+    discordSetup.stderr?.trim()
+  );
+  const discordAllow = await bridgeAsync(installed, "discord", "allow", "42");
+  check("discord allow adds the account", discordAllow.json?.allowed_user_ids?.includes("42"), discordAllow.stderr?.trim());
+  await reconnected();
+  await waitFor(() => discord.sockets.size, 10_000);
+  const discordSay = (author, content, guild) =>
+    [...discord.sockets].forEach((socket) =>
+      socket.send(JSON.stringify({ op: 0, s: 2, t: "MESSAGE_CREATE", d: { channel_id: `c${author}`, guild_id: guild, author: { id: author, username: "ada" }, content, mentions: guild ? [{ id: "999" }] : [] } }))
+    );
+  discordSay("7", "TG_TASK hello");
+  discordSay("42", `<@999> TG_TASK open ${pageUrl} and tell me the button`, "g1");
+  const discordDone = await waitFor(() => discord.sent.find((item) => item.channel === "c42" && /^Done\n\nTG_DONE Greet/.test(item.text)), 60_000);
+  check(
+    "a Discord mention runs in Chrome and the result comes back; strangers get no task",
+    Boolean(discordDone) && discord.sent.some((item) => item.channel === "c7" && /discord allow 7/.test(item.text)),
+    JSON.stringify(discord.sent.slice(-3))
+  );
+
+  const slackSetup = await bridgeAsync(installed, "slack", "setup", "--bot-token", "xoxb-e2e", "--app-token", "xapp-e2e");
+  check("slack setup checks both tokens", slackSetup.json?.bot === "harness" && slackSetup.json?.team === "Home", slackSetup.stderr?.trim());
+  const slackAllow = await bridgeAsync(installed, "slack", "allow", "U42");
+  check("slack allow adds the account", slackAllow.json?.allowed_user_ids?.includes("U42"), slackAllow.stderr?.trim());
+  await reconnected();
+  await waitFor(() => slack.sockets.size, 10_000);
+  [...slack.sockets].forEach((socket) =>
+    socket.send(
+      JSON.stringify({
+        type: "events_api",
+        envelope_id: `env${++slack.envelopes}`,
+        payload: { event: { type: "message", channel_type: "im", channel: "D42", user: "U42", ts: "1.2", text: `TG_TASK open ${pageUrl} and tell me the button` } }
+      })
+    )
+  );
+  const slackDone = await waitFor(() => slack.sent.find((item) => item.channel === "D42" && /^Done\n\nTG_DONE Greet/.test(item.text)), 60_000);
+  check("a Slack direct message runs in Chrome and the result comes back", Boolean(slackDone), JSON.stringify(slack.sent.slice(-3)));
+
+  const signalSetup = await bridgeAsync(installed, "signal", "setup", "--number", "+15559998888", "--command", fakeSignal);
+  check("signal setup finds signal-cli", signalSetup.json?.signal_cli === "signal-cli 0.13.0" && signalSetup.json?.number === "+15559998888", signalSetup.stderr?.trim());
+  const signalAllow = await bridgeAsync(installed, "signal", "allow", "+15550001111");
+  check("signal allow adds the number", signalAllow.json?.allowed_user_ids?.includes("+15550001111"), signalAllow.stderr?.trim());
+  await reconnected();
+  fs.writeFileSync(
+    signalInbox,
+    `${JSON.stringify({ jsonrpc: "2.0", method: "receive", params: { envelope: { sourceNumber: "+15550001111", sourceName: "Ada", dataMessage: { message: `TG_TASK open ${pageUrl} and tell me the button` } } } })}\n`
+  );
+  const signalReplies = () =>
+    fs.existsSync(signalSent) ? fs.readFileSync(signalSent, "utf8").trim().split("\n").map((line) => JSON.parse(line).params) : [];
+  const signalDone = await waitFor(() => signalReplies().find((item) => item.recipient[0] === "+15550001111" && /^Done\n\nTG_DONE Greet/.test(item.message)), 60_000);
+  check("a Signal message runs in Chrome and the result comes back", Boolean(signalDone), JSON.stringify(signalReplies().slice(-3)));
+
+  const chats = await bridgeAsync(installed, "chats");
+  const listedChats = Object.fromEntries((chats.json?.chats || []).map((chat) => [chat.app, chat.on && chat.allowed === 1]));
+  check("chats shows all four apps set up, without tokens", Object.values(listedChats).filter(Boolean).length === 4 && !/xoxb-e2e|xapp-e2e|discord-token|123:abc/.test(JSON.stringify(chats.json)), JSON.stringify(chats.json));
+  const allHistory = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.taskHistory"))["browserharness.taskHistory"] || []);
+  check(
+    "each task is in history with the app it came from",
+    ["Discord", "Slack", "Signal"].every((app) => allHistory.some((entry) => entry.task.startsWith(`From ${app}: TG_TASK`))),
+    allHistory.map((entry) => entry.task.slice(0, 30)).join(" | ")
+  );
+
   // 4. Uninstall removes what install added.
   const removed = bridge(installed, "uninstall");
   const afterClaude = JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8"));
@@ -330,6 +491,8 @@ try {
   await ctx?.close().catch(() => undefined);
   bridge(bundle, "stop");
   page.close();
+  discordGateway.close();
+  slackSocket.close();
   fs.rmSync(home, { recursive: true, force: true });
 }
 
