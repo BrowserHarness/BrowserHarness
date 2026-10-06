@@ -103,6 +103,12 @@ export type BridgeLlmRequest = {
   timeout_ms?: number;
 };
 
+export type BridgeChatRequest = {
+  type: "BRIDGE_CHAT";
+  action: "status" | "setup" | "allow" | "remove" | "off";
+  args?: Record<string, string>;
+};
+
 export type RemoteTaskResult = {
   type: "REMOTE_TASK_RESULT";
   id: string;
@@ -123,6 +129,7 @@ export type ExtensionRequest =
   | RemoteTaskResult
   | ChatNotify
   | BridgeLlmRequest
+  | BridgeChatRequest
   | BrowserToolRequest
   | WatchRequest;
 

@@ -47,4 +47,4 @@ export function findGuide(slug: string | undefined): Guide | undefined {
 }
 
 /** Setup guides first in the Help list; the rest are for when something goes wrong. */
-export const SETUP_GUIDES: GuideSlug[] = ["connect-your-ai", "set-up-helper-app"];
+export const SETUP_GUIDES: GuideSlug[] = ["connect-your-ai", "set-up-helper-app", "set-up-chat-apps"];

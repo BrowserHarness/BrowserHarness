@@ -9,6 +9,11 @@ You need: the BrowserHarness Bridge installed and paired (see
 [CODING-AGENTS.md](CODING-AGENTS.md)), Chrome open, and an AI model connected
 in BrowserHarness.
 
+> **Easiest: no commands.** In BrowserHarness, open **Settings → Phone & chat
+> apps**, pick the app, paste the bot's token and press **Connect**. When you
+> message your bot, you appear under **People waiting**: press **Allow**. The
+> commands below do the same from a terminal.
+
 Every app works the same way once it is set up:
 1. Message the bot. Because it doesn't know you yet, it replies with a command
    like `browserharness-bridge discord allow 123456789`.

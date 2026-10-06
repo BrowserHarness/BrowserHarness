@@ -126,6 +126,7 @@ export function createSignalRelay({ number, command = "signal-cli", dataDir, all
     },
     app: relay.app,
     deliver: relay.deliver,
+    allow: relay.allow,
     notify: relay.notify,
     handle
   };

@@ -149,6 +149,7 @@ export function createDiscordRelay({
     },
     app: relay.app,
     deliver: relay.deliver,
+    allow: relay.allow,
     notify: relay.notify,
     handle
   };
