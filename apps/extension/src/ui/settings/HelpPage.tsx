@@ -1,6 +1,9 @@
-import type { ReactNode } from "react";
-import { Box, Button, Divider, Stack, Typography } from "@mui/material";
+import { useEffect, useState, type ReactNode } from "react";
+import { Box, Button, Divider, List, ListItemButton, ListItemIcon, ListItemText, Stack, Typography } from "@mui/material";
 import { MoreDetails, PageTitle, SettingsCard } from "../kit";
+import { Markdown } from "../Markdown";
+import { BackIcon, NextIcon, TipIcon, WarningIcon } from "../icons";
+import { GUIDES, SETUP_GUIDES, findGuide, type Guide } from "../../help/guides";
 import type { SectionId, SectionProps } from "./SettingsShell";
 
 interface Question {
@@ -66,12 +69,81 @@ const QUESTIONS: Question[] = [
   }
 ];
 
+// In the big Settings tab a guide has its own address (settings.html#help/<slug>),
+// so the "Read the guide" buttons can open it. In the side panel it just shows.
+const inSettingsTab = () => location.pathname.endsWith("/settings.html");
+const slugFromHash = () => (inSettingsTab() ? location.hash.match(/^#help\/([a-z0-9-]+)/)?.[1] : undefined);
+
+function useGuideSlug(): [string | undefined, (slug?: string) => void] {
+  const [slug, setSlug] = useState(slugFromHash);
+  useEffect(() => {
+    if (!inSettingsTab()) return;
+    const onHash = () => setSlug(slugFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const open = (next?: string) => {
+    if (inSettingsTab()) location.hash = next ? `help/${next}` : "help";
+    else setSlug(next);
+    window.scrollTo({ top: 0 });
+  };
+  return [slug, open];
+}
+
+function GuideList({ guides, onOpen, icon }: { guides: Guide[]; onOpen: (slug: string) => void; icon: ReactNode }) {
+  return (
+    <List disablePadding>
+      {guides.map((guide) => (
+        <ListItemButton key={guide.slug} onClick={() => onOpen(guide.slug)} sx={{ borderRadius: 1.5, alignItems: "flex-start" }} data-guide-link={guide.slug}>
+          <ListItemIcon sx={{ minWidth: 34, mt: 0.5, color: "text.secondary" }}>{icon}</ListItemIcon>
+          <ListItemText primary={guide.title} secondary={guide.summary} primaryTypographyProps={{ fontWeight: 600 }} />
+          <Box sx={{ mt: 0.75, opacity: 0.6, display: "inline-flex" }}>
+            <NextIcon fontSize="small" />
+          </Box>
+        </ListItemButton>
+      ))}
+    </List>
+  );
+}
+
+function GuideView({ guide, onOpen }: { guide: Guide; onOpen: (slug?: string) => void }) {
+  const related = guide.related.map(findGuide).filter((item): item is Guide => Boolean(item));
+  return (
+    <Stack spacing={2.5} component="article" data-guide-view={guide.slug}>
+      <Box>
+        <Button startIcon={<BackIcon fontSize="small" />} onClick={() => onOpen(undefined)} sx={{ ml: -1 }}>
+          All help
+        </Button>
+      </Box>
+      <PageTitle title={guide.title} intro={guide.summary} />
+      <SettingsCard>
+        <Box sx={{ "& h2": { fontSize: "1.1rem", mt: 2.5, mb: 0.5 }, "& li": { mb: 0.5 } }}>
+          <Markdown text={guide.body} />
+        </Box>
+      </SettingsCard>
+      {related.length > 0 && (
+        <SettingsCard title="You might also need">
+          <GuideList guides={related} onOpen={onOpen} icon={<TipIcon fontSize="small" />} />
+        </SettingsCard>
+      )}
+    </Stack>
+  );
+}
+
 export function HelpPage({ go }: SectionProps) {
   const version = chrome.runtime.getManifest?.().version;
+  const [slug, openGuide] = useGuideSlug();
+  const guide = findGuide(slug);
+  if (guide) return <GuideView guide={guide} onOpen={openGuide} />;
+  const setup = SETUP_GUIDES.map(findGuide).filter((item): item is Guide => Boolean(item));
+  const fixes = GUIDES.filter((item) => !SETUP_GUIDES.includes(item.slug as never));
   return (
     <>
-      <PageTitle title="Help" intro="Simple answers to common questions. Press a question to see the answer." />
+      <PageTitle title="Help" intro="Simple answers to common questions, and step-by-step guides for when something doesn't work." />
       <Stack spacing={2.5}>
+        <SettingsCard title="Getting started">
+          <GuideList guides={setup} onOpen={openGuide} icon={<TipIcon fontSize="small" />} />
+        </SettingsCard>
         <SettingsCard>
           <Stack spacing={0.5} divider={<Divider flexItem />}>
             {QUESTIONS.map((item) => (
@@ -90,10 +162,16 @@ export function HelpPage({ go }: SectionProps) {
             ))}
           </Stack>
         </SettingsCard>
+        <SettingsCard title="When something doesn't work">
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Each guide says why it happens and what to do, one step at a time.
+          </Typography>
+          <GuideList guides={fixes} onOpen={openGuide} icon={<WarningIcon fontSize="small" />} />
+        </SettingsCard>
         <SettingsCard title="For someone helping you">
           <Typography variant="body2">
-            BrowserHarness version {version || "unknown"}. The full guides are in the docs folder that came with the
-            download.
+            BrowserHarness version {version || "unknown"}. When a problem card shows "Show details for someone helping
+            you", the text there is what the AI service or helper app said.
           </Typography>
         </SettingsCard>
       </Stack>

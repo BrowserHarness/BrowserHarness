@@ -6,7 +6,8 @@ import { ThemedRoot } from "./ui/ThemedRoot";
 import { PAGE_ACTIONS, SettingsShell, isSectionId, type SectionId } from "./ui/settings/SettingsShell";
 
 function fromHash(): SectionId | undefined {
-  const id = location.hash.replace(/^#/, "");
+  // "#help/ai-key-rejected" opens Help on that guide.
+  const id = location.hash.replace(/^#/, "").split("/")[0];
   return isSectionId(id) ? id : undefined;
 }
 
@@ -22,7 +23,9 @@ function SettingsPage() {
       mode="page"
       initialSection={section}
       actions={PAGE_ACTIONS}
-      onSectionChange={(next) => history.replaceState(null, "", `#${next}`)}
+      onSectionChange={(next) => {
+        if (fromHash() !== next) history.replaceState(null, "", `#${next}`);
+      }}
     />
   );
 }

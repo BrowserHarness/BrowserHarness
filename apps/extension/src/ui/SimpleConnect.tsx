@@ -9,6 +9,9 @@ import {
   Typography
 } from "@mui/material";
 import { MoreDetails, Note, RecommendedBadge, SettingsCard, StatusPill, Steps } from "./kit";
+import { ProblemCard, SuccessBanner, useSaved } from "./feedback";
+import { diagnoseAi, noModels, type Problem } from "../help/problems";
+import { aiContext, type ConnectFeedback } from "./settings/connect-ai";
 import {
   PROVIDERS,
   type ProviderConfig,
@@ -144,46 +147,60 @@ export function ModelChooser({
   );
 }
 
-function Waiting({ children }: { children: ReactNode }) {
+export function Waiting({ children }: { children: ReactNode }) {
   return (
-    <Stack direction="row" spacing={1} alignItems="center" role="status">
-      <CircularProgress size={16} />
+    <Stack direction="row" spacing={1.25} alignItems="center" role="status" aria-live="polite" sx={{ py: 0.5 }}>
+      <CircularProgress size={18} />
       <Typography variant="body2">{children}</Typography>
     </Stack>
   );
 }
 
-/** Shows how the last check went, in the colours of the copy rulebook. */
-export function TestResult({ state, message }: { state: "idle" | "testing" | "success" | "error"; message: string }) {
-  if (state === "testing") return <Waiting>{message}</Waiting>;
-  if (state === "success") return <Note kind={/can only chat/.test(message) ? "warning" : "success"}>{message}</Note>;
-  if (state === "error") return <Note kind="danger">{message}</Note>;
+/** How the last connect attempt went: a tick, or the reason and the fix. */
+export function TestResult({ feedback, onRetry }: { feedback: ConnectFeedback; onRetry?: () => void }) {
+  if (feedback.state === "testing") return <Waiting>{feedback.message}</Waiting>;
+  if (feedback.state === "success" && feedback.problem) {
+    return <ProblemCard problem={feedback.problem} severity="warning" heading="Saved for chatting only" />;
+  }
+  if (feedback.state === "success") return <SuccessBanner title="Connected">{feedback.message}</SuccessBanner>;
+  if (feedback.state === "error") {
+    return feedback.problem ? (
+      <ProblemCard problem={feedback.problem} heading="Couldn't connect" onRetry={onRetry} />
+    ) : (
+      <ProblemCard problem={diagnoseAi(feedback.message)} heading="Couldn't connect" onRetry={onRetry} />
+    );
+  }
   return null;
 }
 
-const appName = (provider: LocalProvider) => PROVIDERS[provider].label.replace(" (local)", "");
+const appName = (provider: LocalProvider) => PROVIDERS[provider].label.replace(" (local)", "") as "LM Studio" | "Ollama";
+
+type Where = "openrouter" | "local";
 
 /** The three easy ways to connect an AI. */
 export function SimpleConnect({
   onConnect,
-  state,
-  message
+  feedback
 }: {
   onConnect: (config: ProviderConfig) => Promise<void>;
-  state: "idle" | "testing" | "success" | "error";
-  message: string;
+  feedback: ConnectFeedback;
 }) {
+  const saved = useSaved();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [problem, setProblem] = useState<{ where: Where; problem: Problem; retry?: () => void } | null>(null);
   const [local, setLocal] = useState<LocalServer[] | null>(null);
+  const [looked, setLooked] = useState(false);
   const [address, setAddress] = useState("");
   const [openRouter, setOpenRouter] = useState<ProviderAccount | null>(null);
   const [openRouterModels, setOpenRouterModels] = useState<AccountModel[] | null>(null);
-  const [lastUsed, setLastUsed] = useState<"openrouter" | "local" | null>(null);
+  const [lastUsed, setLastUsed] = useState<Where | null>(null);
+  const [lastTry, setLastTry] = useState<(() => void) | null>(null);
 
   const scan = async (extra?: string) => {
     setLocal(null);
-    setLocal(await detectLocalModels(discoverModels, extra));
+    const found = await detectLocalModels(discoverModels, extra);
+    setLocal(found);
+    return found;
   };
 
   const loadOpenRouterModels = async (account: ProviderAccount) => {
@@ -192,39 +209,62 @@ export function SimpleConnect({
       setOpenRouterModels(await listAccountModels(account));
     } catch (err) {
       setOpenRouterModels([]);
-      setError(err instanceof Error ? `Could not load the list of models: ${err.message}` : "Could not load the list of models.");
+      setProblem({ where: "openrouter", problem: diagnoseAi(err, { service: "OpenRouter" }), retry: () => void loadOpenRouterModels(account) });
     }
   };
 
   useEffect(() => {
     void scan();
     void loadAccounts().then((accounts) => {
-      const saved = accounts.find((item) => item.provider === "openrouter" && item.apiKey);
-      if (saved) {
-        setOpenRouter(saved);
-        void loadOpenRouterModels(saved);
+      const savedAccount = accounts.find((item) => item.provider === "openrouter" && item.apiKey);
+      if (savedAccount) {
+        setOpenRouter(savedAccount);
+        void loadOpenRouterModels(savedAccount);
       }
     });
   }, []);
 
-  const run = async (task: () => Promise<void>) => {
+  const run = async (where: Where, task: () => Promise<void>, context?: Parameters<typeof diagnoseAi>[1]) => {
+    setLastUsed(where);
     setBusy(true);
-    setError("");
+    setProblem(null);
+    const retry = () => void run(where, task, context);
+    setLastTry(() => retry);
     try {
       await task();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not connect. Please try again.");
+      setProblem({ where, problem: diagnoseAi(err, context), retry });
     } finally {
       setBusy(false);
     }
   };
 
-  const working = busy || state === "testing";
-  const resultFor = (where: "openrouter" | "local") =>
+  const connectOpenRouter = () =>
+    run(
+      "openrouter",
+      async () => {
+        const account = makeAccount("openrouter", await connectWithOpenRouter());
+        await saveAccount(account);
+        setOpenRouter(account);
+        saved("Signed in to OpenRouter");
+        await loadOpenRouterModels(account);
+      },
+      { service: "OpenRouter" }
+    );
+
+  const lookAgain = () =>
+    run("local", async () => {
+      setLooked(true);
+      const found = await scan(address.trim() || undefined);
+      if (found.length) saved(`Found ${found.map((server) => appName(server.provider)).join(" and ")}`);
+    });
+
+  const working = busy || feedback.state === "testing";
+  const resultFor = (where: Where) =>
     lastUsed === where ? (
       <>
-        {error && <Note kind="danger">{error}</Note>}
-        <TestResult state={state} message={message} />
+        {problem?.where === where && <ProblemCard problem={problem.problem} heading="Couldn't connect" onRetry={problem.retry} />}
+        {!problem && <TestResult feedback={feedback} onRetry={lastTry || undefined} />}
       </>
     ) : null;
 
@@ -255,21 +295,8 @@ export function SimpleConnect({
               ]}
             />
             <Box>
-              <Button
-                variant="contained"
-                size="large"
-                disabled={working}
-                onClick={() => {
-                  setLastUsed("openrouter");
-                  void run(async () => {
-                    const account = makeAccount("openrouter", await connectWithOpenRouter());
-                    await saveAccount(account);
-                    setOpenRouter(account);
-                    await loadOpenRouterModels(account);
-                  });
-                }}
-              >
-                {working && lastUsed === "openrouter" ? "Connecting…" : "Connect"}
+              <Button variant="contained" size="large" disabled={working} onClick={() => void connectOpenRouter()}>
+                {working && lastUsed === "openrouter" ? "Waiting for OpenRouter…" : "Connect"}
               </Button>
             </Box>
           </>
@@ -282,10 +309,9 @@ export function SimpleConnect({
               label="OpenRouter model"
               models={openRouterModels}
               disabled={working}
-              onUse={(model) => {
-                setLastUsed("openrouter");
-                void run(() => onConnect({ provider: "openrouter", apiKey: openRouter.apiKey, model }));
-              }}
+              onUse={(model) =>
+                void run("openrouter", () => onConnect({ provider: "openrouter", apiKey: openRouter.apiKey, model }), { service: "OpenRouter", model })
+              }
             />
             <Note kind="tip" title="Not sure which one to pick?">
               Choose a recent, well-known model from a big company, for example a newer Claude, GPT or Gemini. Bigger
@@ -319,23 +345,24 @@ export function SimpleConnect({
               {` (${server.models.length} model${server.models.length === 1 ? "" : "s"})`}
             </StatusPill>
             {server.models.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                No model is loaded yet. Load one in {appName(server.provider)}, then press Look again.
-              </Typography>
+              <ProblemCard problem={noModels({ local: true, app: appName(server.provider) })} severity="warning" onRetry={() => void lookAgain()} retryLabel="Look again" />
             ) : (
               <ModelChooser
                 label={`${appName(server.provider)} model`}
                 models={server.models}
                 disabled={working}
-                onUse={(model) => {
-                  setLastUsed("local");
-                  void run(() => onConnect({ provider: server.provider, apiKey: "", model, baseUrl: server.baseUrl }));
-                }}
+                onUse={(model) =>
+                  void run(
+                    "local",
+                    () => onConnect({ provider: server.provider, apiKey: "", model, baseUrl: server.baseUrl }),
+                    aiContext({ provider: server.provider, model })
+                  )
+                }
               />
             )}
           </Stack>
         ))}
-        {local && local.length === 0 && (
+        {local && local.length === 0 && !looked && (
           <Steps
             steps={[
               <>Install LM Studio (lmstudio.ai) or Ollama (ollama.com) and download a model in it.</>,
@@ -347,29 +374,30 @@ export function SimpleConnect({
             ]}
           />
         )}
-        {local !== null && (
-          <MoreDetails summary="My AI app shows a different address">
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "flex-start" }}>
-              <TextField
-                size="small"
-                label="Server address (optional)"
-                placeholder="http://127.0.0.1:1234"
-                helperText="Copy it from your AI app, for example http://127.0.0.1:1234"
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-                sx={{ flex: 1 }}
-              />
-            </Stack>
-          </MoreDetails>
+        {local && local.length === 0 && looked && (
+          <ProblemCard
+            problem={diagnoseAi("Failed to fetch", { local: true })}
+            heading="Nothing found"
+            onRetry={() => void lookAgain()}
+            retryLabel="Look again"
+          />
         )}
         {local !== null && (
+          <MoreDetails summary="My AI app shows a different address">
+            <TextField
+              size="small"
+              fullWidth
+              label="Server address (optional)"
+              placeholder="http://127.0.0.1:1234"
+              helperText="Copy it from your AI app, for example http://127.0.0.1:1234"
+              value={address}
+              onChange={(event) => setAddress(event.target.value)}
+            />
+          </MoreDetails>
+        )}
+        {local !== null && !(local.length === 0 && looked) && (
           <Box>
-            <Button variant="outlined" onClick={() => {
-                setLastUsed("local");
-                void run(() => scan(address.trim() || undefined));
-              }}
-              disabled={working}
-            >
+            <Button variant="outlined" onClick={() => void lookAgain()} disabled={working}>
               Look again
             </Button>
           </Box>

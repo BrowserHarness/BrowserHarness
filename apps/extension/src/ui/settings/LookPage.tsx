@@ -3,13 +3,18 @@ import { Stack } from "@mui/material";
 import { ChoiceCards, Note, PageTitle, SettingsCard } from "../kit";
 import { DEFAULT_PREFERENCES, loadPreferences, updatePreferences, type AppearanceMode, type TextSize, type UserPreferences } from "../../settings/preferences";
 import type { SectionProps } from "./SettingsShell";
+import { useSaved } from "../feedback";
 
 export function LookPage(_props: SectionProps) {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   useEffect(() => {
     void loadPreferences().then(setPreferences);
   }, []);
-  const set = async (patch: Partial<UserPreferences>) => setPreferences(await updatePreferences(patch));
+  const saved = useSaved();
+  const set = async (patch: Partial<UserPreferences>, note: string) => {
+    setPreferences(await updatePreferences(patch));
+    saved(note);
+  };
 
   return (
     <>
@@ -21,7 +26,7 @@ export function LookPage(_props: SectionProps) {
             help="How big the words are in the chat and in Settings."
             columns={3}
             value={preferences.textSize}
-            onChange={(value) => void set({ textSize: value })}
+            onChange={(value) => void set({ textSize: value }, "Saved. Text size changed")}
             choices={[
               { value: "normal", title: "Normal", recommended: true, description: "Fits the most on the screen." },
               { value: "large", title: "Large", description: "A little bigger. Easier on the eyes." },
@@ -38,7 +43,7 @@ export function LookPage(_props: SectionProps) {
             help="Dark is easier on the eyes at night. Light is easier to read in a bright room."
             columns={3}
             value={preferences.appearance}
-            onChange={(value) => void set({ appearance: value })}
+            onChange={(value) => void set({ appearance: value }, value === "dark" ? "Saved. Always dark" : value === "light" ? "Saved. Always light" : "Saved. Same as your computer")}
             choices={[
               {
                 value: "system",

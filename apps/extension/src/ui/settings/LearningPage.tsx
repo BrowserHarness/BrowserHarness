@@ -4,6 +4,7 @@ import { PageTitle, SettingsCard, ToggleSetting, useConfirm } from "../kit";
 import { DEFAULT_PREFERENCES, loadPreferences, updatePreferences, type UserPreferences } from "../../settings/preferences";
 import { clearTaskHistory } from "../../runtime/history";
 import type { SectionProps } from "./SettingsShell";
+import { useSaved } from "../feedback";
 
 export function LearningPage({ go }: SectionProps) {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
@@ -13,7 +14,11 @@ export function LearningPage({ go }: SectionProps) {
     void loadPreferences().then(setPreferences);
   }, []);
 
-  const set = async (patch: Partial<UserPreferences>) => setPreferences(await updatePreferences(patch));
+  const saved = useSaved();
+  const set = async (patch: Partial<UserPreferences>) => {
+    setPreferences(await updatePreferences(patch));
+    saved(Object.values(patch)[0] ? "Saved. Turned on" : "Saved. Turned off");
+  };
 
   const setHistory = async (keep: boolean) => {
     if (!keep) {

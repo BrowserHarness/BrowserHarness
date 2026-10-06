@@ -4,6 +4,7 @@ import { ChoiceCards, Note, Outcomes, PageTitle, SettingsCard, useConfirm, type 
 import { DEFAULT_PREFERENCES, loadPreferences, updatePreferences, type ApprovalMode } from "../../settings/preferences";
 import { loadSiteGrants, removeGrant, saveSiteGrants, SITE_GRANTS_KEY, type SiteGrant } from "../../settings/site-grants";
 import type { SectionProps } from "./SettingsShell";
+import { useSaved } from "../feedback";
 
 export const APPROVAL_CHOICES: Choice<ApprovalMode>[] = [
   {
@@ -37,6 +38,7 @@ export function SafetyPage(_props: SectionProps) {
   const [mode, setMode] = useState<ApprovalMode>(DEFAULT_PREFERENCES.approvalMode);
   const [grants, setGrants] = useState<SiteGrant[]>([]);
   const [dialog, confirm] = useConfirm();
+  const saved = useSaved();
 
   useEffect(() => {
     void loadPreferences().then((preferences) => setMode(preferences.approvalMode));
@@ -52,6 +54,7 @@ export function SafetyPage(_props: SectionProps) {
   const choose = async (next: ApprovalMode) => {
     setMode(next);
     await updatePreferences({ approvalMode: next });
+    saved(`Saved. ${APPROVAL_CHOICES.find((choice) => choice.value === next)?.title}`);
   };
 
   const stopAllowing = async (host: string) => {
@@ -64,6 +67,7 @@ export function SafetyPage(_props: SectionProps) {
     const next = removeGrant(grants, host);
     await saveSiteGrants(next);
     setGrants(next);
+    saved(`Saved. It asks you again on ${host}`);
   };
 
   return (

@@ -6,6 +6,7 @@ import "@fontsource/inter/600.css";
 import "@fontsource/poppins/500.css";
 import "@fontsource/poppins/600.css";
 import "@fontsource/poppins/700.css";
+import { SavedNotes } from "./feedback";
 import { createBrowserHarnessTheme, resolvePaletteMode } from "./theme";
 import {
   DEFAULT_PREFERENCES,
@@ -48,7 +49,7 @@ export function ThemedRoot({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {children}
+      <SavedNotes>{children}</SavedNotes>
     </ThemeProvider>
   );
 }
