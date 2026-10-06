@@ -176,11 +176,11 @@ test("config edits handle empty files and Windows paths", () => {
 test("login service files start the Bridge on every platform", () => {
   const base = { home: "/home/a", nodePath: "/usr/bin/node", cliPath: "/home/a/bh.mjs", env: { PATH: "/usr/bin:/home/a/.local/bin" } };
   const linux = serviceDefinition({ ...base, platform: "linux" });
-  assert.equal(linux.file, "/home/a/.config/systemd/user/browserharness-bridge.service");
+  assert.equal(linux.file, path.join("/home/a/.config/systemd/user/browserharness-bridge.service"));
   assert.match(linux.content, /ExecStart="\/usr\/bin\/node" "\/home\/a\/bh\.mjs" serve/);
   assert.match(linux.content, /Environment="PATH=\/usr\/bin:\/home\/a\/\.local\/bin"/);
   const mac = serviceDefinition({ ...base, platform: "darwin" });
-  assert.equal(mac.file, "/home/a/Library/LaunchAgents/com.browserharness.bridge.plist");
+  assert.equal(mac.file, path.join("/home/a/Library/LaunchAgents/com.browserharness.bridge.plist"));
   assert.match(mac.content, /<string>serve<\/string>/);
   assert.match(mac.content, /<key>RunAtLoad<\/key><true\/>/);
   const windows = serviceDefinition({ ...base, platform: "win32", env: { APPDATA: "C:\\Users\\a\\AppData\\Roaming" } });
