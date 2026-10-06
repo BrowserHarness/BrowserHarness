@@ -1,5 +1,6 @@
 // Chrome cannot show the microphone prompt inside the side panel, so the
 // side panel opens this page once; the permission then applies to it too.
+import "./plain-page-fonts";
 const statusLine = document.getElementById("status");
 
 navigator.mediaDevices

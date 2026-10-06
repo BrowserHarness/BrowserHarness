@@ -53,6 +53,7 @@ import { SkillsView } from "../SkillsView";
 import { ScheduledView } from "../ScheduledView";
 import { HistoryView } from "../HistoryView";
 import { handToSidePanel } from "./handoff";
+import { HEADING } from "../theme";
 
 export type SectionId =
   | "home"
@@ -213,7 +214,7 @@ function Brand() {
     <Stack direction="row" spacing={1.25} alignItems="center">
       <Box component="img" src="/icons/icon48.png" alt="" sx={{ width: 32, height: 32, borderRadius: 1.5 }} />
       <Box>
-        <Typography variant="subtitle1" lineHeight={1.2}>
+        <Typography variant="subtitle1" lineHeight={1.2} fontFamily={HEADING}>
           BrowserHarness
         </Typography>
         <Typography variant="caption" color="text.secondary">

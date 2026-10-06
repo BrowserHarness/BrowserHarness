@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Sidebar, type SidebarScreen } from "./Sidebar";
+import { HEADING } from "./theme";
 import { SpaceBadge, saveTextFile, useSpaces } from "./spaces-ui";
 import {
   chatContextPrompt,
@@ -1531,7 +1532,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           </Tooltip>
           <Box sx={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 1 }}>
             {fullPage ? (
-              <Typography variant="subtitle1" noWrap sx={{ minWidth: 0 }} data-testid="chat-title">
+              <Typography variant="subtitle1" noWrap sx={{ minWidth: 0, fontFamily: HEADING }} data-testid="chat-title">
                 {messages.length ? chatTitle(messages) : "New chat"}
               </Typography>
             ) : (
@@ -1981,7 +1982,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
           variant="outlined"
           data-testid="composer"
           sx={{
-            borderRadius: 4,
+            // A square chat box, by design.
+            borderRadius: 0,
             px: 1.25,
             pt: 1,
             pb: 0.75,

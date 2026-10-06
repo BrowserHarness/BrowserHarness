@@ -1,5 +1,6 @@
 // The page a scheduled task runs in. The service worker opens it in a
 // background tab when the task's alarm fires; it closes itself when done.
+import "./plain-page-fonts";
 import { saveTaskHistoryEntry } from "./runtime/history";
 import { pinSpace } from "./runtime/spaces";
 import { runScheduledTask, runUnattendedTask } from "./runtime/scheduled-run";
