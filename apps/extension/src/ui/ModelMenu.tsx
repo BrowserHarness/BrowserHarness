@@ -29,11 +29,13 @@ import {
   type ProviderAccount
 } from "../settings/account-store";
 import { CheckIcon, ChevronDownIcon } from "./icons";
+import { diagnoseAi, type Problem } from "../help/problems";
+import { guideUrl } from "../help/links";
 
 interface AccountRow {
   account: ProviderAccount;
   models: AccountModel[];
-  error?: string;
+  error?: Problem;
 }
 
 /** Most a single service shows before the user narrows it with search. */
@@ -60,17 +62,20 @@ export function browserLabel(health: CapabilityHealth | undefined): string | und
 }
 
 /**
- * The model menu at the top of the chat: every model from every connected
+ * The model menu under the chat box: every model from every connected
  * service, searchable, one click to switch (like claude.ai or chatgpt.com).
  */
 export function ModelMenu({
   current,
   onChanged,
-  onManage
+  onManage,
+  above = false
 }: {
   current: ProviderConnection | null;
   onChanged: () => void | Promise<void>;
   onManage: () => void;
+  /** Open upwards, for the menu under the chat box. */
+  above?: boolean;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [rows, setRows] = useState<AccountRow[] | null>(null);
@@ -92,7 +97,7 @@ export function ModelMenu({
             return {
               account,
               models: [],
-              error: error instanceof Error ? error.message : "Could not load models"
+              error: diagnoseAi(error, { service: accountLabel(account) })
             };
           }
         })
@@ -142,7 +147,7 @@ export function ModelMenu({
             ? `${current.model}: browser-ready`
             : current?.model
         }
-        sx={{ maxWidth: 180, textTransform: "none" }}
+        sx={{ maxWidth: 180, textTransform: "none", ...(above && { color: "text.secondary", fontWeight: 600, borderRadius: 99, px: 1.25 }) }}
       >
         <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {current?.model ? shortModelName(current.model) : "Connect AI"}
@@ -152,8 +157,8 @@ export function ModelMenu({
         open={Boolean(anchor)}
         anchorEl={anchor}
         onClose={() => setAnchor(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-        transformOrigin={{ vertical: "top", horizontal: "right" }}
+        anchorOrigin={{ vertical: above ? "top" : "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: above ? "bottom" : "top", horizontal: "right" }}
         slotProps={{ paper: { sx: { width: 320, maxHeight: 460, display: "flex", flexDirection: "column" } } }}
       >
         <Box sx={{ p: 1.5, pb: 1 }}>
@@ -187,7 +192,10 @@ export function ModelMenu({
                     </ListSubheader>
                     {row.error && (
                       <Typography variant="caption" color="error" sx={{ px: 2, display: "block" }}>
-                        {row.error}
+                        {row.error.title}.{" "}
+                        <Box component="a" href={guideUrl(row.error.guide)} target="_blank" rel="noopener" sx={{ color: "inherit", fontWeight: 600 }}>
+                          How to fix it
+                        </Box>
                       </Typography>
                     )}
                     {!row.error && row.models.length === 0 && (
