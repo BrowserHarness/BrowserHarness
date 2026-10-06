@@ -103,6 +103,19 @@ export function diagnoseAi(error: unknown, context: AiContext = {}): Problem {
     };
   }
   if (status === 401 || status === 402 || /unauthori[sz]ed|invalid api key|incorrect api key|invalid_api_key|authentication|insufficient credits|payment required/i.test(detail)) {
+    if (context.local) {
+      return {
+        title: `${app} asked for a key`,
+        reason: `${app} is set to need a secret key, and BrowserHarness doesn't have the right one.`,
+        fixes: [
+          `In ${app}, look in its server settings for a key, or turn that requirement off.`,
+          "If it shows a key, paste it under Settings → Your AI → More ways to connect.",
+          "Press Test and save again."
+        ],
+        guide: "ai-key-rejected",
+        detail
+      };
+    }
     return {
       title: `${service} said no to your key`,
       reason: "The secret key is wrong or was deleted, or your account needs credit before it can be used.",

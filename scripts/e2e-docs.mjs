@@ -133,7 +133,7 @@ try {
     await box.fill(text);
     await side.getByRole("button", { name: "Send" }).click();
     await side
-      .waitForFunction(() => /Wrote the script|loop|failed|error/i.test(document.body.innerText.split("Agent activity").pop() || ""), null, { timeout: 45000 })
+      .waitForFunction(() => /Wrote the script|loop|failed|error/i.test(document.body.innerText.split(/What I.m doing|What I did/).pop() || ""), null, { timeout: 45000 })
       .catch(() => {});
     await side.waitForTimeout(500);
   };

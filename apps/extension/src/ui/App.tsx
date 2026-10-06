@@ -29,8 +29,13 @@ import {
   MemoryIcon,
   SettingsIcon,
   SkillsIcon,
-  StopIcon
+  StopIcon,
+  WarningIcon,
+  YesIcon
 } from "./icons";
+import { ProblemCard } from "./feedback";
+import { cantUseBrowser, diagnoseAi, type Problem } from "../help/problems";
+import { aiContext } from "./settings/connect-ai";
 import { SkillsView } from "./SkillsView";
 import {
   loadSiteCommands,
@@ -120,6 +125,7 @@ import {
 } from "../runtime/prompt-polish";
 import {
   Alert,
+  AlertTitle,
   AppBar,
   Box,
   Button,
@@ -174,7 +180,16 @@ type Message = {
   skillNote?: string;
   /** A Skill learned on its own from this answer, which the person can undo. */
   autoSkill?: { id: string; slug: string };
+  /** Why a task couldn't finish, with the fix and a guide. */
+  problem?: { problem: Problem; retry?: string; openAi?: boolean };
 };
+
+/** Thrown when the chosen AI failed the browser check, so the card can say so plainly. */
+class CantUseBrowserError extends Error {
+  constructor(readonly model: string) {
+    super(`${model} did not pass the browser-control check. Pick another model from the model menu at the top.`);
+  }
+}
 
 const RESERVED_COMMANDS = BUILT_IN_COMMANDS.map((command) => command.name);
 type Activity = { id: string; text: string; state: "working" | "done" | "error" };
@@ -297,6 +312,13 @@ export function App() {
       { id, role: "assistant", text, learned }
     ]);
     return id;
+  };
+
+  const addProblemMessage = (problem: Problem, options: { retry?: string; openAi?: boolean } = {}) => {
+    setMessages((items) => [
+      ...items,
+      { id: crypto.randomUUID(), role: "assistant", text: `${problem.title}. ${problem.reason}`, problem: { problem, ...options } }
+    ]);
   };
 
   useEffect(() => {
@@ -592,13 +614,13 @@ export function App() {
     hostOverride?: string
   ) => {
     if (autoApproves(approvalMode.current, description)) {
-      addActivity(`Approved automatically (automatic mode): ${description}`, "done");
+      addActivity(`Went ahead without asking (you chose not to be asked): ${description}`, "done");
       return true;
     }
     const host =
       hostOverride ?? (approvalHost.current || safeHostname(tab?.url));
     if (host && isHostGranted(siteGrants.current, host)) {
-      addActivity(`Approved automatically (always allowed on ${host})`, "done");
+      addActivity(`Went ahead without asking (you allowed ${host}): ${description}`, "done");
       return true;
     }
     return new Promise<boolean>((resolve) =>
@@ -1049,7 +1071,7 @@ export function App() {
           finishActivity(activity);
           if (routed.usedFallback) {
             const fallbackActivity = addActivity(
-              "Primary unavailable — used fallback model",
+              "Your main AI didn't answer, so your backup AI did",
               "done"
             );
             finishActivity(fallbackActivity);
@@ -1075,9 +1097,7 @@ export function App() {
             : null;
 
       if (!agentPrimary) {
-        throw new Error(
-          `${primary.model} did not pass the browser-control check. Pick another model from the model menu at the top.`
-        );
+        throw new CantUseBrowserError(primary.model);
       }
 
       const agentFallback =
@@ -1166,15 +1186,11 @@ export function App() {
         error instanceof DOMException &&
         error.name === "AbortError"
       ) {
-        addAssistantMessage(
-          "The model request was interrupted unexpectedly. Please try again."
-        );
+        addProblemMessage(diagnoseAi("Request timed out: the AI stopped answering partway", aiContext(primary)), { retry: typed });
+      } else if (error instanceof CantUseBrowserError) {
+        addProblemMessage(cantUseBrowser(error.model), { openAi: true });
       } else {
-        addAssistantMessage(
-          error instanceof Error
-            ? error.message
-            : "BrowserHarness hit an unexpected error."
-        );
+        addProblemMessage(diagnoseAi(error, aiContext(primary)), { retry: typed });
       }
     } finally {
       requestAbort.current = null;
@@ -1310,13 +1326,8 @@ export function App() {
         }}
       >
         <Toolbar variant="dense" sx={{ minHeight: 56, gap: 1 }}>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="h6" noWrap>
-              BrowserHarness
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              {safeHostname(tab?.url) || "No supported tab"}
-            </Typography>
+          <Box sx={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center" }}>
+            <Box component="img" src="/icons/icon48.png" alt="BrowserHarness" title="BrowserHarness" sx={{ width: 28, height: 28, borderRadius: 1.25 }} />
           </Box>
 
           {running && (
@@ -1377,12 +1388,14 @@ export function App() {
 
       <Box sx={{ px: 2, pt: 1.5 }}>
         <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }}>
-          <Chip size="small" label="Personal" variant="outlined" />
-          <Chip
-            size="small"
-            label={tab?.title || "Current tab"}
-            variant="outlined"
-          />
+          {/^https?:/.test(tab?.url || "") && <Tooltip title="BrowserHarness works on the tab you are looking at">
+            <Chip
+              size="small"
+              label={`On: ${tab?.title || safeHostname(tab?.url) || "this tab"}`}
+              variant="outlined"
+              sx={{ maxWidth: "100%" }}
+            />
+          </Tooltip>}
           {recording && (
             <Chip
               size="small"
@@ -1403,16 +1416,22 @@ export function App() {
             sx={{ minHeight: 300, textAlign: "center" }}
           >
             <Typography variant="h5">Give your browser a task.</Typography>
-            <Typography color="text.secondary" sx={{ maxWidth: 300 }}>
-              Ask BrowserHarness to read, navigate, compare, fill, or work across tabs.
+            <Typography color="text.secondary" sx={{ maxWidth: 320 }}>
+              Type what you want, the way you would ask a person. BrowserHarness reads pages, clicks and types for
+              you, and asks before anything important.
             </Typography>
             {!primary && (
-              <Button variant="contained" onClick={() => setView("settings")}>
-                Connect your AI
-              </Button>
+              <Stack spacing={1} alignItems="center">
+                <Typography variant="body2" color="text.secondary">
+                  First, connect an AI. It takes about a minute.
+                </Typography>
+                <Button variant="contained" size="large" onClick={() => openSettings("ai")}>
+                  Connect your AI
+                </Button>
+              </Stack>
             )}
             <Stack direction="row" flexWrap="wrap" gap={1} justifyContent="center">
-              {["Summarize this page", "Find the best option", "Fill this form"].map(
+              {["Summarize this page", "Find the cheapest option here", "Help me fill in this form"].map(
                 (suggestion) => (
                   <Chip
                     key={suggestion}
@@ -1437,12 +1456,26 @@ export function App() {
                   variant={message.role === "user" ? "outlined" : "elevation"}
                   elevation={0}
                   sx={{
-                    p: 1.5,
+                    p: message.problem ? 0 : 1.5,
                     bgcolor:
                       message.role === "user" ? "action.hover" : "transparent"
                   }}
                 >
-                  {message.role === "assistant" ? (
+                  {message.problem ? (
+                    <ProblemCard
+                      problem={message.problem.problem}
+                      heading="Couldn't finish"
+                      severity={message.problem.openAi ? "warning" : "error"}
+                      retryLabel={message.problem.openAi ? "Choose another AI" : "Try again"}
+                      onRetry={
+                        message.problem.openAi
+                          ? () => openSettings("ai")
+                          : message.problem.retry && !running
+                            ? () => void runTask(message.problem!.retry)
+                            : undefined
+                      }
+                    />
+                  ) : message.role === "assistant" ? (
                     <>
                       <Markdown text={message.text} />
                       {markdownTables(message.text).map((table, index, all) => (
@@ -1542,8 +1575,8 @@ export function App() {
 
             {activities.length > 0 && (
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Agent activity
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  {running ? "What I'm doing" : "What I did"}
                 </Typography>
                 <Stack spacing={0.75} mt={1}>
                   {activities.map((activity) => (
@@ -1556,8 +1589,12 @@ export function App() {
                       {activity.state === "working" ? (
                         <CircularProgress size={13} />
                       ) : (
-                        <Box component="span">
-                          {activity.state === "done" ? "✓" : "!"}
+                        <Box
+                          component="span"
+                          aria-label={activity.state === "done" ? "Done" : "Didn't work"}
+                          sx={{ display: "inline-flex", color: activity.state === "done" ? "success.main" : "warning.main" }}
+                        >
+                          {activity.state === "done" ? <YesIcon fontSize="small" /> : <WarningIcon fontSize="small" />}
                         </Box>
                       )}
                       <Typography variant="body2">{activity.text}</Typography>
@@ -1596,6 +1633,7 @@ export function App() {
                   </Stack>
                 }
               >
+                <AlertTitle>Is it OK to go ahead?</AlertTitle>
                 BrowserHarness wants to: {approval.description}
               </Alert>
             )}

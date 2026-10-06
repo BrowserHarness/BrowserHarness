@@ -29,6 +29,9 @@ BrowserHarness tried your AI service and it answered "not allowed".
 
 If you connected with the OpenRouter **Connect** button, disconnect OpenRouter under **Services you've connected** and connect again.
 
+## If your AI runs on this computer
+LM Studio and Ollama don't need a key unless you set one. If BrowserHarness says your app asked for a key, look in the app's server settings: either turn the key off, or copy the key it shows and paste it under **Settings → Your AI → More ways to connect**. Then press **Test and save**.
+
 ## Related
 - [[knowledge/help/connect-your-ai]]
 - [[knowledge/help/ai-model-not-found]]
