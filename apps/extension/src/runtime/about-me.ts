@@ -8,6 +8,8 @@ export interface AboutMeFact {
   text: string;
   source: "you" | "learned";
   created_at: string;
+  /** Facts about the same thing (where I live, my name) replace each other. */
+  topic?: string;
 }
 
 const KEY = "browserharness.aboutMe";
@@ -37,16 +39,44 @@ async function store(facts: AboutMeFact[]): Promise<void> {
   await chrome.storage.local.set({ [KEY]: facts.slice(0, MAX_FACTS) });
 }
 
-/** Adds facts that are new and safe to keep; returns the ones added. */
+/**
+ * What a fact is about, when only one such fact can be true at a time:
+ * "I live in Mumbai" replaces "I live in Pune".
+ */
+export function factTopic(text: string): string | undefined {
+  const value = text.toLowerCase();
+  if (/^my name is\b/.test(value)) return "name";
+  if (/^i like to be called\b/.test(value)) return "nickname";
+  if (/^i (live|am based|'m based) in\b/.test(value)) return "home";
+  if (/^i work (at|for)\b/.test(value)) return "work";
+  const favourite = /^my favou?rite ([a-z ]{2,30}) is\b/.exec(value);
+  if (favourite) return `favourite:${favourite[1].trim()}`;
+  const setting = /^my (currency|budget|timezone|time zone|language) is\b/.exec(value);
+  if (setting) return setting[1].replace(" ", "");
+  return undefined;
+}
+
+/**
+ * Adds facts that are new and safe to keep; a fact on the same topic as an
+ * older one replaces it. Returns the ones added.
+ */
 export async function addFacts(texts: string[], source: AboutMeFact["source"]): Promise<AboutMeFact[]> {
-  const facts = await loadAboutMe();
+  let facts = await loadAboutMe();
   const known = new Set(facts.map((fact) => fact.text.toLowerCase()));
   const added: AboutMeFact[] = [];
   for (const text of texts) {
     const value = clean(text);
     if (!isStorableFact(value) || known.has(value.toLowerCase())) continue;
     known.add(value.toLowerCase());
-    added.push({ id: crypto.randomUUID(), text: value, source, created_at: new Date().toISOString() });
+    const topic = factTopic(value);
+    if (topic) facts = facts.filter((fact) => (fact.topic ?? factTopic(fact.text)) !== topic);
+    added.push({
+      id: crypto.randomUUID(),
+      text: value,
+      source,
+      created_at: new Date().toISOString(),
+      ...(topic ? { topic } : {})
+    });
   }
   if (added.length) await store([...added, ...facts]);
   return added;
@@ -81,7 +111,7 @@ export async function clearAboutMe(): Promise<void> {
 const PATTERNS: Array<[RegExp, (match: RegExpExecArray) => string]> = [
   [/\bmy name is ([\p{L}][\p{L}'’ -]{0,40}?)(?=[,.;!?]|\band\b|\bbut\b|$)/iu, (m) => `My name is ${m[1]}`],
   [/\bcall me ([\p{L}][\p{L}'’ -]{0,30}?)(?=[,.;!?]|\band\b|\bbut\b|$)/iu, (m) => `I like to be called ${m[1]}`],
-  [/\bi live in ([\p{L}][\p{L}0-9'’ ,-]{1,50}?)(?=[.;!?]|\band\b|\bbut\b|$)/iu, (m) => `I live in ${m[1]}`],
+  [/\bi live in ([\p{L}][\p{L}0-9'’ ,-]{1,50}?)(?=[.;!?]|\band\b|\bbut\b|$)/iu, (m) => `I live in ${m[1].replace(/\s+(now|these days)$/i, "")}`],
   [/\bi(?:'m| am) based in ([\p{L}][\p{L}'’ ,-]{1,50}?)(?=[.;!?]|\band\b|\bbut\b|$)/iu, (m) => `I live in ${m[1]}`],
   [/\bi (?:usually |always )?prefer ([^.;!?\n]{3,100})/iu, (m) => `I prefer ${m[1]}`],
   [/\bi always ([^.;!?\n]{3,100})/iu, (m) => `I always ${m[1]}`],
@@ -104,6 +134,49 @@ export function factsInMessage(text: string): string[] {
     }
   }
   return found.slice(0, 5);
+}
+
+/** Messages that may say something lasting about the person, worth a closer look. */
+export function mightStateFacts(text: string): boolean {
+  return /\b(i am|i'm|i work|i have|i use|i like|i love|i hate|i don't|i do not|i moved|i live|i usually|i own|i drive|i speak|i study|my (wife|husband|partner|son|daughter|kids?|children|family|company|team|job|office|home|car|budget|size|birthday)|we are|we're|we live|our (company|team|family|home))\b/i.test(
+    text
+  );
+}
+
+const EXTRACT_MARKER = "EXTRACT_FACTS";
+
+/** Asks the model for lasting facts in a message, as first-person sentences. */
+export function factExtractionPrompt(message: string, known: AboutMeFact[]): string {
+  return [
+    EXTRACT_MARKER,
+    "From the person's message below, list lasting facts about them that would help an assistant later: name, where they live, where they work, family, preferences, tools and sites they use, regular plans.",
+    "Write each as a short first-person sentence, like “I live in Mumbai” or “I prefer aisle seats”.",
+    "Skip anything temporary or about this one request. Never include passwords, card, account or ID numbers, or anything secret.",
+    known.length ? `Already known (do not repeat): ${known.slice(0, 30).map((fact) => fact.text).join("; ")}` : "",
+    "Reply with only a JSON array of strings, or [] if there is nothing lasting.",
+    "",
+    "MESSAGE:",
+    message.slice(0, 2000)
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The facts in the model's reply, keeping only safe, short sentences. */
+export function parseExtractedFacts(reply: string): string[] {
+  const match = /\[[\s\S]*\]/.exec(reply);
+  if (!match) return [];
+  try {
+    const value = JSON.parse(match[0]);
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map(clean)
+      .filter((fact) => isStorableFact(fact) && fact.length <= MAX_FACT)
+      .slice(0, 5);
+  } catch {
+    return [];
+  }
 }
 
 /** The block added to every request so the agent knows the person. */

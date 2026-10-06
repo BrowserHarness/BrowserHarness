@@ -74,7 +74,12 @@ export function MemoryView({ onBack }: { onBack: () => void }) {
       </Stack>
       <Typography variant="body2" color="text.secondary" mb={2}>
         BrowserHarness keeps these facts in mind for every task, so you don't have to repeat yourself. They stay on
-        this device. Type <code>/remember</code> in the chat to add one.
+        this device. Type <code>/remember</code> in the chat to add one. When something changes, like where you live,
+        the new fact replaces the old one.
+      </Typography>
+      <Typography variant="body2" color="text.secondary" mb={2}>
+        It also remembers your past conversations: ask “what did I find last week about…?” or type{" "}
+        <code>/recall</code> and a few words. Turn off task history in Settings to stop this.
       </Typography>
 
       <Stack direction="row" spacing={1} mb={1}>
