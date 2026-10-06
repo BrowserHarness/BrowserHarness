@@ -64,6 +64,8 @@ export interface MemoryCandidate {
     user_message?: string;
     /** The sentence the candidate was found in, for scope words ("for this project", "across all Spaces"). */
     said_in?: string;
+    /** For a "Keep it" tap: where the offer came from (the person's message). Kept as the record's origin, marked accepted. */
+    offered_from?: CandidateOrigin;
   };
   requested_scope?: "space" | "global";
   /** Said for this Space on purpose ("In this Space…"). */
@@ -103,6 +105,8 @@ export interface MemoryWriteResult {
   /** Plain words, safe to show. */
   reason: string;
   sensitive?: SensitiveReason;
+  /** Where the candidate came from, so an offer kept later keeps its origin. */
+  origin?: CandidateOrigin;
   /** For a decision candidate the person can save with one tap. */
   decision?: { subject: string; value: string; rationale?: string };
 }

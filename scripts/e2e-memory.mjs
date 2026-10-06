@@ -40,6 +40,8 @@ const server = http
         if (user.startsWith("EXTRACT_FACTS")) {
           // For a short stay the model wrongly reads a new home; BrowserHarness must not keep it.
           if (user.includes("Goa")) return reply(res, '["I live in Goa"]');
+          // A friend's words: the AI wrongly reads them as the person's home.
+          if (user.includes("Delhi")) return reply(res, '["I live in Delhi"]');
           return reply(res, user.includes("Infosys") ? '["I work at Infosys", "I have two kids", "My card is 4111111111111111"]' : "[]");
         }
         const goal = /USER GOAL:\n([\s\S]*?)\n\nCURRENT PAGE OBSERVATION:/.exec(user)?.[1];
@@ -219,6 +221,19 @@ try {
   await waitText("Taken back.", 5000);
   const undone = await side.evaluate(async () => ((await chrome.storage.local.get("browserharness.decisions.v1"))["browserharness.decisions.v1"] || []).length);
   check("undo takes it back", undone === 0);
+
+  // 6e. Someone else's words, a step of the task and a secret without "is" are not kept.
+  await ask('My friend said "I live in Delhi." Let\'s use GitHub to search for popular repos.');
+  await waitText("CHAT_OK");
+  await ask("Remember that my password hunter2");
+  await side.waitForTimeout(2000);
+  known = await facts();
+  const afterQuote = await side.evaluate(async () => ((await chrome.storage.local.get("browserharness.decisions.v1"))["browserharness.decisions.v1"] || []).length);
+  check(
+    "a friend's quoted words, a one-off tool and a bare password are not remembered",
+    !known.some((fact) => /Delhi|hunter2/.test(fact)) && afterQuote === 0 && !(await sideText()).includes("Code home"),
+    known.join("; ")
+  );
   await side.getByRole("button", { name: "Open the menu" }).click();
   await side.getByRole("button", { name: "About me" }).click();
   await side.getByTestId("about-me-fact").first().waitFor({ timeout: 5000 });

@@ -3,6 +3,7 @@
 // offered to keep. Each builds candidates with a known origin and leaves every
 // decision to admitMemory.
 import { statementsInMessage, withoutScopeWords, factScopeIn, saidForThisSpace } from "../about-me";
+import { selfAssertedText } from "./assertion";
 import { classifyStatement } from "./classify";
 import { admitMemory } from "./pipeline";
 import { refusalMessage } from "./sensitivity";
@@ -39,7 +40,10 @@ export function wasKept(result: MemoryWriteResult): boolean {
  */
 export async function learnFromMessage(message: string, context: WriteContext): Promise<MemoryWriteResult[]> {
   const results: MemoryWriteResult[] = [];
-  const statements = statementsInMessage(message);
+  // Only what the person says about themselves: quotations, examples, code and
+  // other people's words are left out before anything is picked up.
+  const own = selfAssertedText(message);
+  const statements = statementsInMessage(own);
   const covered = new Set<string>();
   for (const statement of statements) {
     covered.add(statement.sentence);
@@ -54,7 +58,7 @@ export async function learnFromMessage(message: string, context: WriteContext): 
     );
   }
   // Standing wishes and decisions, sentence by sentence, when no statement above came from it.
-  for (const sentence of message.split(/(?<=[.!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean)) {
+  for (const sentence of own.split(/(?<=[.!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean)) {
     if (covered.has(sentence)) continue;
     const classified = classifyStatement(sentence, { requireStanding: true });
     if (classified.type !== "instruction" && classified.type !== "decision") continue;
@@ -117,7 +121,7 @@ export async function acceptOffer(offer: MemoryWriteResult, context: WriteContex
       proposed_type: type,
       requested_scope: offer.scope,
       ...(offer.decision ? { decision: offer.decision } : {}),
-      source: { kind: "explicit_user", space_id: context.spaceId }
+      source: { kind: "explicit_user", space_id: context.spaceId, ...(offer.origin ? { offered_from: offer.origin } : {}) }
     }),
     { writer: context.writer }
   );

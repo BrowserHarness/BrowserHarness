@@ -12,6 +12,7 @@
 import { factScopeIn, factTopic, saidForThisSpace, type AboutMeFact, type FactScope } from "../about-me";
 import { subjectKey } from "../decisions";
 import { contentWords } from "../skill-learning";
+import { selfAssertedText } from "./assertion";
 import { certaintyOf, classifyStatement } from "./classify";
 import { recordWriteDiagnostics } from "./diagnostics";
 import { checkSensitive } from "./sensitivity";
@@ -85,6 +86,18 @@ export function groundedIn(fact: string, message: string): boolean {
   return needed.length > 0 && needed.every((word) => said.has(word));
 }
 
+/**
+ * Did the person assert this themselves? Its words must be in the part of
+ * the message that is their own statement, not in a quotation, an example,
+ * code or someone else's words ("My friend said I live in Delhi").
+ */
+export function assertedIn(statement: string, message: string): boolean {
+  const own = selfAssertedText(message);
+  if (!own) return false;
+  const said = contentWords(own);
+  return [...contentWords(statement)].filter((word) => !FRAME_WORDS.has(word)).every((word) => said.has(word));
+}
+
 /** How sure the person sounded where they said it: the part of the sentence that carries the fact. */
 export function certaintyWhereSaid(fact: string, sentence: string): Certainty {
   const needed = [...contentWords(fact)].filter((word) => !FRAME_WORDS.has(word));
@@ -144,7 +157,7 @@ export async function admitMemory(candidate: MemoryCandidate, options: AdmitOpti
     at: new Date().toISOString()
   });
   const { certainty: _certainty, ...visible } = result;
-  return visible;
+  return { ...visible, origin: candidate.source.kind };
 }
 
 type Decided = MemoryWriteResult & { certainty?: Certainty };
@@ -179,12 +192,24 @@ async function decideAndWrite(candidate: MemoryCandidate, writer: MemoryWriter):
   const type = resolveType(candidate, classified);
   const text = capital(classified.text || raw);
 
-  // The AI's reading must be found in the person's own words.
+  // The AI's reading must be found in what the person said about themselves:
+  // all of its words somewhere in the message is not enough when they sit in
+  // a quotation, an example or someone else's words.
   const message = candidate.source.user_message ?? "";
-  if (candidate.source.kind === "model_extraction" && !groundedIn(text, message)) {
-    return { action: "rejected", type, confidence: 0, reason: "not found in your message (the AI's guess, not your words)" };
+  const ownWords = candidate.source.kind === "model_extraction" ? selfAssertedText(message) : "";
+  if (candidate.source.kind === "model_extraction" && !groundedIn(text, ownWords)) {
+    return {
+      action: "rejected",
+      type,
+      confidence: 0,
+      reason: groundedIn(text, message) ? "only in quoted or someone else's words, not said about yourself" : "not found in your message (the AI's guess, not your words)"
+    };
   }
-  const said = candidate.source.said_in ?? (candidate.source.kind === "model_extraction" ? message : raw);
+  // Picked up from chat on its own: only what the person says about themselves.
+  if (candidate.source.kind === "user_message" && !candidate.explicit && !assertedIn(text, candidate.source.said_in ?? raw)) {
+    return { action: "ignored", type, confidence: 0, reason: "quoted, an example or someone else's words, not said about yourself" };
+  }
+  const said = candidate.source.said_in ?? (candidate.source.kind === "model_extraction" ? ownWords : raw);
   const certainty = candidate.explicit ? "clear" : certaintyWhereSaid(text, said);
 
   // 4. Scope: this Space unless it's who you are or you said every Space.
@@ -230,6 +255,13 @@ async function decideAndWrite(candidate: MemoryCandidate, writer: MemoryWriter):
   return { ...base, action: "ignored", reason: classified.why };
 }
 
+/** The origin kept on the record: an accepted offer keeps where it came from, marked accepted. */
+function recordOrigin(candidate: MemoryCandidate): { origin: "explicit_user" | "user_message" | "model_extraction"; accepted: boolean } {
+  const offered = candidate.source.offered_from;
+  const from = offered === "user_message" || offered === "model_extraction" ? offered : candidate.source.kind;
+  return { origin: from as "explicit_user" | "user_message" | "model_extraction", accepted: from !== candidate.source.kind };
+}
+
 async function writeFact(
   candidate: MemoryCandidate,
   writer: MemoryWriter,
@@ -249,12 +281,13 @@ async function writeFact(
     return { ...base, action: "needs_confirmation", relationship, replaced_id: other?.id, reason: "says the opposite of something remembered; offered to update" };
   }
   const by: AboutMeFact["source"] = candidate.explicit && candidate.source.kind === "explicit_user" ? "you" : "learned";
-  const origin = candidate.source.kind as "explicit_user" | "user_message" | "model_extraction";
+  const { origin, accepted } = recordOrigin(candidate);
   const fact = await writer.writeFact(base.text, by, spaceId, base.scope, {
     explicit: explicitScope,
     chatId: candidate.source.chat_id,
     kind: base.type,
     origin,
+    ...(accepted ? { accepted } : {}),
     ...(relationship === "contradicts" && other ? { replaces: other.id } : {})
   });
   if (!fact) return { ...base, action: "duplicate", relationship: "duplicate", reason: "already remembered" };
@@ -297,7 +330,8 @@ async function writeDecision(
     return { ...base, type: "decision", scope, action: "duplicate", relationship: "same_value", memory_id: same.id, decision, reason: "already decided" };
   }
   const by = candidate.explicit && candidate.source.kind === "explicit_user" ? "you" : "learned";
-  const saved = await writer.writeDecision({ ...decision, scope, by, chatId: candidate.source.chat_id }, spaceId);
+  const { origin, accepted } = recordOrigin(candidate);
+  const saved = await writer.writeDecision({ ...decision, scope, by, chatId: candidate.source.chat_id, origin, ...(accepted ? { accepted } : {}) }, spaceId);
   if (!saved.ok) return { ...base, type: "decision", scope, action: "rejected", reason: saved.error, ...(saved.sensitive ? { sensitive: saved.sensitive } : {}) };
   return {
     ...base,

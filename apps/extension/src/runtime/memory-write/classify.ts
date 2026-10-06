@@ -83,6 +83,17 @@ const DECISION_PATTERNS: RegExp[] = [
   /\bfrom now on,? (use|we use)\b/i
 ];
 
+/**
+ * A tool used for one step of this task ("let's use GitHub to search for
+ * repos", "use Stripe docs to check webhook signatures"), not a choice for the
+ * work. Deploying, hosting or storing with something still reads as a choice.
+ */
+const TASK_USE =
+  /\buse\s+(?:[\w.+-]+\s+){1,4}?(?:to\s+(?!(?:deploy|host|store|run|manage|handle|process|track|build|power)\b)[a-z]+|for\s+(?:(?:this|the|a|my|our)\s+)?(?:search|task|query|question|request|lookup|example|test|demo|now|today|tonight|[a-z]+ing)\b)/i;
+/** Wording that makes a choice durable even when it is phrased like a step. */
+const DURABLE =
+  /\b(from now on|going forward|for (this|our|the) (project|space|team|company|app|site|website|repo|codebase|business|shop|store)|canonical|by default|default|we('ve| have)? decided|decided to|our (platform|stack|tool|choice|standard)|official(ly)?|because|since)\b/i;
+
 function platformIn(text: string): { value: string; subject: string } | null {
   for (const [pattern, value, subject] of PLATFORMS) if (pattern.test(text)) return { value, subject };
   return null;
@@ -109,6 +120,7 @@ export function certaintyOf(text: string): Certainty {
 /** A decision in this sentence: what it's about, what was chosen, and how settled it sounds. */
 export function decisionIn(sentence: string): Classification["decision"] | null {
   if (!DECISION_PATTERNS.some((pattern) => pattern.test(sentence))) return null;
+  if (TASK_USE.test(sentence) && !DURABLE.test(sentence)) return null;
   const platform = platformIn(sentence);
   const subject = platform?.subject ?? namedSubject(sentence);
   const value = platform?.value ?? /\b(?:use|with|to|on) ([A-Z][\w.+-]*(?: [A-Z][\w.+-]*){0,2})/.exec(sentence)?.[1] ?? null;

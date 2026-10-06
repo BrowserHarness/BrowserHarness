@@ -69,6 +69,10 @@ export interface DecisionInput {
   scope?: Decision["scope"];
   by?: Provenance["by"];
   chatId?: string;
+  /** How it reached memory (/decide or the screen, or the person's message); left out for older callers. */
+  origin?: Provenance["origin"];
+  /** Offered from the person's message, then kept with "Keep it". */
+  accepted?: boolean;
 }
 
 /**
@@ -107,7 +111,14 @@ export async function recordDecision(
     ...(old ? { supersedes: old.id } : {}),
     space_id: space,
     visibility: scope === "global" ? "all" : "space",
-    provenance: { by: input.by ?? "you", space_id: space, at: now, ...(input.chatId ? { chat_id: input.chatId } : {}) }
+    provenance: {
+      by: input.by ?? "you",
+      space_id: space,
+      at: now,
+      ...(input.chatId ? { chat_id: input.chatId } : {}),
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.accepted ? { accepted: true } : {})
+    }
   };
   const next = decisions.map((item) =>
     item === old ? { ...item, status: "superseded" as const, valid_until: now, superseded_by: decision.id } : item
@@ -250,7 +261,7 @@ export function parseDecision(args: string): DecisionInput | null {
 export async function decideCommand(args: string, spaceId?: string, chatId?: string): Promise<string> {
   const input = parseDecision(args);
   if (!input) return "Tell me what you decided, like `/decide code home: GitHub because it's where the team works`.";
-  const result = await recordDecision({ ...input, by: "you", chatId }, spaceId);
+  const result = await recordDecision({ ...input, by: "you", chatId, origin: "explicit_user" }, spaceId);
   if (!result.ok) return result.error;
   const where = result.decision.scope === "global" ? " for every Space" : "";
   return result.replaced

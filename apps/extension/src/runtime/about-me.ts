@@ -27,6 +27,8 @@ export interface Provenance {
    * records saved before; never guessed for them.
    */
   origin?: "explicit_user" | "user_message" | "model_extraction";
+  /** Offered by BrowserHarness from the origin above, then kept because the person tapped "Keep it". */
+  accepted?: boolean;
 }
 
 export type FactStatus = "current" | "superseded" | "historical";
@@ -163,6 +165,7 @@ export interface AddFactOptions {
   chatId?: string;
   kind?: AboutMeFact["kind"];
   origin?: Provenance["origin"];
+  accepted?: boolean;
   /** A current fact at this level the new one replaces though it has no known topic ("I don't eat meat" after "I eat meat"). */
   replaces?: string;
 }
@@ -205,7 +208,7 @@ export async function addFacts(
       valid_from: now,
       ...(scope === "space" && options.explicit ? { explicit_scope: true } : {}),
       ...(options.kind ? { kind: options.kind } : {}),
-      provenance: { by: source, space_id: saidIn, at: now, ...(options.chatId ? { chat_id: options.chatId } : {}), ...(options.origin ? { origin: options.origin } : {}) }
+      provenance: { by: source, space_id: saidIn, at: now, ...(options.chatId ? { chat_id: options.chatId } : {}), ...(options.origin ? { origin: options.origin } : {}), ...(options.accepted ? { accepted: true } : {}) }
     };
     const replaced = topic ? facts.find((item) => isCurrent(item) && topicOf(item) === topic) : undefined;
     if (replaced) {
