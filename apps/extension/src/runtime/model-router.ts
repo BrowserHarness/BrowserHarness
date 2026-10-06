@@ -81,7 +81,8 @@ export async function readOnlyWorkerDecisionWithFallback(
   mcpCatalog: BrowserHarnessMcpCatalog = {
     servers_considered: 0,
     tools: []
-  }
+  },
+  mode: "read" | "act" = "read"
 ): Promise<RoutedResult<AgentDecision>> {
   return runWithFallback(primary, fallback, (connection) =>
     nextReadOnlyWorkerDecision(
@@ -91,7 +92,8 @@ export async function readOnlyWorkerDecisionWithFallback(
       trail,
       signal,
       evidence,
-      mcpCatalog
+      mcpCatalog,
+      mode
     )
   );
 }

@@ -178,3 +178,47 @@ describe("read-only worker tool policy", () => {
     );
   });
 });
+
+describe("acting helper tool policy", () => {
+  it("acts only in tabs the helper opened, never in the person's tabs", async () => {
+    const state = newReadOnlyWorkerToolState();
+    const mock = vi.fn(async (tool: ToolName) =>
+      tool === "open_tab" ? { ok: true, data: { tab_id: 77 } } : { ok: true, data: {} }
+    );
+    const run = (tool: ToolName, input: Record<string, unknown> = {}, execution?: BrowserToolExecution) =>
+      runReadOnlyWorkerTool(tool, input, execution, state, genericTool(mock), "act");
+
+    // Not yet in its own tab: a correction the helper can recover from, not the end of its run.
+    const early = await run("click", { element_id: "@e1" });
+    expect(early).toMatchObject({ ok: false, error: { code: "HELPER_NEEDS_OWN_TAB" } });
+    expect((early as { error: { message: string } }).error.message).toMatch(/only in tabs they opened/);
+
+    await run("open_tab", { url: "https://shop.example/", active: true });
+    expect(mock).toHaveBeenLastCalledWith("open_tab", { url: "https://shop.example/", active: false }, undefined);
+
+    expect(await run("click", { element_id: "@e1" }, { approvalGranted: true })).toMatchObject({ ok: true });
+    // An approved step carries its approval through to Chrome.
+    expect(mock).toHaveBeenLastCalledWith("click", { element_id: "@e1" }, { approvalGranted: true });
+    expect(await run("type", { element_id: "@e2", text: "green tea" })).toMatchObject({ ok: true });
+    expect(await run("click", { element_id: "@e1", tab_id: 5 })).toMatchObject({ ok: false });
+    expect(await run("switch_tab", { tab_id: 5 })).toMatchObject({ ok: false });
+    expect(await run("switch_tab", { tab_id: 77 })).toMatchObject({ ok: true });
+
+    for (const tool of ["evaluate", "cdp", "upload", "agent", "await_user_action"] as ToolName[]) {
+      expect(await run(tool, {})).toMatchObject({ ok: false, error: { code: "SUBAGENT_SCOPE_DENIED" } });
+    }
+    expect(await run("site_skill", { action: "run" })).toMatchObject({ ok: false });
+    expect(await run("memory", { action: "save" })).toMatchObject({ ok: false });
+  });
+
+  it("read-only workers still never click, and never forward an approval", async () => {
+    const state = newReadOnlyWorkerToolState();
+    const mock = vi.fn(async (tool: ToolName) =>
+      tool === "open_tab" ? { ok: true, data: { tab_id: 9 } } : { ok: true, data: {} }
+    );
+    await runReadOnlyWorkerTool("open_tab", {}, undefined, state, genericTool(mock));
+    expect(await runReadOnlyWorkerTool("click", { element_id: "@e1" }, { approvalGranted: true }, state, genericTool(mock))).toMatchObject({ ok: false });
+    await runReadOnlyWorkerTool("navigate", { url: "https://a.example" }, { approvalGranted: true }, state, genericTool(mock));
+    expect(mock).toHaveBeenLastCalledWith("navigate", { url: "https://a.example" }, undefined);
+  });
+});

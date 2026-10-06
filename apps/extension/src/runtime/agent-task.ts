@@ -114,6 +114,13 @@ export async function runAgentTask(
   { agentPrimary, agentFallback, session, signal, hooks, context = "" }: AgentTaskOptions
 ): Promise<BrowserEngineResult> {
   let usedFallback = false;
+  // Helpers run side by side, but the person answers one approval at a time.
+  let approvalQueue: Promise<unknown> = Promise.resolve();
+  const oneApprovalAtATime = (ask: () => Promise<boolean>): Promise<boolean> => {
+    const answer = approvalQueue.then(ask, ask);
+    approvalQueue = answer.catch(() => undefined);
+    return answer;
+  };
   const result = await runBrowserTask(
     task,
     {
@@ -156,14 +163,17 @@ export async function runAgentTask(
         execution?: BrowserToolExecution
       ): Promise<ToolResult<T>> => {
         if (tool === "agent") {
-          const launchWorker = async (spec: { task: string; max_steps: number }, index: number) => {
+          const launchWorker = async (spec: { task: string; max_steps: number; act?: boolean }, index: number) => {
                 const workerTask = spec.task;
+                const mode = spec.act ? "act" : "read";
+                const name = spec.act ? `Helper ${index + 1}` : `Worker ${index + 1}`;
                 const workerSessionId =
                   `${session.id}:worker:${index + 1}:${crypto.randomUUID()}`;
                 const workerSessionTitle =
                   workerTask.length > 48
-                    ? `Worker ${index + 1}: ${workerTask.slice(0, 37)}…`
-                    : `Worker ${index + 1}: ${workerTask}`;
+                    ? `${name}: ${workerTask.slice(0, 37)}…`
+                    : `${name}: ${workerTask}`;
+                const started = spec.act ? hooks.addActivity(`${name} started: ${workerTask.slice(0, 80)}`) : "";
 
                 return runReadOnlySubagent(
                   workerTask,
@@ -189,7 +199,8 @@ export async function runAgentTask(
                           trail,
                           workerSignal,
                           evidence,
-                          mcp_catalog
+                          mcp_catalog,
+                          mode
                         );
                       return {
                         decision: routed.result,
@@ -199,7 +210,8 @@ export async function runAgentTask(
                     },
                     baseTool: (
                       workerTool,
-                      workerInput = {}
+                      workerInput = {},
+                      workerExecution
                     ) =>
                       extensionMessage({
                         type: "BROWSER_TOOL",
@@ -208,8 +220,31 @@ export async function runAgentTask(
                         session_id:
                           workerSessionId,
                         session_title:
-                          workerSessionTitle
+                          workerSessionTitle,
+                        approval_granted: workerExecution?.approvalGranted
                       }),
+                    mode,
+                    approvalDescription: hooks.approvalQuestion,
+                    // One question at a time, saying which helper asks.
+                    requestApproval: (description) =>
+                      oneApprovalAtATime(() =>
+                        hooks.isCancelled()
+                          ? Promise.resolve(false)
+                          : hooks.requestApproval(`${name} (${workerTask.slice(0, 60)}): ${description}`)
+                      ),
+                    withActivity: spec.act
+                      ? async (label, operation) => {
+                          const id = hooks.addActivity(`${name}: ${label}`);
+                          try {
+                            const value = await operation();
+                            hooks.finishActivity(id);
+                            return value;
+                          } catch (error) {
+                            hooks.finishActivity(id, hooks.isCancelled() ? "done" : "error");
+                            throw error;
+                          }
+                        }
+                      : undefined,
                     recallMemory: async (
                       subtask,
                       observation
@@ -269,6 +304,15 @@ export async function runAgentTask(
                   },
                   signal,
                   spec.max_steps
+                ).then(
+                  (finding) => {
+                    if (started) hooks.finishActivity(started, finding.status === "completed" ? "done" : "error");
+                    return finding;
+                  },
+                  (error) => {
+                    if (started) hooks.finishActivity(started, hooks.isCancelled() ? "done" : "error");
+                    throw error;
+                  }
                 );
               };
 
