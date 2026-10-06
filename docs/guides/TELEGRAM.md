@@ -9,6 +9,11 @@ You need: the BrowserHarness Bridge installed and paired (see
 [CODING-AGENTS.md](CODING-AGENTS.md)), Chrome open, and an AI model connected
 in BrowserHarness.
 
+> **Easiest: no commands.** In BrowserHarness, open **Settings → Phone & chat
+> apps**, pick the app, paste the bot's token and press **Connect**. When you
+> message your bot, you appear under **People waiting**: press **Allow**. The
+> commands below do the same from a terminal.
+
 ## 1. Make a bot (2 minutes, once)
 1. In Telegram, open **@BotFather** and send `/newbot`.
 2. Pick a name and a username. BotFather replies with a token like

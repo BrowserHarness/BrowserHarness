@@ -152,11 +152,15 @@ try {
   await page.getByText("Your task history was deleted.").waitFor({ timeout: 3000 }).catch(() => {});
   check("Privacy deletes history after confirming", ((await stored(page, "browserharness.taskHistory")) || []).length === 0);
 
-  // 6. The phone page explains each app with commands to copy.
+  // 6. The phone page explains each app with a form, and keeps the commands for terminal users.
   await nav.getByRole("button", { name: "Phone & chat apps", exact: true }).click();
   await page.getByRole("radio", { name: "Slack" }).click();
+  await page.getByRole("button", { name: "Commands, for people who use a terminal" }).click();
   const phone = await page.locator("main").innerText();
-  check("the phone page shows Slack's steps and its command", phone.includes("How to set up Slack") && phone.includes("browserharness-bridge slack setup"));
+  check(
+    "the phone page shows Slack's steps, its form and its command",
+    phone.includes("How to set up Slack") && phone.includes("Bot code (starts with xoxb-)") && phone.includes("browserharness-bridge slack setup")
+  );
 
   // 7. A narrow window shows the list first.
   await page.setViewportSize({ width: 430, height: 900 });

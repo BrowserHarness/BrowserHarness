@@ -47,6 +47,7 @@ import {
   type PendingExplain
 } from "../runtime/quick-explain";
 import {
+  requestBridgeChat,
   requestBridgeLlm,
   sendBridgeEvent,
   startBridgeClient,
@@ -3278,6 +3279,30 @@ chrome.runtime.onMessage.addListener(
               url: request.url
             })
           });
+          return;
+        }
+        if (request.type === "BRIDGE_CHAT") {
+          // Chat app tokens only come from BrowserHarness's own Settings page.
+          if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(""))) {
+            sendResponse({
+              ok: false,
+              error: { code: "FORBIDDEN", message: "Chat apps can only be set up from BrowserHarness pages" }
+            });
+            return;
+          }
+          const allowed = ["status", "setup", "allow", "remove", "off"];
+          if (!allowed.includes(request.action)) {
+            sendResponse({ ok: false, error: { code: "BAD_REQUEST", message: "Unknown chat app action" } });
+            return;
+          }
+          // An older helper app never answers, so the status check gives up sooner.
+          sendResponse(
+            await requestBridgeChat(
+              request.action,
+              request.args && typeof request.args === "object" ? request.args : {},
+              request.action === "status" ? 8000 : 60_000
+            )
+          );
           return;
         }
         if (request.type === "BRIDGE_LLM") {

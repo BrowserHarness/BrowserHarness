@@ -79,6 +79,9 @@ export function createTelegramRelay({
     while (!stopped) {
       try {
         const updates = await api.getUpdates(offset, pollTimeoutSeconds);
+        // Stopped while waiting (for example a new token from Settings): leave
+        // these for the new bot, which asks Telegram again.
+        if (stopped) break;
         for (const update of updates) {
           offset = Math.max(offset, update.update_id + 1);
           await handle(update).catch((error) => log(`telegram: ${error.message}`));
@@ -101,6 +104,7 @@ export function createTelegramRelay({
     /** Sends a finished task's result to the chat it came from. */
     app: relay.app,
     deliver: relay.deliver,
+    allow: relay.allow,
     notify: relay.notify,
     handle
   };

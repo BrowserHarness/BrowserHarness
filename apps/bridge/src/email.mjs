@@ -398,6 +398,7 @@ export function createEmailRelay({
     },
     app: relay.app,
     deliver: relay.deliver,
+    allow: (ids) => relay.allow(ids.map((id) => String(id).toLowerCase())),
     notify: relay.notify,
     handle,
     poll

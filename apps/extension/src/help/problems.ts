@@ -21,6 +21,9 @@ export const GUIDE_SLUGS = [
   "helper-not-running",
   "helper-not-connected",
   "helper-pairing-failed",
+  "set-up-chat-apps",
+  "chat-app-token-rejected",
+  "chat-app-cant-reach",
   "something-went-wrong"
 ] as const;
 
@@ -305,6 +308,152 @@ export function diagnoseHelper(issue: HelperIssue, error?: unknown): Problem {
         : "The helper app didn't accept the code.",
     fixes: ["Press Pair to get a new code.", "Type all 6 numbers on the setup page in your browser, then press Connect."],
     guide: "helper-pairing-failed",
+    detail
+  };
+}
+
+export type ChatAppId = "telegram" | "discord" | "slack" | "signal" | "mattermost" | "matrix" | "email";
+
+const CHAT_APP_NAME: Record<ChatAppId, string> = {
+  telegram: "Telegram",
+  discord: "Discord",
+  slack: "Slack",
+  signal: "Signal",
+  mattermost: "Mattermost",
+  matrix: "Matrix",
+  email: "Your email provider"
+};
+
+/** How to get a working code again, for each chat app. */
+const NEW_CODE: Record<ChatAppId, string[]> = {
+  telegram: [
+    "In Telegram, open @BotFather, send /mybots, pick your bot, then press API Token.",
+    "Copy the whole code it shows (numbers, a colon, then letters) and paste it again."
+  ],
+  discord: [
+    "Open the Discord Developer Portal, pick your app, then Bot, and press Reset Token.",
+    "Copy the new token and paste it again."
+  ],
+  slack: [
+    "Check the first box has the code that starts with xoxb- and the second has the one that starts with xapp-.",
+    "If you changed the app on api.slack.com, press Reinstall to Workspace and copy the xoxb- code again."
+  ],
+  mattermost: [
+    "In Mattermost, open Integrations, then Bot Accounts, and make a new token for the bot.",
+    "Check the address is the same one you open Mattermost at."
+  ],
+  matrix: [
+    "Sign in to the bot's account in Element, open Settings, then Help & About, and copy the Access Token again.",
+    "Check the server address matches the bot's account (for most people, https://matrix.org)."
+  ],
+  email: [
+    "Use an app password made for the bot's mailbox, not the mailbox's normal password.",
+    "Gmail and Outlook only offer app passwords after two-step sign-in is turned on for that mailbox."
+  ],
+  signal: ["Check the number is the bot's spare number, with + and the country code, like +15551234567."]
+};
+
+/** Why a chat app couldn't be set up from Settings, and what to do. */
+export function diagnoseChatApp(app: ChatAppId, error: unknown): Problem {
+  const detail = messageOf(error);
+  const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "";
+  const name = CHAT_APP_NAME[app];
+  if (code === "BRIDGE_DISCONNECTED" || code === "CHAT_EXTENSION_REQUIRED") return diagnoseHelper("not-connected", error);
+  if (code === "CHAT_REQUEST_TIMEOUT") {
+    return {
+      title: "The helper app didn't answer",
+      reason: "It took too long. A slow connection can cause this, and so can an older helper app that can't set up chat apps from here.",
+      fixes: [
+        "Try again.",
+        "If it keeps happening, download the helper app again from Settings, then Helper app, and double-click Install BrowserHarness Helper."
+      ],
+      guide: "set-up-helper-app",
+      detail
+    };
+  }
+  if (code === "CHAT_APPS_UNAVAILABLE" || code === "UNKNOWN_ACTION") {
+    return {
+      title: "The helper app needs updating",
+      reason: "Your helper app is older than this version of BrowserHarness, so it can't set up chat apps from here yet.",
+      fixes: ["Download the helper app again from Settings, then Helper app, and double-click Install BrowserHarness Helper.", "Come back here and try again."],
+      guide: "set-up-helper-app",
+      detail
+    };
+  }
+  if (code === "MISSING_DETAILS") {
+    return {
+      title: "Some details are missing",
+      reason: "Every box above needs to be filled in.",
+      fixes: ["Fill in each box, then press Connect again."],
+      guide: "set-up-chat-apps",
+      detail
+    };
+  }
+  if (code === "EMAIL_SERVERS_UNKNOWN") {
+    return {
+      title: "BrowserHarness doesn't know this email provider",
+      reason: "It knows the mail servers for Gmail, Outlook, Yahoo, iCloud and a few others, but not this one.",
+      fixes: [
+        "Open “Mail server addresses” below the form.",
+        "Copy the incoming (IMAP) and outgoing (SMTP) server names from your email provider's help pages, like imap.example.com:993.",
+        "Press Connect again."
+      ],
+      guide: "set-up-chat-apps",
+      detail
+    };
+  }
+  if (app === "signal" && /not found|ENOENT/i.test(detail)) {
+    return {
+      title: "The Signal program isn't installed",
+      reason: "Signal bots need a free program called signal-cli on this computer, and BrowserHarness couldn't find it.",
+      fixes: ["Install signal-cli and register the bot's spare number with it, following its guide.", "Then press Connect again."],
+      guide: "set-up-chat-apps",
+      detail
+    };
+  }
+  if (/unauthori[sz]ed|not found|invalid_auth|not_authed|token_revoked|account_inactive|invalid or expired|access token|AUTHENTICATIONFAILED|invalid credentials|\b535\b|\b40[13]\b|login failed|authentication failed/i.test(detail)) {
+    return {
+      title: app === "email" ? "The mailbox didn't accept that password" : `${name} didn't accept that code`,
+      reason:
+        app === "email"
+          ? "The email provider said the address or app password is wrong."
+          : `${name} said the token is wrong. A letter may be missing, or it was replaced with a new one.`,
+      fixes: [...NEW_CODE[app], "Press Connect again."],
+      guide: "chat-app-token-rejected",
+      detail
+    };
+  }
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|getaddrinfo|did not answer|timed? ?out|aborted|closed the connection|certificate|network/i.test(detail)) {
+    return {
+      title: `Couldn't reach ${app === "email" ? "the mail server" : name}`,
+      reason: "The helper app on this computer couldn't get through to it. The internet may be down, or an address is mistyped.",
+      fixes: [
+        "Check this computer is online.",
+        app === "mattermost" || app === "matrix"
+          ? "Check the server address. Copy it from your browser when Mattermost or Element is open."
+          : app === "email"
+            ? "If you typed mail server addresses, check them against your provider's help page."
+            : "Wait a minute in case the service is having a problem.",
+        "Press Connect again."
+      ],
+      guide: "chat-app-cant-reach",
+      detail
+    };
+  }
+  if (code === "BAD_ACCOUNT_ID") {
+    return {
+      title: "That doesn't look like an account",
+      reason: detail,
+      fixes: ["The easiest way: send your bot a message, then press Allow next to your name under People waiting."],
+      guide: "set-up-chat-apps",
+      detail
+    };
+  }
+  return {
+    title: "Something went wrong",
+    reason: `${name} couldn't be set up.`,
+    fixes: ["Check every box is filled in correctly.", "Press Connect again."],
+    guide: "something-went-wrong",
     detail
   };
 }

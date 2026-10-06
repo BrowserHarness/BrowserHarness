@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cantUseBrowser, diagnoseAi, diagnoseHelper, GUIDE_SLUGS, noModels, subscriptionAppMissing } from "./problems";
+import { cantUseBrowser, diagnoseAi, diagnoseChatApp, diagnoseHelper, GUIDE_SLUGS, noModels, subscriptionAppMissing } from "./problems";
 import { GUIDES, findGuide, parseGuide } from "./guides";
 
 describe("diagnoseAi", () => {
@@ -43,6 +43,26 @@ describe("other problems", () => {
     expect(cantUseBrowser("tiny").guide).toBe("ai-cant-use-browser");
     expect(noModels({ local: true, app: "LM Studio" }).title).toContain("LM Studio");
     expect(subscriptionAppMissing("Codex").guide).toBe("subscription-app-missing");
+  });
+});
+
+describe("chat apps", () => {
+  const failed = (code: string, message: string) => ({ code, message });
+  it("a refused token says how to get the code again, per app", () => {
+    const telegram = diagnoseChatApp("telegram", failed("CHAT_SETUP_FAILED", "Unauthorized"));
+    expect(telegram.title).toBe("Telegram didn't accept that code");
+    expect(telegram.guide).toBe("chat-app-token-rejected");
+    expect(telegram.fixes.join(" ")).toMatch(/@BotFather/);
+    expect(diagnoseChatApp("slack", failed("CHAT_SETUP_FAILED", "Slack auth.test failed: invalid_auth")).fixes.join(" ")).toMatch(/xoxb-/);
+    expect(diagnoseChatApp("email", failed("CHAT_SETUP_FAILED", "IMAP: NO [AUTHENTICATIONFAILED] Invalid credentials")).title).toMatch(/password/);
+  });
+  it("network trouble, missing details, unknown mail servers, signal-cli and old helper apps", () => {
+    expect(diagnoseChatApp("mattermost", failed("CHAT_SETUP_FAILED", "fetch failed")).guide).toBe("chat-app-cant-reach");
+    expect(diagnoseChatApp("telegram", failed("MISSING_DETAILS", "Usage: …")).title).toBe("Some details are missing");
+    expect(diagnoseChatApp("email", failed("EMAIL_SERVERS_UNKNOWN", "I don't know the mail servers")).fixes[0]).toMatch(/Mail server addresses/);
+    expect(diagnoseChatApp("signal", failed("CHAT_SETUP_FAILED", "signal-cli was not found. Install signal-cli first")).title).toMatch(/isn't installed/);
+    expect(diagnoseChatApp("telegram", failed("CHAT_REQUEST_TIMEOUT", "took too long")).guide).toBe("set-up-helper-app");
+    expect(diagnoseChatApp("telegram", failed("BRIDGE_DISCONNECTED", "x")).guide).toBe("helper-not-connected");
   });
 });
 

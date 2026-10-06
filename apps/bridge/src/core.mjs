@@ -91,7 +91,8 @@ export function createBridgeServer({
   llmManager = null,
   allowRemote = false,
   onExtensionEvent = null,
-  chatApps = () => []
+  chatApps = () => [],
+  chatManager = null
 } = {}) {
   if (!token) throw new Error("Bridge pairing token is required");
   if (!isLoopbackHost(host)) {
@@ -514,6 +515,31 @@ export function createBridgeServer({
 
         if (message.type === "heartbeat") {
           ws.send(JSON.stringify({ type: "heartbeat_ack" }));
+          return;
+        }
+
+        // Setting up chat apps from Settings in Chrome, instead of commands.
+        if (message.type === "chat_request" && typeof message.id === "string") {
+          const reply = (body) => ws.send(JSON.stringify({ type: "chat_result", id: message.id, ...body }));
+          if (extension !== ws || !chatManager) {
+            reply({
+              ok: false,
+              error: {
+                code: extension !== ws ? "CHAT_EXTENSION_REQUIRED" : "CHAT_APPS_UNAVAILABLE",
+                message: "Chat apps can only be set up from the paired BrowserHarness extension"
+              }
+            });
+            return;
+          }
+          try {
+            const args = message.args && typeof message.args === "object" && !Array.isArray(message.args) ? message.args : {};
+            reply({ ok: true, data: await chatManager.handle(String(message.action || ""), args) });
+          } catch (error) {
+            reply({
+              ok: false,
+              error: { code: typeof error?.code === "string" ? error.code : "CHAT_SETUP_FAILED", message: error instanceof Error ? error.message : String(error) }
+            });
+          }
           return;
         }
 

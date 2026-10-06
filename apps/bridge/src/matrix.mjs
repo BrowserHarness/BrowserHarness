@@ -139,6 +139,11 @@ export function createMatrixRelay({ homeserver, token, botId = "", allowedUserId
     },
     app: relay.app,
     deliver: relay.deliver,
+    allow(ids) {
+      allowed.clear();
+      for (const id of ids) allowed.add(String(id));
+      relay.allow(ids);
+    },
     notify: relay.notify,
     handleSync
   };
