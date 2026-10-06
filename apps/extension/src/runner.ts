@@ -1,8 +1,10 @@
 // The page a scheduled task runs in. The service worker opens it in a
 // background tab when the task's alarm fires; it closes itself when done.
 import { saveTaskHistoryEntry } from "./runtime/history";
-import { activeSpaceId, pinSpace } from "./runtime/spaces";
-import { runScheduledTask, runUnattendedTask } from "./runtime/scheduled-run";
+import { pinSpace } from "./runtime/spaces";
+import { runScheduledTask } from "./runtime/scheduled-run";
+import { CHAT_APP_NAMES, takeRemoteTask } from "./runtime/remote-queue";
+import { runRemoteTask } from "./runtime/remote-tasks";
 import { deliveryText, describeSchedule, loadSchedules, recordScheduledRun } from "./runtime/schedules";
 
 const title = document.getElementById("title") as HTMLElement;
@@ -21,35 +23,18 @@ const HEADINGS = {
   "needs you": "Needs you"
 } as const;
 
-const CHAT_APPS: Record<string, string> = {
-  telegram: "Telegram",
-  discord: "Discord",
-  slack: "Slack",
-  signal: "Signal",
-  mattermost: "Mattermost",
-  matrix: "Matrix",
-  email: "email"
-};
-
 /** A task sent from a chat app; the result goes back the same way. */
 async function runRemote(id: string, keep: boolean) {
-  const key = "browserharness.remoteTasks";
-  const stored = ((await chrome.storage.session.get(key))[key] || {}) as Record<string, { text: string; from: string }>;
-  const request = stored[id];
+  const request = await takeRemoteTask(id);
   if (!request) {
     title.textContent = "This task is no longer waiting.";
     return;
   }
-  const { [id]: _done, ...rest } = stored;
-  await chrome.storage.session.set({ [key]: rest });
-  const source = CHAT_APPS[request.from] || "your phone";
-  // A message from a chat app works in the Space in use when it arrived, and
-  // stays there (history included) even if the person switches meanwhile.
-  pinSpace(await activeSpaceId());
+  const source = CHAT_APP_NAMES[request.from] || "your phone";
   document.title = `Running: ${request.text}`;
   title.textContent = `Running a task from ${source}: ${request.text}`;
-  const outcome = await runUnattendedTask(request.text, `From ${source}`, log);
-  await saveTaskHistoryEntry({ task: `From ${source}: ${request.text}`, result: outcome.message, url: outcome.url }).catch(() => undefined);
+  // Works in the Space that was in use when the message arrived.
+  const outcome = await runRemoteTask(request, log);
   await chrome.runtime.sendMessage({ type: "REMOTE_TASK_RESULT", id, ...outcome }).catch(() => undefined);
   title.textContent = `${HEADINGS[outcome.status]}: ${request.text}`;
   outcomeBox.textContent = outcome.message;

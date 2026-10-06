@@ -62,7 +62,7 @@ Not yet done (later phases):
 - Chat tasks (`ui/App.tsx`): the chat's Space is captured at the start of `runTask` and passed explicitly to About me, instructions, history, recall, Skills, `runAgentTask`, learning and history writes.
 - `runAgentTask` takes a required `spaceId`. Parent recall, helper (worker) recall, the episode write, and every `BROWSER_TOOL` message (parent and helpers) carry it, so the agent's `memory` and `skills` tools answer from that Space.
 - Scheduled tasks: unchanged pinning, plus `runUnattendedTask` resolves the Space once and passes it everywhere.
-- Phone/chat-app tasks: the runner page pins the Space in use when the message arrived, so the whole run, and its history entry, stay there.
+- Phone/chat-app messages record the Space in use when the message is accepted (`runtime/remote-queue.ts`, `space_id` on the queued request); the runner pins that Space. Requests queued before this change fall back to the Space in use when the runner starts.
 - Calls with no task behind them (settings screens, coding agents through the Bridge) use the Space in use now.
 
 ### 3.4 Skills
@@ -72,9 +72,13 @@ Not yet done (later phases):
 No stored data is rewritten. New fields are optional and read-time defaults handle old records: episodes without `space_id` → Personal; Skills without `space_id`/`visibility` → every Space. Deleting a Space now also removes its own episodes and Skills (`SPACE_TAGGED_KEYS` in `spaces.ts`), never shared ones. The episode cap (500) is now per Space.
 
 ### 3.6 Tests
-`runtime/memory-scope.test.ts` (17 tests): same-words and perfect-embedding matches never cross Spaces; get/delete limited to the asking Space; old episodes count as Personal; helper findings keep the parent's Space and sources; per-Space episode cap; Skill isolation, hint isolation, old Skills shared, no cross-Space delete, unique slugs, Space kept on update, per-Space pruning; notes, instructions and history written with an explicit Space while another is active; recall searches the current Space only; deleting a Space removes only its records. Breaking `visibleInSpace` makes 10 of them fail.
+`runtime/memory-scope.test.ts` (17 tests) and `runtime/remote-tasks.test.ts` (queued in Space A, switched to B, run stays in A): same-words and perfect-embedding matches never cross Spaces; get/delete limited to the asking Space; old episodes count as Personal; helper findings keep the parent's Space and sources; per-Space episode cap; Skill isolation, hint isolation, old Skills shared, no cross-Space delete, unique slugs, Space kept on update, per-Space pruning; notes, instructions and history written with an explicit Space while another is active; recall searches the current Space only; deleting a Space removes only its records. Breaking `visibleInSpace` makes 10 of them fail.
 
-## 4. Recommended next phases
+## 4. Recorded follow-ups (from review of PR #38)
+1. Skills saved before Memory v2 have no scope and are read as `visibility: "all"`. Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
+2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
+
+## 5. Recommended next phases
 - Phase 3: "All Spaces" level for About me and instructions (a small global store read alongside the Space one; new statements default to the Space; explicit "across all Spaces" goes global).
 - Phase 4: keep superseded facts with `valid_until`/`superseded_by`; add decisions with `current/superseded/reversed/historical`.
 - Phase 5: Context Compiler replacing the string concatenation, with authority order, per-model budget and a diagnostics record.

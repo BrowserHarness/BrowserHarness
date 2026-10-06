@@ -142,6 +142,7 @@ import {
   type ToolExecutionOptions
 } from "./approval-grant";
 import { runExternalMcpTool } from "./mcp-tools";
+import { enqueueRemoteTask } from "../runtime/remote-queue";
 import {
   goBackAndWait,
   reloadAndWait,
@@ -3038,7 +3039,6 @@ const BRIDGE_TOOL_NAMES = new Set<ToolName>([
   "screenshot"
 ]);
 
-const REMOTE_TASKS_KEY = "browserharness.remoteTasks";
 
 /**
  * "/schedule every weekday at 8am check prices" from a chat app: saves the
@@ -3123,14 +3123,8 @@ async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResul
   if (/^\/schedule\b/i.test(text)) return scheduleFromChat(text.replace(/^\/schedule\s*/i, ""), from);
   const reply = await chatCommandReply(text, from);
   if (reply !== null) return { ok: true, data: { id: crypto.randomUUID(), reply } };
-  const id = crypto.randomUUID();
-  const stored = (await chrome.storage.session.get(REMOTE_TASKS_KEY))[REMOTE_TASKS_KEY] || {};
-  await chrome.storage.session.set({
-    [REMOTE_TASKS_KEY]: {
-      ...stored,
-      [id]: { text, from: typeof args.from === "string" ? args.from : "phone", created_at: new Date().toISOString() }
-    }
-  });
+  // The Space is captured now, as the message arrives, not when the runner starts.
+  const id = await enqueueRemoteTask(text, from);
   const tab = await chrome.tabs.create({
     url: chrome.runtime.getURL(`runner.html?remote=${encodeURIComponent(id)}`),
     active: false
