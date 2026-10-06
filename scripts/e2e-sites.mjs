@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -24,10 +24,10 @@ for (const file of [path.join(dist, "manifest.json"), bundle]) {
   }
 }
 const { Client } = await import(
-  require.resolve("@modelcontextprotocol/client", { paths: [path.join(root, "apps/bridge")] })
+  pathToFileURL(require.resolve("@modelcontextprotocol/client", { paths: [path.join(root, "apps/bridge")] })).href
 );
 const { StdioClientTransport } = await import(
-  require.resolve("@modelcontextprotocol/client/stdio", { paths: [path.join(root, "apps/bridge")] })
+  pathToFileURL(require.resolve("@modelcontextprotocol/client/stdio", { paths: [path.join(root, "apps/bridge")] })).href
 );
 
 const results = [];
@@ -45,7 +45,7 @@ fs.writeFileSync(
   path.join(home, ".browserharness-bridge", "config.json"),
   JSON.stringify({ host: "127.0.0.1", port, allow_remote: false, token })
 );
-const env = { ...process.env, HOME: home, USERPROFILE: home };
+const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming"), LOCALAPPDATA: path.join(home, "AppData", "Local") };
 const installed = path.join(home, ".browserharness-bridge", "bin", "browserharness-bridge.mjs");
 const run = (file, ...args) =>
   new Promise((resolve) => {
