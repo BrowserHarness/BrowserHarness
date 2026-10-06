@@ -19,7 +19,7 @@ Everything below is under "Advanced" and is for people comfortable with keys and
 
 ## 2. Your ChatGPT or Claude subscription — no API key
 1. Install and sign in to the vendor's app once on this computer: Claude Code (for Claude) or the Codex CLI (for ChatGPT).
-2. Install the Local Bridge (see [Coding agents](CODING-AGENTS.md)) and press **Pair** under Settings → Coding agents.
+2. Install the Local Bridge (see [Coding agents](CODING-AGENTS.md)) and press **Pair** under Settings → Helper app.
 3. Provider "Claude subscription" or "ChatGPT subscription". The panel shows "Ready" once the Bridge is connected and the app is found. Press "Test Chat + Agent & save".
 
 Text only (no screenshots) and slower per step than an API. Details: `docs/architecture/SUBSCRIPTION-ADAPTERS.md`.

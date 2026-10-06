@@ -194,13 +194,14 @@ try {
 
   // 6. The Skills screen marks it, Keep makes it the person's own, and learning can be turned off.
   await side.getByRole("button", { name: "Skills" }).click();
-  await side.getByText("Learned on its own").first().waitFor({ timeout: 5000 });
+  const learnedBadge = side.locator(".MuiChip-label", { hasText: "Learned on its own" });
+  await learnedBadge.first().waitFor({ timeout: 5000 });
   check("the Skills screen marks Skills learned on their own", true);
   if (process.env.SHOT_DIR) await side.screenshot({ path: path.join(process.env.SHOT_DIR, "self-learning-skills.png"), fullPage: true });
-  await side.getByRole("button", { name: "Keep" }).first().click();
+  await side.getByRole("button", { name: "Keep", exact: true }).first().click();
   await side.waitForTimeout(300);
-  check("Keep makes it a normal Skill", (await skills())[0].source === "chat" && !(await side.getByText("Learned on its own").isVisible().catch(() => false)));
-  await side.getByLabel(/Learn Skills on my own/).uncheck();
+  check("Keep makes it a normal Skill", (await skills())[0].source === "chat" && (await learnedBadge.count()) === 0, JSON.stringify((await skills()).map((skill) => [skill.slug, skill.source])));
+  await side.getByLabel(/Learn Skills on its own/).uncheck();
   await side.getByRole("button", { name: "Back to chat" }).first().click();
   const beforeOff = prompts.length;
   await ask("search the tea shop for oolong tea and add it to the cart");

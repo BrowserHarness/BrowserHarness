@@ -424,7 +424,7 @@ export async function requestBridgeLlm(
       error: {
         code: "BRIDGE_DISCONNECTED",
         message:
-          "Connect the Local Agent Bridge (Settings) before using a ChatGPT or Claude subscription"
+          "Connect the helper app (Settings → Helper app) before using a ChatGPT or Claude subscription"
       }
     };
   }

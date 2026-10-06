@@ -19,6 +19,7 @@
     "smoke:agent": "node scripts/e2e-agent.mjs",
     "smoke:subscription": "node scripts/e2e-subscription.mjs",
     "smoke:connect": "node scripts/e2e-connect.mjs",
+    "smoke:settings": "node scripts/e2e-settings.mjs",
     "smoke:docs": "node scripts/e2e-docs.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
     "smoke:bridge": "node scripts/e2e-bridge.mjs",

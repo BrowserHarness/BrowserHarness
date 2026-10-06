@@ -134,7 +134,8 @@ try {
   }, `ws://127.0.0.1:${port}/ws`);
   await side.reload();
   await side.getByRole("button", { name: "Settings" }).first().click();
-  await side.getByText("Coding agents", { exact: true }).waitFor({ timeout: 10000 });
+  await side.getByRole("button", { name: /^Helper app/ }).click();
+  await side.getByText("Set it up", { exact: true }).waitFor({ timeout: 10000 });
   await side.getByRole("button", { name: "Pair", exact: true }).click();
   const code = (await side.getByLabel("Pairing code").innerText({ timeout: 10000 })).replace(/\D/g, "");
   const paired = await run(installed, "pair", "--code", code, "--json");

@@ -13,6 +13,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         sidepanel: resolve(root, "sidepanel.html"),
+        settings: resolve(root, "settings.html"),
         mic: resolve(root, "mic.html"),
         runner: resolve(root, "runner.html"),
         "service-worker": resolve(root, "src/background/service-worker.ts"),

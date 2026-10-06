@@ -224,8 +224,9 @@ try {
   await side.waitForTimeout(400);
   const formItem = ((await stored("browserharness.schedules")) || []).find((item) => item.task.startsWith("FORM_TASK"));
   const formAlarm = (await alarms()).find((item) => item.name.endsWith(formItem?.id));
-  check("turning it off removes its alarm", formItem?.enabled === false && !formAlarm && (await formCard.innerText()).includes("· off"));
+  check("turning it off removes its alarm", formItem?.enabled === false && !formAlarm && (await formCard.innerText()).includes("· turned off"));
   await formCard.getByRole("button", { name: /^Delete scheduled task/ }).click();
+  await side.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
   await side.waitForTimeout(400);
   check("it can be deleted", (await side.getByTestId("scheduled-task").filter({ hasText: "FORM_TASK" }).count()) === 0);
 

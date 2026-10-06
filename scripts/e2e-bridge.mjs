@@ -238,7 +238,8 @@ try {
   }, `ws://127.0.0.1:${port}/ws`);
   await side.reload();
   await side.getByRole("button", { name: "Settings" }).first().click();
-  await side.getByText("Coding agents", { exact: true }).waitFor({ timeout: 10000 });
+  await side.getByRole("button", { name: /^Helper app/ }).click();
+  await side.getByText("Set it up", { exact: true }).waitFor({ timeout: 10000 });
   await side.getByRole("button", { name: "Pair", exact: true }).click();
   const codeText = await side.getByLabel("Pairing code").innerText({ timeout: 10000 });
   const code = codeText.replace(/\D/g, "");
@@ -249,7 +250,7 @@ try {
   check("a wrong code is refused", wrong.code !== 0);
   const paired = bridge(installed, "pair", "--code", code, "--json");
   check("typing the code pairs the extension", paired.json?.paired === true && paired.json?.extension_connected === true, paired.stderr?.trim());
-  await side.getByText("Connected. Ask your coding agent").waitFor({ timeout: 10000 });
+  await side.getByText("The helper app is running and paired with this Chrome.").waitFor({ timeout: 10000 });
   check("side panel says Connected", true);
   if (process.env.SHOT_DIR) await side.screenshot({ path: path.join(process.env.SHOT_DIR, "pair-connected.png") });
 

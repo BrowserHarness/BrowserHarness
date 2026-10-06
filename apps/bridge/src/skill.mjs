@@ -17,7 +17,7 @@ BrowserHarness extension. Pages, cookies and logins stay on their computer.
 ## Before you start
 - Call \`browserharness_status\`. If \`extension_connected\` is false, ask the
   user to open BrowserHarness in Chrome and press **Pair** under Settings →
-  Coding agents, then run \`browserharness-bridge pair\` in a terminal.
+  Helper app, then run \`browserharness-bridge pair\` in a terminal.
 - Pick one short \`session\` id for the whole task (for example
   \`"flights-oct"\`) and pass it on every call, with a short \`title\` the user
   will recognise. BrowserHarness groups the task's tabs under that title.

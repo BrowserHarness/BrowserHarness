@@ -22,6 +22,25 @@ import {
   Square,
   Trash2,
   WandSparkles,
+  Sparkles,
+  ShieldCheck,
+  Smartphone,
+  Plug,
+  Palette,
+  Lock,
+  CircleHelp,
+  House,
+  CalendarClock,
+  UserRound,
+  Copy,
+  ExternalLink,
+  TriangleAlert,
+  Lightbulb,
+  CircleCheck,
+  CircleX,
+  Info,
+  ChevronRight,
+  X,
   type LucideProps
 } from "lucide-react";
 
@@ -72,3 +91,22 @@ export const SkillsIcon = makeIcon(BookMarked);
 export const UploadIcon = makeIcon(Upload);
 export const EditIcon = makeIcon(Pencil);
 export const RunIcon = makeIcon(Play);
+export const SparklesIcon = makeIcon(Sparkles);
+export const SafetyIcon = makeIcon(ShieldCheck);
+export const PhoneIcon = makeIcon(Smartphone);
+export const PlugIcon = makeIcon(Plug);
+export const PaletteIcon = makeIcon(Palette);
+export const LockIcon = makeIcon(Lock);
+export const HelpIcon = makeIcon(CircleHelp);
+export const HomeIcon = makeIcon(House);
+export const ScheduleIcon = makeIcon(CalendarClock);
+export const PersonIcon = makeIcon(UserRound);
+export const CopyIcon = makeIcon(Copy);
+export const OpenIcon = makeIcon(ExternalLink);
+export const WarningIcon = makeIcon(TriangleAlert);
+export const TipIcon = makeIcon(Lightbulb);
+export const YesIcon = makeIcon(CircleCheck);
+export const NoIcon = makeIcon(CircleX);
+export const InfoIcon = makeIcon(Info);
+export const NextIcon = makeIcon(ChevronRight);
+export const CloseIcon = makeIcon(X);

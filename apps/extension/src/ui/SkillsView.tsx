@@ -4,16 +4,15 @@ import {
   Box,
   Button,
   Chip,
-  FormControlLabel,
   IconButton,
   Paper,
   Stack,
-  Switch,
   TextField,
   Tooltip,
   Typography
 } from "@mui/material";
-import { BackIcon, DeleteIcon, DownloadIcon, EditIcon, ReplayIcon, RunIcon, UploadIcon } from "./icons";
+import { DeleteIcon, DownloadIcon, EditIcon, ReplayIcon, RunIcon, UploadIcon } from "./icons";
+import { ScreenFrame, SettingsCard, ToggleSetting } from "./kit";
 import {
   deleteSkill,
   loadSkills,
@@ -56,9 +55,12 @@ export function SkillsView({
   onBack,
   onRun,
   onReplay,
-  onUseCommand
+  onUseCommand,
+  embedded
 }: {
   onBack: () => void;
+  /** Inside Settings: no back button of its own. */
+  embedded?: boolean;
   onRun: (skill: UserSkill) => void;
   onReplay: (workflow: SavedWorkflow) => void;
   /** Puts "/name " in the chat box so the person can add the details. */
@@ -131,31 +133,40 @@ export function SkillsView({
     await refresh();
   };
 
+  const importButtons = (
+    <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+      <Button size="small" startIcon={<UploadIcon fontSize="small" />} onClick={() => fileInput.current?.click()}>
+        From a file
+      </Button>
+      <Button size="small" onClick={() => setLink(link === null ? "" : null)}>
+        From a link
+      </Button>
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".md,text/markdown,text/plain"
+        multiple
+        hidden
+        data-testid="skill-import-input"
+        onChange={(event) => void importFiles(event.target.files)}
+      />
+    </Stack>
+  );
+
   return (
-    <Box sx={{ minHeight: "100vh", p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-        <IconButton onClick={onBack} aria-label="Back to chat">
-          <BackIcon />
-        </IconButton>
-        <Typography variant="h6" sx={{ flex: 1 }}>
-          Skills
-        </Typography>
-        <Button size="small" startIcon={<UploadIcon fontSize="small" />} onClick={() => fileInput.current?.click()}>
-          Import SKILL.md
-        </Button>
-        <Button size="small" onClick={() => setLink(link === null ? "" : null)}>
-          From a link
-        </Button>
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".md,text/markdown,text/plain"
-          multiple
-          hidden
-          data-testid="skill-import-input"
-          onChange={(event) => void importFiles(event.target.files)}
-        />
-      </Stack>
+    <ScreenFrame
+      title={embedded ? "Saved Skills" : "Skills"}
+      embedded={embedded}
+      onBack={onBack}
+      action={importButtons}
+      intro={
+        <>
+          A Skill is a task BrowserHarness has learned and can repeat. Run one here, or type <code>/</code> and its name
+          in the chat. When you ask for something similar, it follows the Skill by itself. A shorter way updates the
+          Skill, and a run that goes wrong teaches it a lesson.
+        </>
+      }
+    >
       {link !== null && (
         <Stack direction="row" spacing={1} mb={1.5}>
           <TextField
@@ -175,25 +186,22 @@ export function SkillsView({
           </Button>
         </Stack>
       )}
-      <Typography variant="body2" color="text.secondary" mb={2}>
-        A Skill is a task BrowserHarness has learned. Run one here or type <code>/</code> and its name in the chat.
-        When you ask for something similar, it follows the Skill on its own. A shorter way updates the Skill, and a run
-        that goes wrong teaches it a lesson.
-      </Typography>
-
-      <FormControlLabel
-        sx={{ mb: 1 }}
-        control={
-          <Switch
+      <Box mb={2.5}>
+        <SettingsCard>
+          <ToggleSetting
+            label="Learn Skills on its own"
+            help="When a task takes several steps and works, BrowserHarness keeps it as a Skill and does it faster next time."
+            whenOn="Finished tasks with several steps are saved as Skills marked “Learned on its own”, and it follows a matching Skill next time."
+            whenOff="It only keeps the Skills you save yourself with the “Save as Skill” button."
+            recommended="Keep this on. You can delete any Skill it learns, or press “Keep” to make it permanent."
             checked={autoSkills}
-            onChange={async (event) => {
-              setAutoSkills(event.target.checked);
-              await updatePreferences({ autoSkills: event.target.checked });
+            onChange={async (value) => {
+              setAutoSkills(value);
+              await updatePreferences({ autoSkills: value });
             }}
           />
-        }
-        label="Learn Skills on my own: keep finished multi-step tasks, and follow a matching Skill next time"
-      />
+        </SettingsCard>
+      </Box>
 
       {notice && (
         <Alert severity={notice.severity} onClose={() => setNotice(null)} sx={{ mb: 2 }}>
@@ -340,7 +348,7 @@ export function SkillsView({
           </Typography>
           <Typography variant="body2" color="text.secondary" mb={1}>
             Each one gives you commands. Type one in the chat, like <code>/name what to search</code>, and it runs
-            straight away. Coding agents and the Bridge can run them too.
+            straight away. Coding tools and the helper app can run them too.
           </Typography>
           <Stack spacing={1.5} mb={2}>
             {siteSkills.map((site) => (
@@ -413,7 +421,6 @@ export function SkillsView({
         </>
       )}
 
-      <Button onClick={onBack}>Back to chat</Button>
-    </Box>
+    </ScreenFrame>
   );
 }

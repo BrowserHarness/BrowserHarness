@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  Alert,
   Box,
   Button,
   Chip,
@@ -14,6 +13,7 @@ import {
   Typography
 } from "@mui/material";
 import { DeleteIcon, RunIcon } from "./icons";
+import { Note, PageTitle, SettingsCard, useConfirm } from "./kit";
 import { BRIDGE_STATUS_KEY, loadBridgeStatus } from "../settings/bridge-store";
 import {
   CHAT_APP_LABELS,
@@ -53,8 +53,10 @@ function scheduleFrom(when: When, time: string, day: number, hours: number, at: 
 }
 
 const STATUS_COLOR = { worked: "success", failed: "error", "needs you": "warning" } as const;
+const STATUS_LABEL = { worked: "Worked", failed: "Didn't work", "needs you": "Needs you" } as const;
 
-export function ScheduledView() {
+export function ScheduledView({ embedded }: { embedded?: boolean } = {}) {
+  const [dialog, confirm] = useConfirm();
   const [items, setItems] = useState<ScheduledTask[]>([]);
   const [task, setTask] = useState("");
   const [when, setWhen] = useState<When>("weekdays");
@@ -94,15 +96,27 @@ export function ScheduledView() {
     await refresh();
   };
 
+  const intro = (
+    <>
+      BrowserHarness runs these by itself while Chrome is open, each in its own background tab, and tells you when they
+      finish. Anything that needs your OK waits for you. You can also type <code>/schedule every weekday at 8am …</code>{" "}
+      in the chat.
+    </>
+  );
+
   return (
     <Box>
-      <Typography variant="body2" color="text.secondary" mb={1.5}>
-        BrowserHarness runs these while Chrome is open, each in its own background tab, and tells you when they finish.
-        Anything that needs your approval waits for you. You can also type <code>/schedule every weekday at 8am …</code> in
-        the chat.
-      </Typography>
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
-        <Stack spacing={1.25}>
+      {dialog}
+      {embedded ? (
+        <PageTitle title="Scheduled tasks" intro={intro} />
+      ) : (
+        <Typography variant="body2" color="text.secondary" mb={1.5}>
+          {intro}
+        </Typography>
+      )}
+      <Box mb={2.5}>
+      <SettingsCard title={embedded ? "Add a scheduled task" : undefined}>
+        <Stack spacing={1.5}>
           <TextField
             size="small"
             label="What should it do?"
@@ -112,7 +126,7 @@ export function ScheduledView() {
             multiline
             maxRows={4}
           />
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <TextField
               select
               size="small"
@@ -143,11 +157,12 @@ export function ScheduledView() {
               <TextField
                 size="small"
                 type="number"
-                label="Hours"
+                label="Every how many hours"
+                helperText="1 to 24 hours"
                 value={hours}
                 onChange={(event) => setHours(Number(event.target.value))}
                 slotProps={{ htmlInput: { min: 1, max: 24 } }}
-                sx={{ width: 90 }}
+                sx={{ width: 170 }}
               />
             )}
             {when === "once" && (
@@ -178,17 +193,20 @@ export function ScheduledView() {
               ))}
             </TextField>
           )}
-          {error && <Alert severity="warning">{error}</Alert>}
+          {error && <Note kind="warning">{error}</Note>}
           <Box>
-            <Button variant="contained" size="small" disabled={!task.trim()} onClick={() => void add()}>
+            <Button variant="contained" disabled={!task.trim()} onClick={() => void add()}>
               Schedule it
             </Button>
           </Box>
         </Stack>
-      </Paper>
+      </SettingsCard>
+      </Box>
 
       {items.length === 0 ? (
-        <Alert severity="info">Nothing scheduled yet.</Alert>
+        <Note kind="info" title="Nothing scheduled yet">
+          For example: “Every weekday at 8:00, check my inbox and list new invoices”.
+        </Note>
       ) : (
         <Stack spacing={1.5}>
           {items.map((item) => (
@@ -212,12 +230,12 @@ export function ScheduledView() {
                   {describeSchedule(item.schedule)}
                   {item.enabled && item.next_run_at
                     ? ` · next ${new Date(item.next_run_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`
-                    : " · off"}
+                    : " · turned off"}
                   {item.deliver_to ? ` · results also go to ${CHAT_APP_LABELS[item.deliver_to]}` : ""}
                 </Typography>
                 {item.last_status && (
                   <Stack direction="row" spacing={1} alignItems="flex-start">
-                    <Chip size="small" color={STATUS_COLOR[item.last_status]} label={item.last_status} />
+                    <Chip size="small" color={STATUS_COLOR[item.last_status]} label={STATUS_LABEL[item.last_status]} />
                     <Typography variant="body2" sx={{ flex: 1, whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}>
                       {item.last_result}
                     </Typography>
@@ -261,6 +279,13 @@ export function ScheduledView() {
                       size="small"
                       aria-label={`Delete scheduled task ${item.task}`}
                       onClick={async () => {
+                        const ok = await confirm({
+                          title: "Delete this scheduled task?",
+                          body: `“${item.task}” won't run again. To pause it instead, use its on/off switch.`,
+                          confirmLabel: "Delete",
+                          danger: true
+                        });
+                        if (!ok) return;
                         await deleteScheduledTask(item.id);
                         await refresh();
                       }}

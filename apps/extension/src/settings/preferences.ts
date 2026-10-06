@@ -1,5 +1,8 @@
 export type AppearanceMode = "system" | "light" | "dark";
 
+/** How big the words are on every BrowserHarness screen. */
+export type TextSize = "normal" | "large" | "larger";
+
 /**
  * When the agent asks before acting:
  * - risky: only for send, submit, buy, delete and account changes (default)
@@ -16,6 +19,7 @@ export interface UserPreferences {
   learnAboutMe: boolean;
   /** Keep finished multi-step tasks as Skills, and use matching Skills as hints. */
   autoSkills: boolean;
+  textSize: TextSize;
 }
 
 const KEY = "browserharness.preferences";
@@ -25,7 +29,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   retainTaskHistory: true,
   approvalMode: "risky",
   learnAboutMe: true,
-  autoSkills: true
+  autoSkills: true,
+  textSize: "normal"
 };
 
 export async function loadPreferences(): Promise<UserPreferences> {

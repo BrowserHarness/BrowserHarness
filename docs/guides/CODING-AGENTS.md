@@ -20,7 +20,7 @@ The installer:
 - asks for the pairing code (step 2).
 
 ## 2. Pair Chrome
-In Chrome, open BrowserHarness → Settings → **Coding agents** and press
+In Chrome, open BrowserHarness → Settings → **Helper app** and press
 **Pair**. Type the 6-digit code it shows into the terminal. The side panel then
 says **Connected**. To pair later: `browserharness-bridge pair`.
 

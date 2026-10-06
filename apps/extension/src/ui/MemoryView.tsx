@@ -1,19 +1,17 @@
 import { useEffect, useState } from "react";
 import {
-  Alert,
   Box,
   Button,
   Chip,
-  FormControlLabel,
   IconButton,
   Paper,
   Stack,
-  Switch,
   TextField,
   Tooltip,
   Typography
 } from "@mui/material";
-import { BackIcon, DeleteIcon, EditIcon } from "./icons";
+import { DeleteIcon, EditIcon } from "./icons";
+import { Note, ScreenFrame, SettingsCard, ToggleSetting, useConfirm } from "./kit";
 import {
   addFacts,
   clearAboutMe,
@@ -57,36 +55,27 @@ function InstructionsCard() {
   };
 
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
-      <Typography variant="subtitle2" mb={0.5}>
-        How BrowserHarness should work for you
-      </Typography>
-      <Typography variant="body2" color="text.secondary" mb={1}>
-        A few lines it follows in every chat, task and scheduled run, unless a request says otherwise. They never switch
-        off approvals.
-      </Typography>
+    <SettingsCard
+      title="Your wishes"
+      intro="A few lines it follows in every chat, task and scheduled run, unless a request says otherwise. They never switch off the approvals you chose under Safety."
+    >
       <TextField
         fullWidth
         multiline
         minRows={3}
         maxRows={10}
-        size="small"
         label="Your instructions"
         placeholder={"Answer briefly.\nShow prices in rupees.\nNever buy anything over ₹5,000 without asking me."}
+        helperText={`Write one wish per line, the way you would tell a person. Up to ${MAX_INSTRUCTIONS} letters (${text.length} used).`}
         value={text}
         onChange={(event) => setText(event.target.value.slice(0, MAX_INSTRUCTIONS))}
       />
-      {note && (
-        <Alert severity={note.severity} sx={{ mt: 1 }} onClose={() => setNote(null)}>
-          {note.text}
-        </Alert>
-      )}
-      <Stack direction="row" spacing={1} mt={1}>
-        <Button variant="contained" size="small" disabled={text.trim() === saved} onClick={() => void save(text)}>
+      {note && <Note kind={note.severity === "success" ? "success" : "warning"}>{note.text}</Note>}
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        <Button variant="contained" disabled={text.trim() === saved} onClick={() => void save(text)}>
           Save instructions
         </Button>
         <Button
-          size="small"
           disabled={!saved}
           onClick={() => {
             const url = URL.createObjectURL(new Blob([instructionsFile(saved)], { type: "text/markdown" }));
@@ -97,10 +86,10 @@ function InstructionsCard() {
             setTimeout(() => URL.revokeObjectURL(url), 1000);
           }}
         >
-          Download
+          Save a copy to a file
         </Button>
-        <Button size="small" component="label">
-          Load from file
+        <Button component="label">
+          Load from a file
           <input
             hidden
             type="file"
@@ -114,16 +103,19 @@ function InstructionsCard() {
           />
         </Button>
       </Stack>
-    </Paper>
+    </SettingsCard>
   );
 }
 
-export function MemoryView({ onBack }: { onBack: () => void }) {
+const NOT_SAVED = "That looks like a password, card or ID number, so it isn't saved. BrowserHarness never keeps those.";
+
+export function MemoryView({ onBack, embedded }: { onBack: () => void; embedded?: boolean }) {
   const [facts, setFacts] = useState<AboutMeFact[]>([]);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [learn, setLearn] = useState(true);
   const [error, setError] = useState("");
+  const [dialog, confirm] = useConfirm();
 
   const refresh = async () => setFacts(await loadAboutMe());
 
@@ -135,7 +127,7 @@ export function MemoryView({ onBack }: { onBack: () => void }) {
   const add = async () => {
     if (!draft.trim()) return;
     if (!isStorableFact(draft)) {
-      setError("That looks like a password, card or ID number, so it isn't saved.");
+      setError(NOT_SAVED);
       return;
     }
     setError("");
@@ -147,7 +139,7 @@ export function MemoryView({ onBack }: { onBack: () => void }) {
   const saveEdit = async () => {
     if (!editing) return;
     if (!(await updateFact(editing.id, editing.text))) {
-      setError("That looks like a password, card or ID number, so it isn't saved.");
+      setError(NOT_SAVED);
       return;
     }
     setError("");
@@ -155,127 +147,134 @@ export function MemoryView({ onBack }: { onBack: () => void }) {
     await refresh();
   };
 
+  const forgetAll = async () => {
+    const ok = await confirm({
+      title: "Forget every fact about you?",
+      body: `All ${facts.length} saved fact${facts.length === 1 ? "" : "s"} will be deleted. Your wishes stay. This can't be undone.`,
+      confirmLabel: "Forget everything",
+      danger: true
+    });
+    if (!ok) return;
+    await clearAboutMe();
+    await refresh();
+  };
+
   return (
-    <Box sx={{ minHeight: "100vh", p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-        <IconButton onClick={onBack} aria-label="Back to chat">
-          <BackIcon />
-        </IconButton>
-        <Typography variant="h6" sx={{ flex: 1 }}>
-          About me
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" mb={2}>
-        BrowserHarness keeps these facts in mind for every task, so you don't have to repeat yourself. They stay on
-        this device. Type <code>/remember</code> in the chat to add one. When something changes, like where you live,
-        the new fact replaces the old one.
-      </Typography>
-      <Typography variant="body2" color="text.secondary" mb={2}>
-        It also remembers your past conversations: ask “what did I find last week about…?” or type{" "}
-        <code>/recall</code> and a few words. Turn off task history in Settings to stop this.
-      </Typography>
+    <ScreenFrame
+      title={embedded ? "About you" : "About me"}
+      embedded={embedded}
+      onBack={onBack}
+      intro="BrowserHarness keeps these in mind for every task, so you don't have to repeat yourself. They stay on this computer."
+    >
+      {dialog}
+      <Stack spacing={2.5}>
+        <SettingsCard
+          title="Facts about you"
+          intro={
+            <>
+              Things like your city, your sizes or your favourite airline. You can also type <code>/remember</code> and
+              a fact in the chat. When something changes, the new fact replaces the old one.
+            </>
+          }
+        >
+          <Stack direction="row" spacing={1} alignItems="flex-start">
+            <TextField
+              fullWidth
+              label="Add a fact about you"
+              placeholder="I prefer aisle seats"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void add();
+              }}
+            />
+            <Button variant="contained" onClick={() => void add()} disabled={!draft.trim()} sx={{ mt: 1 }}>
+              Add
+            </Button>
+          </Stack>
+          {error && <Note kind="warning">{error}</Note>}
+          {facts.length === 0 ? (
+            <Note kind="info">Nothing saved yet.</Note>
+          ) : (
+            <Stack spacing={1}>
+              {facts.map((fact) => (
+                <Paper variant="outlined" sx={{ p: 1, pl: 1.5 }} key={fact.id} data-testid="about-me-fact">
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    {editing?.id === fact.id ? (
+                      <TextField
+                        size="small"
+                        fullWidth
+                        autoFocus
+                        label="Change this fact"
+                        value={editing.text}
+                        onChange={(event) => setEditing({ id: fact.id, text: event.target.value })}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void saveEdit();
+                          if (event.key === "Escape") setEditing(null);
+                        }}
+                        onBlur={() => void saveEdit()}
+                      />
+                    ) : (
+                      <Typography variant="body1" sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                        {fact.text}
+                      </Typography>
+                    )}
+                    {fact.source === "learned" && (
+                      <Tooltip title="It noticed this in one of your requests">
+                        <Chip size="small" label="learned" variant="outlined" />
+                      </Tooltip>
+                    )}
+                    <Tooltip title="Change">
+                      <IconButton size="small" aria-label={`Edit ${fact.text}`} onClick={() => setEditing({ id: fact.id, text: fact.text })}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete">
+                      <IconButton
+                        size="small"
+                        aria-label={`Delete ${fact.text}`}
+                        onClick={async () => {
+                          await removeFact(fact.id);
+                          await refresh();
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                </Paper>
+              ))}
+              <Box>
+                <Button color="error" variant="outlined" size="small" onClick={() => void forgetAll()}>
+                  Forget everything
+                </Button>
+              </Box>
+            </Stack>
+          )}
+        </SettingsCard>
 
-      <InstructionsCard />
+        <InstructionsCard />
 
-      <Stack direction="row" spacing={1} mb={1}>
-        <TextField
-          size="small"
-          fullWidth
-          label="Add a fact about you"
-          placeholder="I prefer aisle seats"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void add();
-          }}
-        />
-        <Button variant="contained" onClick={() => void add()} disabled={!draft.trim()}>
-          Add
-        </Button>
-      </Stack>
-      {error && (
-        <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setError("")}>
-          {error}
-        </Alert>
-      )}
-      <FormControlLabel
-        sx={{ mb: 2 }}
-        control={
-          <Switch
+        <SettingsCard>
+          <ToggleSetting
+            label="Remember facts you mention"
+            help="When you say things like “my name is…” or “I prefer…” in a request, it saves them here."
+            whenOn="It notices facts in your requests and adds them to the list above, marked “learned”."
+            whenOff="Only the facts you add yourself are kept."
+            recommended="Keep this on. It never saves passwords, card numbers or ID numbers."
             checked={learn}
-            onChange={async (event) => {
-              setLearn(event.target.checked);
-              await updatePreferences({ learnAboutMe: event.target.checked });
+            onChange={async (value) => {
+              setLearn(value);
+              await updatePreferences({ learnAboutMe: value });
             }}
           />
-        }
-        label="Learn from my requests (like “my name is…” or “I prefer…”)"
-      />
+        </SettingsCard>
 
-      {facts.length === 0 ? (
-        <Alert severity="info">Nothing saved yet.</Alert>
-      ) : (
-        <Stack spacing={1}>
-          {facts.map((fact) => (
-            <Paper variant="outlined" sx={{ p: 1 }} key={fact.id} data-testid="about-me-fact">
-              <Stack direction="row" spacing={1} alignItems="center">
-                {editing?.id === fact.id ? (
-                  <TextField
-                    size="small"
-                    fullWidth
-                    autoFocus
-                    value={editing.text}
-                    onChange={(event) => setEditing({ id: fact.id, text: event.target.value })}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") void saveEdit();
-                      if (event.key === "Escape") setEditing(null);
-                    }}
-                    onBlur={() => void saveEdit()}
-                  />
-                ) : (
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    {fact.text}
-                  </Typography>
-                )}
-                {fact.source === "learned" && <Chip size="small" label="learned" variant="outlined" />}
-                <Tooltip title="Edit">
-                  <IconButton size="small" aria-label={`Edit ${fact.text}`} onClick={() => setEditing({ id: fact.id, text: fact.text })}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Delete">
-                  <IconButton
-                    size="small"
-                    aria-label={`Delete ${fact.text}`}
-                    onClick={async () => {
-                      await removeFact(fact.id);
-                      await refresh();
-                    }}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              </Stack>
-            </Paper>
-          ))}
-          <Box>
-            <Button
-              color="error"
-              size="small"
-              onClick={async () => {
-                await clearAboutMe();
-                await refresh();
-              }}
-            >
-              Forget everything
-            </Button>
-          </Box>
-        </Stack>
-      )}
-
-      <Button sx={{ mt: 2 }} onClick={onBack}>
-        Back to chat
-      </Button>
-    </Box>
+        <Note kind="tip" title="It also remembers your past tasks">
+          Ask “what did I find last week about kettles?” or type <code>/recall</code> and a few words. To stop this,
+          turn off task history under Settings, Learning &amp; memory.
+        </Note>
+      </Stack>
+    </ScreenFrame>
   );
 }
