@@ -413,7 +413,8 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     discordSetup.json?.bot === "harness" && discordSetup.json?.invite?.includes("client_id=999") && discordSetup.json?.restarted === true,
     discordSetup.stderr?.trim()
   );
-  await bridgeAsync(installed, "discord", "allow", "42");
+  const discordAllow = await bridgeAsync(installed, "discord", "allow", "42");
+  check("discord allow adds the account", discordAllow.json?.allowed_user_ids?.includes("42"), discordAllow.stderr?.trim());
   await reconnected();
   await waitFor(() => discord.sockets.size, 10_000);
   const discordSay = (author, content, guild) =>
@@ -431,7 +432,8 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 
   const slackSetup = await bridgeAsync(installed, "slack", "setup", "--bot-token", "xoxb-e2e", "--app-token", "xapp-e2e");
   check("slack setup checks both tokens", slackSetup.json?.bot === "harness" && slackSetup.json?.team === "Home", slackSetup.stderr?.trim());
-  await bridgeAsync(installed, "slack", "allow", "U42");
+  const slackAllow = await bridgeAsync(installed, "slack", "allow", "U42");
+  check("slack allow adds the account", slackAllow.json?.allowed_user_ids?.includes("U42"), slackAllow.stderr?.trim());
   await reconnected();
   await waitFor(() => slack.sockets.size, 10_000);
   [...slack.sockets].forEach((socket) =>
@@ -448,7 +450,8 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 
   const signalSetup = await bridgeAsync(installed, "signal", "setup", "--number", "+15559998888", "--command", fakeSignal);
   check("signal setup finds signal-cli", signalSetup.json?.signal_cli === "signal-cli 0.13.0" && signalSetup.json?.number === "+15559998888", signalSetup.stderr?.trim());
-  await bridgeAsync(installed, "signal", "allow", "+15550001111");
+  const signalAllow = await bridgeAsync(installed, "signal", "allow", "+15550001111");
+  check("signal allow adds the number", signalAllow.json?.allowed_user_ids?.includes("+15550001111"), signalAllow.stderr?.trim());
   await reconnected();
   fs.writeFileSync(
     signalInbox,
@@ -461,7 +464,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 
   const chats = await bridgeAsync(installed, "chats");
   const listedChats = Object.fromEntries((chats.json?.chats || []).map((chat) => [chat.app, chat.on && chat.allowed === 1]));
-  check("chats shows all four apps set up, without tokens", Object.values(listedChats).filter(Boolean).length === 4 && !JSON.stringify(chats.json).includes("xoxb"), JSON.stringify(chats.json));
+  check("chats shows all four apps set up, without tokens", Object.values(listedChats).filter(Boolean).length === 4 && !/xoxb-e2e|xapp-e2e|discord-token|123:abc/.test(JSON.stringify(chats.json)), JSON.stringify(chats.json));
   const allHistory = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.taskHistory"))["browserharness.taskHistory"] || []);
   check(
     "each task is in history with the app it came from",

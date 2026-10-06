@@ -500,7 +500,7 @@ const CHAT_APPS = {
   },
   discord: {
     usage: "discord setup --token <bot token from the Discord Developer Portal>",
-    idPattern: /^\d{5,25}$/,
+    idPattern: /^\d+$/,
     idHint: "your Discord user id",
     async setup(current) {
       const token = option("token") || process.argv[4];
@@ -518,7 +518,7 @@ const CHAT_APPS = {
   },
   slack: {
     usage: "slack setup --bot-token <xoxb-…> --app-token <xapp-…>",
-    idPattern: /^[UW][A-Z0-9]{4,}$/,
+    idPattern: /^[UW][A-Z0-9]+$/,
     idHint: "your Slack member id",
     async setup(current) {
       const botToken = option("bot-token");
