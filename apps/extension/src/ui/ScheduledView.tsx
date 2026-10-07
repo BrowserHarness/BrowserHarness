@@ -15,6 +15,7 @@ import {
 import { DeleteIcon, RunIcon } from "./icons";
 import { Note, PageTitle, SettingsCard, useConfirm } from "./kit";
 import { useSaved } from "./feedback";
+import { useSpaces } from "./spaces-ui";
 import { BRIDGE_STATUS_KEY, loadBridgeStatus } from "../settings/bridge-store";
 import {
   CHAT_APP_LABELS,
@@ -60,6 +61,9 @@ export function ScheduledView({ embedded }: { embedded?: boolean } = {}) {
   const [dialog, confirm] = useConfirm();
   const saved = useSaved();
   const [items, setItems] = useState<ScheduledTask[]>([]);
+  const { spaces } = useSpaces();
+  // Which Space a scheduled task runs in, when there is more than one Space.
+  const spaceName = (id?: string) => (spaces.length > 1 && id ? spaces.find((space) => space.id === id)?.name : undefined);
   const [task, setTask] = useState("");
   const [when, setWhen] = useState<When>("weekdays");
   const [time, setTime] = useState("08:00");
@@ -236,6 +240,7 @@ export function ScheduledView({ embedded }: { embedded?: boolean } = {}) {
                     ? ` · next ${new Date(item.next_run_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`
                     : " · turned off"}
                   {item.deliver_to ? ` · results also go to ${CHAT_APP_LABELS[item.deliver_to]}` : ""}
+                  {spaceName(item.space_id) ? ` · in ${spaceName(item.space_id)}` : ""}
                 </Typography>
                 {item.last_status && (
                   <Stack direction="row" spacing={1} alignItems="flex-start">

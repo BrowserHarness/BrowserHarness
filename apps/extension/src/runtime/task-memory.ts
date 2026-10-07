@@ -8,14 +8,14 @@ import { redactSecrets, safeSourceUrl, safeSources, safeTitle, type DagNodeStatu
 
 const KEY = "browserharness.taskEpisodes.v1";
 /** Kept per Space. */
-const MAX_EPISODES = 500;
+export const MAX_EPISODES = 500;
 const MAX_TEXT = 1000;
-const MAX_TARGETS = 40;
-const MAX_SITES = 20;
-const MAX_SKILL_REFS = 20;
-const MAX_DELEGATIONS = 20;
+export const MAX_TARGETS = 40;
+export const MAX_SITES = 20;
+export const MAX_SKILL_REFS = 20;
+export const MAX_DELEGATIONS = 20;
 /** Task DAGs per episode; each has at most four nodes. */
-const MAX_DAG_RUNS = 5;
+export const MAX_DAG_RUNS = 5;
 const MAX_DAG_NODES = 4;
 
 export interface TaskEpisodeSkillRef {

@@ -88,7 +88,7 @@ export function skillSlug(name: string): string {
   return slug || "skill";
 }
 
-function uniqueSlug(base: string, taken: string[], ownId?: string, skills: UserSkill[] = []): string {
+export function uniqueSlug(base: string, taken: string[], ownId?: string, skills: UserSkill[] = []): string {
   const others = new Set(
     skills.filter((skill) => skill.id !== ownId).map((skill) => skill.slug).concat(taken)
   );
@@ -149,7 +149,7 @@ function shelf(skill: UserSkill): string {
 }
 
 /** Newest first, at most MAX_SKILLS per Space and MAX_SKILLS shared ones: a busy Space only ever pushes out its own. */
-function capped(skills: UserSkill[]): UserSkill[] {
+export function cappedSkills(skills: UserSkill[]): UserSkill[] {
   const counts = new Map<string, number>();
   return skills.filter((skill) => {
     const key = shelf(skill);
@@ -161,7 +161,7 @@ function capped(skills: UserSkill[]): UserSkill[] {
 
 /** Saves the store, capped per shelf; returns what was kept. */
 async function store(skills: UserSkill[]): Promise<UserSkill[]> {
-  const kept = capped(skills);
+  const kept = cappedSkills(skills);
   await chrome.storage.local.set({ [KEY]: kept });
   return kept;
 }

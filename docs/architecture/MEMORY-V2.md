@@ -404,7 +404,7 @@ No bulk or destructive migration (legacy Skills are normalized on read and may b
 - Space backups don't include Skills yet (Phase 9).
 - The decisions store still has one overall cap of 300 (follow-up 4).
 
-## 3g. Phase 8: task, helper and verifier provenance (PR #44)
+## 3g. Phase 8: task, helper and verifier provenance (PR #44, merged at main 138bb9d)
 
 **A remembered task result is only as trustworthy as the evidence and verification attached to it.** A saved task now keeps who found a claim, which sources they used, which verifier checked it and what the verifier concluded, with every edge, inside the task's Space. No second verifier was built: the existing Task DAG (`runtime/task-dag.ts`) and helper batch (`runtime/subagent-supervisor.ts`) are unchanged in how they run; only what survives into memory changed.
 
@@ -545,14 +545,114 @@ No migration. Episodes saved before Phase 8 load, search and recall exactly as b
 - Worker tasks and findings are cleaned by name/shape rules (Phase 6 `checkSensitive`) and the URL cleaner by parameter names; an unusual secret parameter name with an ordinary-looking value would be kept.
 - Batch workers keep their sources and tools, not a finding summary (as before).
 - Episode storage is capped per Space while the episode vector pool is one global pool of 500 (follow-up 2).
-- Space backups don't include task provenance yet (Phase 9).
-- The decisions store still has one overall cap of 300 (follow-up 4).
+- Space backups don't include task provenance yet (done in Phase 9).
+- The decisions store still has one overall cap of 300 (done in Phase 9: per-Space shelves, follow-up 4).
+
+Phase 8 final baseline: main 138bb9d, 695 unit tests, all 13 Chromium smokes green, provenance smoke 14/14.
+
+## 3h. Phase 9: complete Space backup and restore (PR #PRNUM)
+
+**A Space backup restores the Space's own memory and learned capabilities, not everything the Space can currently see.** Restoring creates an independent clone with new shared-store identities while preserving the internal relationships that make its memory trustworthy. This is the last planned core Memory v2 phase.
+
+### Before Phase 9
+`backupSpace` (version 1, in `runtime/spaces.ts`) saved only the four Space-keyed stores: chats, About you facts, the Space's wishes and task history. Private decisions, private Skills, task episodes with their helper/DAG/verifier evidence and the Space's schedules were lost. A restored history entry's `session_id` pointed at an episode that was not there, so a contradicted answer would have come back unqualified once episodes were added naively. Restore trusted the file (no cleaning), and deleting a Space left its schedules running with a dead `space_id` (the runner then read and wrote empty `@<dead id>` keys).
+
+### Ownership
+A backup takes what the Space **owns**, decided in one place (`ownedBySpaceId` in `runtime/spaces.ts`, also used by Space deletion), never what it can **see** (`visibleInSpace`, which includes every-Space records).
+
+| Data | Where | Owner | In a Space backup |
+|---|---|---|---|
+| Chats | `browserharness.chats[@space]` | the Space | yes, as an archive (ids kept) |
+| Facts and preferences, with superseded/historical ones | `browserharness.aboutMe[@space]` | the Space | yes (ids and lineage kept) |
+| Wishes (standing instructions) | `browserharness.instructions[@space]` | the Space | yes |
+| Task history (request + answer + `session_id`) | `browserharness.taskHistory[@space]` | the Space | yes (ids kept, `session_id` remapped) |
+| Private decisions, current and earlier | `browserharness.decisions.v1`, `visibility: "space"` | `space_id` | yes, new ids |
+| Private Skills | `browserharness.skills`, `visibility: "space"` | `space_id` | yes, new ids |
+| Task episodes with batch helpers, DAG runs, verifier verdicts | `browserharness.taskEpisodes.v1` | `space_id` (none = Personal) | yes, new ids and sessions |
+| Scheduled tasks | `browserharness.schedules` | `space_id` (only when set) | yes, new ids, restored paused |
+| Every-Space facts, wishes | `…aboutMe.global`, `…instructions.global` | every Space | no |
+| Every-Space decisions and Skills | `visibility: "all"` | every Space | no |
+| Legacy Skills (no Space) | `browserharness.skills` | every Space | no |
+| AI connections, safety, settings, chat-app credentials, site grants | various | account | no |
+| Site Skills, procedural/site memory, Watch Me recordings | `siteSkillLibrary.v2`, `proceduralVectors.v1`, `workflows` | shared on purpose (site knowledge, not about the person) | no |
+| Episode vectors, procedural vectors, embedding caches | `taskEpisodeVectors.v1`, … | derived | no: rebuilt lazily from the restored records |
+| Context Compiler and memory-write diagnostics | `contextDiagnostics`, `memoryWriteDiagnostics` | derived | no |
+| Working memory, task tab sessions | `chrome.storage.session` | per run | no |
+| Chat-app queues, pending memory offers, pending explain | `remoteTasks`, … | short-lived | no |
+| Chat attachments | `attachments.v1` (global, 10 files) | short-lived upload buffer, not referenced by saved chats | no |
+
+Schedules without a `space_id` (made before Spaces) run in whichever Space is active; no Space owns them, so they are neither backed up nor removed with a Space.
+
+### Backup v2 (`runtime/space-backup.ts`)
+```
+{ kind: "browserharness-space-backup", version: 2, saved_at,
+  source_space: { id, name, color },
+  data: { scoped: { chats, aboutMe, instructions, history },
+          tagged: { skills, decisions, episodes },
+          schedules },
+  manifest: { counts: { chats, facts, earlier_facts, instructions, history, decisions,
+                        earlier_decisions, skills, episodes, dag_runs, schedules },
+              left_out: [plain-words list of what is never in a backup and why] } }
+```
+New backups are always version 2. `parseSpaceBackup` reads both versions (and a file with no version as version 1), refuses anything else, and refuses files over 60 MB. Version 1 files restore exactly what they hold, through the same cleaning; there is no file migration. Backup and restore moved from `spaces.ts` to `space-backup.ts` (it needs the stores' rules; `spaces.ts` stays dependency-free).
+
+### Restore: always a new Space
+"Work" comes back as "Work (2)", then "Work (3)"; nothing is merged or overwritten. The restored Space's color is kept when it is one of the palette colors. Steps, all before any write: parse → validate and clean every record → build id maps → rewrite links → cap to the new Space's shelves. Then the Space is created with a pre-chosen id, the shared stores are read again and all keys are written with one `chrome.storage.local.set`, and the result is read back (`spaceContents`). If the write or the read-back fails, `deleteSpace(newId)` removes the Space, its keys, its tagged records and its schedules, and the person sees "The backup couldn't be brought back, so nothing was changed."
+
+### Id remapping
+- **Kept:** chat ids, fact ids, history entry ids (they live under the new Space's own keys), and episode-local ids: `action_id`, `node_id`, `depends_on`, `blocked_by`, `checked_by`, `worker_index`, `skill_refs` (Site Skills, shared).
+- **New:** Skill ids, decision ids, schedule ids, and for episodes a new task session per old session (`crypto.randomUUID()`).
+- **Sessions:** episode `session_id`; `id` = `episode:<new session>:<old suffix>`; `delegations[].session_id` and `parent_session_id`; `dag_runs[].parent_session_id`; node `child_session_id`. A helper session `<old>:worker:…` becomes `<new>:worker:…`, so lineage reads the same. A node that never ran gets no session. A session the backup doesn't explain still gets a fresh id, so two restores never share one.
+- **History:** `session_id` is rewritten to the restored episode's new session; when its episode isn't in the file (a version 1 file), it is dropped, since it links nothing in the new Space.
+- **Space references:** `space_id`, and `provenance.space_id` when it named the source Space, become the new Space. Other Space ids in provenance (a copied Skill's `source_space_id`) are history and stay. Nothing new is invented about where a record came from.
+
+### Decision history
+Decision ids are remapped and `supersedes` / `superseded_by` rewritten through the map ("Forgejo → GitHub" stays linked); a link to a decision that didn't come back (skipped as secret or over the cap) is dropped. `earlierDecisionsFor("What did we use before GitHub?")` works in the copy (tested).
+
+### Decision cap per Space (follow-up 4, closed)
+`decisions.ts` now keeps up to 300 decisions per Space and 300 every-Space decisions (`cappedDecisions`, the same shelf rule as Skills). A full Space only makes room from its own oldest; a decision or a restore in Space B never pushes out Space A's (tested with full shelves). A restore adds the new Space's records in front without re-capping anyone else's shelf.
+
+### Skills
+Only the source Space's own Skills are backed up (`visibility: "space"`, or a Phase 2–6 Skill with that `space_id` and no visibility, which already reads as private) (not every-Space, legacy, other Spaces', built-in or Site Skills). Each comes back with a new id, the new `space_id`, `visibility: "space"`, and the same name, description, steps, start page, lessons, run/success/failure counts, `created_at`, `updated_at`, `last_run_at`, `source` and `provenance` (a restore is not a new learned Skill). `provenance.source_skill_id` follows a Skill in the same backup to its new id; one pointing outside the backup is kept as history. `/commands` are globally unique: the copy keeps its slug when free; when the original still exists it takes the next free one (`/pay-invoice-2`, using the existing `uniqueSlug` with built-in commands reserved), the original is never renamed, the restore summary says so, and a restored schedule that ran `/pay-invoice …` is rewritten to `/pay-invoice-2 …`.
+
+### Facts
+The whole Space fact store: current, superseded and historical, with `valid_from`, `valid_until`, `supersedes`, `superseded_by`, `explicit_scope`, `kind`, `topic` and provenance. "Where did I live before …?" works in the copy (tested). Every-Space facts are never exported.
+
+### Task episodes and the Phase 8 link
+Episodes come back whole: parent task, helper batches with read/act mode, DAG runs, research and verify nodes, sources, findings, dependencies, `checked_by` and verdicts. Nothing is re-run or re-judged, and nothing is trusted more than before: a verdict is kept only on a completed verifier (a malformed one becomes `insufficient`, as Phase 8 stores it), `checked_by` and counts are recomputed from the kept nodes, trust labels are the fixed Phase 8 ones, and DAG nodes are always `mode: "read"`. History `session_id` is remapped to the new session, so `/recall` and the Context Compiler in the copy still hold back a contradicted answer (unit test and Chromium smoke). The vector index is never backed up; restored episodes are found by the normal word search at once and are embedded lazily under their new ids on the next meaning search.
+
+### Schedules
+Backed up when `space_id` names the Space. Restored with a new id, the new `space_id`, `enabled: false` and no `next_run_at`, keeping the task, the schedule, `deliver_to`, `created_at` and the last-run fields (`last_result` re-cleaned). Restoring beside the original therefore never sends an email, chat message or notification twice on its own. Turning one on uses the normal `setScheduleEnabled`, which works out the next run; an expired one-time schedule stays off. The store's limit (50 in all) is never met by pushing anything out: what fits is restored, the rest is counted in `skipped.schedules_no_room` and named in the summary. The Scheduled tasks screen shows which Space each task runs in when there is more than one Space.
+
+### Deleting a Space
+`deleteSpace` removes the Space's keys and everything it owns in the shared stores, now including its schedules, so none runs for a Space that is gone (alarms follow the store change). Emptying Personal removes the same things (its schedules included) and keeps the Space; schedules with no `space_id` stay. Every-Space records are never touched. The confirmation counts chats, decisions, Skills made in the Space and scheduled tasks.
+
+### Restore safety
+A file is untrusted input. Every record is shape-checked and bounded, and cleaned with today's rules: facts through `isStorableFact`, decisions through `checkSensitive` on "subject: value because rationale", wishes line by line, history through `safeHistoryEntry` (`safeSourceUrl` + `redactSecrets`), Skill names, descriptions and lessons through `isSafeToRemember` and Skill steps line by line, episodes through the Phase 8 cleaners (`redactSecrets`, `safeSourceUrl`, `safeTitle`, `safeTask`, `findingSummary`, `safeSources`, `safeTools`), schedule tasks through `checkSensitive` and `last_result` through `redactSecrets`. Ordinary text ("Order #123456", "Product ID B0C12345") is unchanged. Chats are kept as conversation archives and are never turned into memory. A Space backup can never create every-Space memory: a Skill without `visibility: "space"`, or a decision with `scope: "global"` or `visibility: "all"`, is skipped and counted; restored records are always written as the new Space's private records.
+
+### Restore result and screen
+`restoreSpace` returns the new Space, `restored` counts, `skipped` counts (secret, every_space, unreadable, over_limit, schedules_no_room), `renamed_commands`, plain `warnings` and `timings`. Settings → Spaces shows "Brought back as “Work (2)”" with one line per kind ("1 Skill", "2 scheduled tasks (paused until you turn them on)") and the warnings. The page now says what is kept inside each Space (chats, facts and preferences, wishes, past conversations and tasks with what was checked, decisions, Skills, scheduled tasks), what is shared only when chosen (every-Space facts, wishes, decisions, Skills) and what is always shared (AI, safety, settings, Site Skills, recordings), and next to "Save a backup": "The backup file may contain private information from this Space. Keep it somewhere you trust." There is no encryption.
+
+### Bounds and performance
+Per restored Space: 300 chats (400 messages each), 60 current + 100 earlier facts, 2,000-character wishes, 500 history entries, 300 decisions, 200 Skills, 500 episodes; schedules up to the 50 in all. Measured in the unit test on a Space with 251 chats, 200 history entries, 60+ facts, 200 DAG episodes (each with a 2-node DAG and a helper batch), 41 decisions and 21 Skills: backup about 7–17 ms, file about 654 KB, restore about 70–130 ms (prepare about 35 ms, write and read-back about 40 ms).
+
+### Tests
+- `runtime/space-backup.test.ts` (32): v2 contents and counts; nothing every-Space, nothing from another Space, no indexes or short-lived data; full round trip (chat, current and earlier fact, wish, history, current and earlier decision, private Skill, episode, DAG, schedule) with the summary; fact lineage and "before" questions; decision remap and lineage; Skill new id with counts and provenance; contradicted answer stays contradicted through `/recall`; DAG nodes, edges, sources, findings, verdicts, helpers and new sessions; normal search finds restored episodes and no vectors are copied; schedules paused with new ids, original still on, turning on schedules a run; a full schedule store pushes nothing out and counts what was skipped; restore twice with no shared ids, sessions or slugs and each copy linked to its own episode; changing the copy leaves the original unchanged; deleting the copy leaves Work and Home byte-for-byte the same; slug collision and no collision; a Skill tagged with its Space before visibility was kept is backed up and stays private; copied-Skill source remap; full decision, episode and Skill shelves are never pushed out; crafted every-Space injection; secrets with today's rules; evidence never upgraded; non-backups rejected; failed write rolls back to the exact previous storage; version 1 file restores; deleting a Space removes its schedules; emptying Personal; performance.
+- `runtime/spaces.test.ts`: the earlier backup test now reads the v2 file.
+- Real-Chromium smoke `npm run smoke:backup` (20 checks): Work gets facts with history, a wish, decisions with history, a private Skill, an every-Space Skill and decision, a schedule, a saved chat and a DAG task whose verifier contradicts the claim; the Spaces page wording and privacy note; the backup is saved from Settings and holds Work's own records and nothing every-Space; it is brought back from Settings as "Work (2)" with the summary; facts, wish, decisions (new ids, lineage), Skill (private, new id, `/pay-invoice-2`), paused schedule, task evidence (new session, verdict and edges) and the history link are checked; no search index is copied; `/recall` in the copy shows CONTRADICTED and not the old answer; changing the copy's fact, decision and Skill leaves Work unchanged; Personal recalls nothing; deleting the copy names its Skill and schedule and removes only what it owned. The spaces smoke's backup check now expects version 2.
+
+### Remaining gaps after Phase 9
+- A backup file is plain JSON, not encrypted; the screen says to keep it somewhere trusted.
+- Restore always creates a new Space; merging a backup into an existing Space is not offered.
+- Chats are restored as archives as they were, without secret cleaning (they are what was said, never memory).
+- The episode vector pool is still one global pool of 500 (follow-up 2); restored episodes are re-embedded lazily.
+- Secret detection remains rule-based (Phase 6), on restore as on write.
 
 ## 4. Recorded follow-ups
 1. Done in Phase 7: legacy Skills read as an explicit every-Space Skill marked `legacy`. (Was: Skills saved before Memory v2 have no scope and are read as `visibility: "all"`.) Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
 2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
 3. Done in Phase 4: same-topic replacement now keeps the older fact as superseded history.
-4. Decisions live in one store (`browserharness.decisions.v1`) with one overall cap of 300. One busy Space must eventually not be able to push out another Space's decision history: cap per Space (as episodes are) or keep current decisions outside the cap. This is the same kind of issue as follow-up 2.
+4. Done in Phase 9: decisions are capped per Space (300) and for every Space (300), so one Space never pushes out another's. (Was: one store with one overall cap of 300.)
 5. Done: reads go through `MemorySource` (Phase 5) and writes through the write pipeline and `MemoryWriter` (Phase 6).
 
 ### Remaining gaps after Phase 5
@@ -577,5 +677,5 @@ No migration. Episodes saved before Phase 8 load, search and recall exactly as b
 - The decisions store still has one overall cap of 300 (follow-up 4).
 
 ## 5. Recommended next phases
-- Done: Phase 6, the Memory Write Pipeline; Phase 7, Skill scope, sharing and copying; Phase 8, task, helper and verifier provenance.
-- Next: backup of tagged records including decisions, Skills, episodes and their provenance (Phase 9). Memory-provider adapters implement `MemorySource`.
+- Done: Phase 6, the Memory Write Pipeline; Phase 7, Skill scope, sharing and copying; Phase 8, task, helper and verifier provenance; Phase 9, complete Space backup and restore.
+- Phase 9 is the last planned core Memory v2 phase. After review, Memory v2 expansion stops by default; the remaining items are sorted into MVP blockers, post-MVP hardening and future provider/index work, and work returns to the MVP roadmap. Memory-provider adapters implement `MemorySource`.

@@ -1,8 +1,10 @@
 // Spaces: separate places for separate parts of someone's life ("Work",
 // "Family trip", "Home"). Each Space keeps its own chats, its own notes about
 // the person, its own standing instructions and its own past conversations,
-// so nothing from one leaks into another. Skills, connected AIs, safety
-// choices and scheduled tasks are shared by every Space.
+// so nothing from one leaks into another. Its own decisions, Skills, task
+// evidence and scheduled tasks live in shared stores tagged with the Space.
+// Connected AIs, safety choices, settings and anything deliberately set "for
+// every Space" are shared.
 //
 // The first Space ("Personal") uses the storage keys BrowserHarness always
 // used, so nothing has to move when someone updates. Every other Space adds
@@ -27,7 +29,7 @@ export const MAX_SPACES = 20;
 export const MAX_SPACE_NAME = 40;
 export const SPACE_COLORS = ["#4f6bed", "#16a34a", "#d97706", "#db2777", "#7c3aed", "#0891b2", "#dc2626", "#64748b"];
 
-/** What each Space keeps for itself. Everything else is shared. */
+/** Stores each Space keeps under its own key. Its records in shared stores are tagged (below). */
 export const SPACE_SCOPED_KEYS = {
   chats: "browserharness.chats",
   aboutMe: "browserharness.aboutMe",
@@ -45,6 +47,27 @@ export const SPACE_TAGGED_KEYS = {
   episodes: "browserharness.taskEpisodes.v1",
   decisions: "browserharness.decisions.v1"
 } as const;
+
+/** Scheduled tasks: shared store, each one run in the Space named by its space_id. */
+export const SCHEDULES_KEY = "browserharness.schedules";
+
+export type OwnedKind = keyof typeof SPACE_TAGGED_KEYS | "schedules";
+
+/**
+ * True when a record in a shared store is owned by this Space: what a Space
+ * backup takes and what deleting the Space removes. Owning is not seeing:
+ * anything shared with every Space (visibility "all", or a Skill from before
+ * Skills belonged to a Space) is owned by no Space. A schedule belongs to a
+ * Space only when it names one.
+ */
+export function ownedBySpaceId(kind: OwnedKind, record: unknown, id: string): boolean {
+  if (!record || typeof record !== "object") return false;
+  const item = record as { space_id?: unknown; visibility?: unknown; scope?: unknown };
+  if (kind === "schedules") return typeof item.space_id === "string" && item.space_id === id;
+  if (item.visibility === "all" || item.scope === "global") return false;
+  if (kind === "skills" && !item.space_id) return false;
+  return ((typeof item.space_id === "string" && item.space_id) || DEFAULT_SPACE_ID) === id;
+}
 
 const KEY = SPACES_STORAGE_KEY;
 
@@ -106,7 +129,7 @@ export function cleanSpaceName(name: string): string {
   return name.replace(/\s+/g, " ").trim().slice(0, MAX_SPACE_NAME);
 }
 
-export async function createSpace(name: string, options: { switchTo?: boolean } = {}): Promise<{ ok: true; space: Space } | { ok: false; error: string }> {
+export async function createSpace(name: string, options: { switchTo?: boolean; id?: string; color?: string } = {}): Promise<{ ok: true; space: Space } | { ok: false; error: string }> {
   const value = cleanSpaceName(name);
   if (!value) return { ok: false, error: "Give the Space a name, like Work or Family." };
   const state = await loadState();
@@ -114,10 +137,13 @@ export async function createSpace(name: string, options: { switchTo?: boolean } 
   if (state.spaces.some((space) => space.name.toLowerCase() === value.toLowerCase())) {
     return { ok: false, error: `You already have a Space called ${value}.` };
   }
+  if (options.id && (options.id === DEFAULT_SPACE_ID || state.spaces.some((space) => space.id === options.id))) {
+    return { ok: false, error: "That Space already exists." };
+  }
   const space: Space = {
-    id: crypto.randomUUID().slice(0, 8),
+    id: options.id || crypto.randomUUID().slice(0, 8),
     name: value,
-    color: SPACE_COLORS[state.spaces.length % SPACE_COLORS.length],
+    color: options.color && SPACE_COLORS.includes(options.color) ? options.color : SPACE_COLORS[state.spaces.length % SPACE_COLORS.length],
     created_at: new Date().toISOString()
   };
   await storeState({ spaces: [...state.spaces, space], active: options.switchTo === false ? state.active : space.id });
@@ -147,9 +173,11 @@ export async function switchSpace(id: string): Promise<void> {
 }
 
 /**
- * Deletes a Space and everything it kept (chats, notes about you,
- * instructions, past conversations). The first Space can only be emptied,
- * never removed, so there is always somewhere to be.
+ * Deletes a Space and everything it owns: chats, notes about you,
+ * instructions, past conversations, and its own decisions, Skills, task
+ * evidence and scheduled tasks. Anything set for every Space stays. The first
+ * Space can only be emptied (the same things go), never removed, so there is
+ * always somewhere to be.
  */
 export async function deleteSpace(id: string): Promise<void> {
   const state = await loadState();
@@ -160,65 +188,17 @@ export async function deleteSpace(id: string): Promise<void> {
   await storeState({ spaces, active: state.active === id ? DEFAULT_SPACE_ID : state.active });
 }
 
-/** Removes one Space's own records from the shared stores; shared-with-everyone ones stay. */
+/**
+ * Removes one Space's own records from the shared stores, its scheduled
+ * tasks included (a schedule must never run for a Space that is gone);
+ * shared-with-everyone ones stay. Their alarms go when the store changes.
+ */
 async function removeTaggedRecords(id: string): Promise<void> {
-  for (const key of Object.values(SPACE_TAGGED_KEYS)) {
+  const stores: Array<[OwnedKind, string]> = [...(Object.entries(SPACE_TAGGED_KEYS) as Array<[OwnedKind, string]>), ["schedules", SCHEDULES_KEY]];
+  for (const [kind, key] of stores) {
     const value = (await chrome.storage.local.get(key))[key];
     if (!Array.isArray(value)) continue;
-    const kept = value.filter((record: { space_id?: string; visibility?: string }) => {
-      // Skills from before Spaces had a say carry no tag and are shared by every Space.
-      if (record?.visibility === "all" || (key === SPACE_TAGGED_KEYS.skills && !record?.space_id)) return true;
-      return (record?.space_id || DEFAULT_SPACE_ID) !== id;
-    });
+    const kept = value.filter((record) => !ownedBySpaceId(kind, record, id));
     if (kept.length !== value.length) await chrome.storage.local.set({ [key]: kept });
   }
-}
-
-/** Everything a Space keeps, as one file people can save and bring back later. */
-export interface SpaceBackup {
-  kind: "browserharness-space-backup";
-  version: 1;
-  saved_at: string;
-  space: { name: string; color: string };
-  data: Partial<Record<keyof typeof SPACE_SCOPED_KEYS, unknown>>;
-}
-
-export async function backupSpace(id: string): Promise<SpaceBackup> {
-  const { spaces } = await loadSpaces();
-  const space = spaces.find((item) => item.id === id) ?? defaultSpace();
-  const data: SpaceBackup["data"] = {};
-  for (const [name, base] of Object.entries(SPACE_SCOPED_KEYS) as [keyof typeof SPACE_SCOPED_KEYS, string][]) {
-    const key = keyForSpace(base, id);
-    const value = (await chrome.storage.local.get(key))[key];
-    if (value !== undefined) data[name] = value;
-  }
-  return { kind: "browserharness-space-backup", version: 1, saved_at: new Date().toISOString(), space: { name: space.name, color: space.color }, data };
-}
-
-export function parseSpaceBackup(text: string): SpaceBackup | null {
-  try {
-    const value = JSON.parse(text.replace(/^﻿/, "")) as SpaceBackup;
-    if (value?.kind !== "browserharness-space-backup" || typeof value.space?.name !== "string" || typeof value.data !== "object") return null;
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-/** Brings a backup back as a new Space, so nothing already here is overwritten. */
-export async function restoreSpace(backup: SpaceBackup): Promise<{ ok: true; space: Space } | { ok: false; error: string }> {
-  const { spaces } = await loadSpaces();
-  const taken = new Set(spaces.map((space) => space.name.toLowerCase()));
-  let name = cleanSpaceName(backup.space.name) || "Restored";
-  for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${cleanSpaceName(backup.space.name)} (${n})`;
-  const created = await createSpace(name, { switchTo: false });
-  if (!created.ok) return created;
-  if (SPACE_COLORS.includes(backup.space.color)) await setSpaceColor(created.space.id, backup.space.color);
-  const values: Record<string, unknown> = {};
-  for (const [name, base] of Object.entries(SPACE_SCOPED_KEYS) as [keyof typeof SPACE_SCOPED_KEYS, string][]) {
-    const value = backup.data[name];
-    if (name === "instructions" ? typeof value === "string" : Array.isArray(value)) values[keyForSpace(base, created.space.id)] = value;
-  }
-  await chrome.storage.local.set(values);
-  return { ok: true, space: { ...created.space, color: SPACE_COLORS.includes(backup.space.color) ? backup.space.color : created.space.color } };
 }

@@ -35,7 +35,7 @@ export function safeHistoryEntry(entry: Omit<TaskHistoryEntry, "id" | "timestamp
 
 // Each Space keeps its own past conversations (see spaces.ts).
 const HISTORY_KEY = SPACE_SCOPED_KEYS.history;
-const MAX_HISTORY = 500;
+export const MAX_HISTORY = 500;
 
 async function historyKey(spaceId?: string): Promise<string> {
   return spaceId ? keyForSpace(HISTORY_KEY, spaceId) : spaceKey(HISTORY_KEY);

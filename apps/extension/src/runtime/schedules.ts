@@ -3,7 +3,7 @@
 // in its own background tab and leaves the result in history and a
 // notification.
 
-import { activeSpaceId } from "./spaces";
+import { activeSpaceId, SCHEDULES_KEY } from "./spaces";
 
 export type Schedule =
   | { kind: "once"; at: string }
@@ -43,8 +43,8 @@ export interface ScheduledTask {
   space_id?: string;
 }
 
-const KEY = "browserharness.schedules";
-const MAX_SCHEDULES = 50;
+const KEY = SCHEDULES_KEY;
+export const MAX_SCHEDULES = 50;
 export const MIN_INTERVAL_MINUTES = 15;
 export const ALARM_PREFIX = "browserharness-schedule:";
 
