@@ -511,6 +511,26 @@ describe("restore safety", () => {
     return result;
   }
 
+  const bareEpisode = (session: string) => ({
+    schema_version: 1,
+    id: `episode:${session}:2026`,
+    kind: "task_episode",
+    recorded_at: "2026-10-07T00:00:00.000Z",
+    session_id: session,
+    title: "t",
+    task: "check",
+    status: "completed",
+    start: { tab_id: 1, url: "https://a.example/", title: "A" },
+    action_count: 1,
+    manual_handoff_count: 0,
+    tools: ["agent"],
+    targets: [],
+    sites: [],
+    skill_refs: [],
+    sensitive_payloads_removed: true,
+    trust: "observed"
+  });
+
   it("a file can never add something for every Space", async () => {
     const result = await crafted({
       scoped: {},
@@ -561,7 +581,115 @@ describe("restore safety", () => {
     const [login] = await loadSkills(copy);
     expect(login.instructions).not.toContain("hunter22secret");
     expect(login.instructions).toContain("Press Sign in");
-    expect(result.skipped.secret).toBe(3);
+    // The fact, the wish line, the decision and the Skill step.
+    expect(result.skipped.secret).toBe(4);
+  });
+
+  it("keeps each episode site only in its cleaned form", async () => {
+    const result = await crafted({
+      scoped: {},
+      tagged: {
+        episodes: [
+          {
+            ...bareEpisode("s1"),
+            sites: [
+              "https://site.example/path?token=abc123secret&page=2",
+              "https://site.example/path?session_id=deadbeef&page=2",
+              "javascript:alert(1)",
+              "https://shop.example/search?q=kettle&sort=price"
+            ]
+          }
+        ]
+      }
+    });
+    const [restored] = episodes().filter((item) => item.space_id === result.space.id);
+    expect(restored.sites).toEqual(["https://site.example/path?page=2", "https://shop.example/search?q=kettle&sort=price"]);
+    const json = JSON.stringify(restored);
+    for (const bad of ["abc123secret", "deadbeef", "token=", "session_id=", "javascript:"]) expect(json).not.toContain(bad);
+  });
+
+  it("a helper or DAG inside an episode always belongs to the restored task, whatever the file says", async () => {
+    const result = await crafted({
+      scoped: {},
+      tagged: {
+        episodes: [
+          {
+            ...bareEpisode("original-parent"),
+            delegations: [
+              { action_id: "a2", worker_index: 0, task: "read", session_id: "original-parent:worker:0:x", status: "completed", sources: [], tools_used: [], parent_session_id: "fake-parent", trust: "observed", mode: "read" },
+              { action_id: "a2", worker_index: 1, task: "read", session_id: "original-parent", status: "completed", sources: [], tools_used: [], parent_session_id: "original-parent" }
+            ],
+            dag_runs: [
+              {
+                action_id: "a1",
+                parent_session_id: "another-fake-parent",
+                nodes: [
+                  { node_id: "r", type: "research", task: "find", status: "completed", mode: "read", child_session_id: "original-parent:worker:r", depends_on: [], sources: [], tools_used: [], trust: { sources: "observed" } },
+                  { node_id: "v", type: "verify", task: "check", status: "blocked", mode: "read", depends_on: ["r"], blocked_by: "r", sources: [], tools_used: [], trust: { sources: "observed" } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    });
+    const [restored] = episodes().filter((item) => item.space_id === result.space.id);
+    const parent = restored.session_id;
+    expect(parent).not.toBe("original-parent");
+    expect(restored.delegations!.map((worker) => worker.parent_session_id)).toEqual([parent, parent]);
+    expect(restored.dag_runs![0].parent_session_id).toBe(parent);
+    const [first, second] = restored.delegations!;
+    expect(first.session_id).toBe(`${parent}:worker:0:x`);
+    expect(second.session_id).not.toBe(parent);
+    const [r, v] = restored.dag_runs![0].nodes;
+    expect(r.child_session_id).toBe(`${parent}:worker:r`);
+    expect(v.child_session_id).toBeUndefined();
+    expect(JSON.stringify(restored)).not.toMatch(/fake-parent|original-parent/);
+  });
+
+  it("never makes up who made a decision", async () => {
+    const result = await crafted({
+      scoped: {},
+      tagged: {
+        decisions: [
+          { id: "d1", type: "decision", subject: "Deployment", value: "Cloudflare", scope: "space", status: "current", visibility: "space", created_at: "2026-01-01T00:00:00.000Z", provenance: null },
+          { id: "d2", type: "decision", subject: "Hosting", value: "Vercel", scope: "space", status: "current", visibility: "space", created_at: "2026-01-01T00:00:00.000Z", provenance: { by: "you", at: "2026-01-01T00:00:00.000Z" } },
+          { id: "d3", type: "decision", subject: "Code home", value: "GitHub", scope: "space", status: "current", visibility: "space", created_at: "2026-01-01T00:00:00.000Z", provenance: { by: "you", space_id: "evil", at: "2026-01-01T00:00:00.000Z" } }
+        ]
+      }
+    });
+    const restored = decisions().filter((item) => item.space_id === result.space.id);
+    // Only the one whose provenance the file establishes; an older one without `origin` is fine.
+    expect(restored.map((item) => item.value)).toEqual(["GitHub"]);
+    expect(restored[0].provenance).toEqual({ by: "you", space_id: result.space.id, at: "2026-01-01T00:00:00.000Z" });
+    expect(result.skipped.unreadable).toBe(2);
+    expect(JSON.stringify(decisions())).not.toContain("Cloudflare");
+  });
+
+  it("counts secret steps and lessons left out of a Skill it still brings back", async () => {
+    const result = await crafted({
+      scoped: {},
+      tagged: {
+        skills: [
+          {
+            ...skill("Account", {
+              instructions: "1. Open the account page\n2. Type password hunter22secret\n3. Press Submit",
+              lessons: ["The Submit button is at the bottom", "The OTP is 482913"]
+            }),
+            slug: "account",
+            visibility: "space",
+            space_id: "evil"
+          }
+        ]
+      }
+    });
+    const [restored] = await loadSkills(result.space.id);
+    expect(restored.instructions).toContain("Open the account page");
+    expect(restored.instructions).toContain("Press Submit");
+    expect(restored.lessons).toEqual(["The Submit button is at the bottom"]);
+    expect(JSON.stringify(restored)).not.toMatch(/hunter22secret|482913/);
+    expect(result.skipped.secret).toBe(2);
+    expect(result.warnings.join(" ")).toMatch(/2 things were left out because they looked like a password/);
   });
 
   it("never upgrades task evidence: verdicts only on finished verifiers, fixed trust labels, read-only helpers", async () => {

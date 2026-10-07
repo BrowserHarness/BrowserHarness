@@ -292,15 +292,21 @@ function spaceMapper(sourceId: string | undefined, newId: string): (id: unknown)
   };
 }
 
-function provenanceOf(raw: unknown, mapSpace: (id: unknown) => string | undefined, newId: string): Provenance | undefined {
+/**
+ * Provenance as the backup establishes it, or none: who said it, the Space
+ * it was said in and when are all required, and nothing missing is filled
+ * in. A missing `origin` (records from before Phase 6) is fine and stays missing.
+ */
+function provenanceOf(raw: unknown, mapSpace: (id: unknown) => string | undefined): Provenance | undefined {
   if (!isObject(raw)) return undefined;
   const by = raw.by === "you" || raw.by === "learned" ? raw.by : undefined;
-  if (!by) return undefined;
+  const space = mapSpace(raw.space_id);
+  if (!by || !space || !isDate(raw.at)) return undefined;
   const origins = ["explicit_user", "user_message", "model_extraction"];
   return {
     by,
-    space_id: mapSpace(raw.space_id) ?? newId,
-    at: isDate(raw.at) ? raw.at : new Date(0).toISOString(),
+    space_id: space,
+    at: raw.at,
     ...(typeof raw.chat_id === "string" && raw.chat_id ? { chat_id: raw.chat_id.slice(0, 80) } : {}),
     ...(origins.includes(raw.origin as string) ? { origin: raw.origin as Provenance["origin"] } : {}),
     ...(raw.accepted === true ? { accepted: true } : {})
@@ -360,7 +366,7 @@ function restoreFacts(raw: unknown, mapSpace: (id: unknown) => string | undefine
       continue;
     }
     ids.add(item.id);
-    const provenance = provenanceOf(item.provenance, mapSpace, newId);
+    const provenance = provenanceOf(item.provenance, mapSpace);
     facts.push({
       id: item.id.slice(0, 80),
       text: item.text.replace(/\s+/g, " ").trim().slice(0, 200),
@@ -443,9 +449,15 @@ function restoreDecisions(raw: unknown, mapSpace: (id: unknown) => string | unde
       skipped.secret += 1;
       continue;
     }
+    // A decision says who made it; without provenance the backup doesn't establish that, so it is never made up.
+    const provenance = provenanceOf(item.provenance, mapSpace);
+    if (!provenance) {
+      skipped.unreadable += 1;
+      continue;
+    }
     const id = crypto.randomUUID();
     ids.set(item.id, id);
-    const created = isDate(item.created_at) ? item.created_at : new Date(0).toISOString();
+    const created = isDate(item.created_at) ? item.created_at : provenance.at;
     decisions.push({
       old: item,
       decision: {
@@ -461,7 +473,7 @@ function restoreDecisions(raw: unknown, mapSpace: (id: unknown) => string | unde
         ...(isDate(item.valid_until) ? { valid_until: item.valid_until } : {}),
         space_id: newId,
         visibility: "space",
-        provenance: provenanceOf(item.provenance, mapSpace, newId) ?? { by: "you", space_id: newId, at: created }
+        provenance
       }
     });
   }
@@ -479,13 +491,19 @@ function restoreDecisions(raw: unknown, mapSpace: (id: unknown) => string | unde
 const SKILL_SOURCES = new Set<UserSkill["source"]>(["chat", "recording", "import", "auto"]);
 const SKILL_ORIGINS = new Set<SkillProvenance["origin"]>(["learned", "saved", "recording", "imported", "copied", "legacy"]);
 
-/** Skill steps as kept: a line that looks like it holds a secret is replaced. */
-function safeSteps(instructions: string): string {
-  return instructions
+/** Skill steps as kept: a line that looks like it holds a secret is replaced; also says how many were. */
+function safeSteps(instructions: string): { text: string; removed: number } {
+  let removed = 0;
+  const text = instructions
     .slice(0, 8000)
     .split("\n")
-    .map((line) => (checkSensitive(line).allowed ? line : "(left out: it looked like a secret)"))
+    .map((line) => {
+      if (checkSensitive(line).allowed) return line;
+      removed += 1;
+      return "(left out: it looked like a secret)";
+    })
     .join("\n");
+  return { text, removed };
 }
 
 function restoreSkills(
@@ -517,6 +535,11 @@ function restoreSkills(
     ids.set(item.id, id);
     const created = isDate(item.created_at) ? item.created_at : new Date().toISOString();
     const startUrl = typeof item.start_url === "string" ? safeSourceUrl(item.start_url) : "";
+    // A Skill comes back with its secret-looking steps and lessons left out; each one left out is counted once.
+    const steps = safeSteps(item.instructions);
+    const lessons = array(item.lessons).filter((lesson): lesson is string => typeof lesson === "string");
+    const safeLessons = lessons.filter(isSafeToRemember);
+    skipped.secret += steps.removed + (lessons.length - safeLessons.length);
     parsed.push({
       old: item,
       skill: {
@@ -524,7 +547,7 @@ function restoreSkills(
         name,
         slug: typeof item.slug === "string" && item.slug ? item.slug : skillSlug(name),
         description,
-        instructions: safeSteps(item.instructions),
+        instructions: steps.text,
         ...(startUrl ? { start_url: startUrl } : {}),
         source: SKILL_SOURCES.has(item.source as UserSkill["source"]) ? (item.source as UserSkill["source"]) : "import",
         created_at: created,
@@ -533,10 +556,7 @@ function restoreSkills(
         successes: count(item.successes),
         failures: count(item.failures),
         ...(isDate(item.last_run_at) ? { last_run_at: item.last_run_at } : {}),
-        lessons: array(item.lessons)
-          .filter((lesson): lesson is string => typeof lesson === "string" && isSafeToRemember(lesson))
-          .map((lesson) => lesson.slice(0, 240))
-          .slice(0, 8),
+        lessons: safeLessons.map((lesson) => lesson.slice(0, 240)).slice(0, 8),
         space_id: newId,
         visibility: "space"
       }
@@ -573,8 +593,11 @@ const EPISODE_STATUSES = new Set(["completed", "stopped", "approval-cancelled"])
  */
 class SessionMap {
   readonly parents = new Map<string, string>();
+  /** The episodes' own (parent task) sessions, before and after. */
+  readonly tasks = new Set<string>();
   constructor(oldIds: string[]) {
     for (const id of oldIds) if (!this.parents.has(id)) this.parents.set(id, crypto.randomUUID());
+    for (const id of oldIds) this.tasks.add(id);
   }
   get(id: unknown): string | undefined {
     if (typeof id !== "string" || !id) return undefined;
@@ -586,6 +609,14 @@ class SessionMap {
     this.parents.set(id, fresh);
     return fresh;
   }
+}
+
+/** A helper's own session: remapped when it existed, and never a task's own session (its parent's or another episode's). */
+function childSession(id: unknown, parent: string, sessions: SessionMap): string | undefined {
+  if (typeof id !== "string" || !id) return undefined;
+  if (sessions.tasks.has(id)) return crypto.randomUUID();
+  const session = sessions.get(id);
+  return session === parent ? crypto.randomUUID() : session;
 }
 
 function pageContext(raw: unknown): TaskEpisodeMemory["start"] | undefined {
@@ -609,7 +640,7 @@ function restoreDelegations(raw: unknown, parent: string, sessions: SessionMap):
     .filter(isObject)
     .flatMap((item): TaskEpisodeDelegation[] => {
       const status = workerStatus(item.status);
-      const session = sessions.get(item.session_id);
+      const session = childSession(item.session_id, parent, sessions);
       if (!status || !session || typeof item.action_id !== "string") return [];
       return [{
         action_id: item.action_id.slice(0, 80),
@@ -619,7 +650,8 @@ function restoreDelegations(raw: unknown, parent: string, sessions: SessionMap):
         status,
         sources: safeSources(item.sources),
         tools_used: safeTools(item.tools_used),
-        parent_session_id: sessions.get(item.parent_session_id) ?? parent,
+        // A helper kept inside an episode belongs to that episode's task, whatever the file says.
+        parent_session_id: parent,
         trust: "observed",
         ...(item.mode === "read" || item.mode === "act" ? { mode: item.mode } : {})
       }];
@@ -650,7 +682,7 @@ function restoreDagRuns(raw: unknown, parent: string, sessions: SessionMap): Tas
         const verdict = type === "verify" && status === "completed" ? (VERDICTS.has(item.verdict as Verdict) ? (item.verdict as Verdict) : "insufficient") : undefined;
         const finding = typeof item.finding === "string" ? findingSummary(item.finding) : undefined;
         // A node that never ran has no session; none is made up for it.
-        const child = typeof item.child_session_id === "string" && item.child_session_id ? sessions.get(item.child_session_id) : undefined;
+        const child = typeof item.child_session_id === "string" && item.child_session_id ? childSession(item.child_session_id, parent, sessions) : undefined;
         const worker = workerStatus(item.worker_status);
         nodes.push({
           node_id: item.node_id.slice(0, 80),
@@ -685,7 +717,8 @@ function restoreDagRuns(raw: unknown, parent: string, sessions: SessionMap): Tas
       const tally = (status: DagNodeStatus) => nodes.filter((node) => node.status === status).length;
       return [{
         action_id: run.action_id.slice(0, 80),
-        parent_session_id: sessions.get(run.parent_session_id) ?? parent,
+        // A DAG kept inside an episode was run by that episode's task, whatever the file says.
+        parent_session_id: parent,
         nodes,
         completed_count: tally("completed"),
         failed_count: tally("failed"),
@@ -740,7 +773,8 @@ function restoreEpisodes(
       manual_handoff_count: count(item.manual_handoff_count),
       tools: strings(item.tools, 50, 60),
       targets: strings(item.targets, MAX_TARGETS, 160, isSafeToRemember),
-      sites: strings(item.sites, MAX_SITES, 300, (site) => Boolean(safeSourceUrl(site))),
+      // Each site is kept as cleaned, never as written in the file.
+      sites: [...new Set(array(item.sites).map((site) => (typeof site === "string" ? safeSourceUrl(site) : "")).filter(Boolean))].slice(0, MAX_SITES),
       skill_refs: array(item.skill_refs)
         .filter((ref): ref is Record<string, unknown> => isObject(ref) && typeof ref.id === "string" && typeof ref.action === "string")
         .slice(0, MAX_SKILL_REFS)
