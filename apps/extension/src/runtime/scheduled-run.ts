@@ -167,7 +167,7 @@ export async function runUnattendedTask(
         spaceId
       ).catch(() => null);
     if (result.status === "completed") {
-      const saved = await learning("completed");
+      const saved = (await learning("completed"))?.saved;
       if (saved && !skill && !hinted) log(`Learned this as /${saved.slug}`);
       return { status: "worked", message: result.message, url };
     }

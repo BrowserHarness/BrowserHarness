@@ -65,7 +65,14 @@ import {
 } from "../runtime/site-commands";
 import { SITE_SKILL_LIBRARY_KEY } from "../runtime/site-skill-store";
 import { siteCommandAnswer } from "./site-command-answer";
-import { applyLearningPlan, matchSkill, planLearning } from "../runtime/skill-learning";
+import {
+  addRefinementToSharedSkill,
+  applyLearningPlan,
+  keepRefinementInSpace,
+  matchSkill,
+  planLearning,
+  type HeldRefinement
+} from "../runtime/skill-learning";
 import { MemoryView } from "./MemoryView";
 import {
   deleteSkill,
@@ -213,6 +220,8 @@ type Message = {
   skillNote?: string;
   /** A Skill learned on its own from this answer, which the person can undo. */
   autoSkill?: { id: string; slug: string };
+  /** A lesson or shorter way found while running an every-Space Skill: the person decides where it goes. */
+  heldSkill?: { held: HeldRefinement; done?: string };
   /** Why a task couldn't finish, with the fix and a guide. */
   problem?: { problem: Problem; retry?: string; openAi?: boolean };
   /**
@@ -488,7 +497,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         ...message.learned.evidence,
         task: message.learned.task
       }),
-      RESERVED_COMMANDS
+      RESERVED_COMMANDS,
+      chatSpace.current ?? undefined
     );
     noteOnMessage(
       message.id,
@@ -499,19 +509,33 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
   const updateSkillFromRun = async (message: Message) => {
     const learned = message.learned;
     if (!learned?.skillId) return;
-    const skill = (await loadSkills()).find((item) => item.id === learned.skillId);
+    const skill = (await loadSkills(chatSpace.current ?? undefined)).find((item) => item.id === learned.skillId);
     if (!skill) {
       noteOnMessage(message.id, "That Skill was deleted.");
       return;
     }
-    await saveSkill(refreshSkillSteps(skill, learned.evidence), RESERVED_COMMANDS);
-    noteOnMessage(message.id, `Updated /${skill.slug} with the steps from this run.`);
+    await saveSkill(refreshSkillSteps(skill, learned.evidence), RESERVED_COMMANDS, chatSpace.current ?? undefined);
+    noteOnMessage(message.id, `Updated /${skill.slug} with the steps from this run${skill.visibility === "all" ? " (in every Space)" : ""}.`);
   };
 
   /** What a finished task taught: a new Skill, a shorter one, a run count or a lesson. */
   const applyLearning = async (plan: ReturnType<typeof planLearning>, messageId: string, spaceId: string) => {
-    const saved = await applyLearningPlan(plan, RESERVED_COMMANDS, spaceId);
-    if (plan.kind === "learn" && saved) {
+    const { saved, held } = await applyLearningPlan(plan, RESERVED_COMMANDS, spaceId);
+    if (held) {
+      setMessages((items) =>
+        items.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                heldSkill: { held },
+                skillNote: held.improved
+                  ? `Found a shorter way for /${held.slug}. It's used in every Space, so I haven't changed it.`
+                  : `Learned a lesson for /${held.slug}. It's used in every Space, so I haven't added it.`
+              }
+            : item
+        )
+      );
+    } else if (plan.kind === "learn" && saved) {
       setMessages((items) =>
         items.map((item) =>
           item.id === messageId
@@ -571,9 +595,24 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     setMessages((items) => items.map((item) => (item.id === message.id && item.memory ? { ...item, memory: { ...item.memory, done } } : item)));
   };
 
+  /** Where a lesson for an every-Space Skill goes: into it for every Space, or into a copy for this Space. */
+  const placeHeldSkill = async (message: Message, where: "every-space" | "this-space") => {
+    const held = message.heldSkill?.held;
+    if (!held || message.heldSkill?.done) return;
+    const result = where === "every-space" ? await addRefinementToSharedSkill(held, RESERVED_COMMANDS) : await keepRefinementInSpace(held, RESERVED_COMMANDS);
+    const done = !result.ok
+      ? result.reason === "gone"
+        ? "That Skill was deleted, so nothing was changed."
+        : `/${held.slug} isn't used in every Space any more, so nothing was changed.`
+      : where === "every-space"
+        ? `Added to /${result.skill.slug} for every Space.`
+        : `Kept in a copy for this Space: /${result.skill.slug}.`;
+    setMessages((items) => items.map((item) => (item.id === message.id && item.heldSkill ? { ...item, heldSkill: { ...item.heldSkill, done } } : item)));
+  };
+
   const undoAutoSkill = async (message: Message) => {
     if (!message.autoSkill) return;
-    await deleteSkill(message.autoSkill.id);
+    await deleteSkill(message.autoSkill.id, chatSpace.current ?? undefined);
     setMessages((items) =>
       items.map((item) =>
         item.id === message.id
@@ -1865,6 +1904,24 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
                             </Button>
                           )}
                         </Typography>
+                      )}
+                      {message.heldSkill && (
+                        <Box sx={{ mt: 0.5 }} data-testid="skill-held">
+                          {message.heldSkill.done ? (
+                            <Typography variant="caption" color="text.secondary">
+                              {message.heldSkill.done}
+                            </Typography>
+                          ) : (
+                            <>
+                              <Button size="small" onClick={() => void placeHeldSkill(message, "this-space")}>
+                                Keep it for this Space only
+                              </Button>
+                              <Button size="small" onClick={() => void placeHeldSkill(message, "every-space")}>
+                                Add it for every Space
+                              </Button>
+                            </>
+                          )}
+                        </Box>
                       )}
                     </>
                   ) : (

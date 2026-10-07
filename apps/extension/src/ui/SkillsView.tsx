@@ -5,18 +5,24 @@ import {
   Button,
   Chip,
   IconButton,
+  Menu,
+  MenuItem,
   Paper,
   Stack,
   TextField,
   Tooltip,
   Typography
 } from "@mui/material";
-import { DeleteIcon, DownloadIcon, EditIcon, ReplayIcon, RunIcon, UploadIcon } from "./icons";
-import { ScreenFrame, SettingsCard, ToggleSetting } from "./kit";
+import { DeleteIcon, DownloadIcon, EditIcon, MoreIcon, ReplayIcon, RunIcon, UploadIcon } from "./icons";
+import { ScreenFrame, SettingsCard, ToggleSetting, useConfirm } from "./kit";
+import { useSpaces } from "./spaces-ui";
 import { useSaved } from "./feedback";
 import {
+  copySkillToSpace,
   deleteSkill,
   loadSkills,
+  ownedBySpace,
+  setSkillReach,
   fetchSkillMd,
   parseSkillMd,
   renameSkill,
@@ -78,9 +84,12 @@ export function SkillsView({
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [autoSkills, setAutoSkills] = useState(true);
   const saved = useSaved();
+  const { spaces, active } = useSpaces();
+  const [dialog, confirm] = useConfirm();
+  const [more, setMore] = useState<{ anchor: HTMLElement; skill: UserSkill } | null>(null);
 
   const refresh = async () => {
-    setSkills(await loadSkills());
+    setSkills(await loadSkills(active.id));
     setRecordings(await loadWorkflows());
     setSiteSkills(await listSiteSkillCandidateSummaries().catch(() => []));
     setSiteCommands(await loadSiteCommands().catch(() => []));
@@ -94,9 +103,38 @@ export function SkillsView({
   };
 
   useEffect(() => {
-    void refresh();
     void loadPreferences().then((preferences) => setAutoSkills(preferences.autoSkills));
   }, []);
+  // Each Space has its own Skills: the list follows the Space in use.
+  useEffect(() => {
+    void refresh();
+  }, [active.id]);
+
+  const otherSpaces = spaces.filter((space) => space.id !== active.id);
+  const reachText = (skill: UserSkill) => (skill.visibility === "all" ? "Every Space" : "This Space");
+
+  const changeReach = async (skill: UserSkill, reach: "every-space" | "this-space") => {
+    setMore(null);
+    const changed = await setSkillReach(skill.id, reach, active.id);
+    setNotice(
+      changed
+        ? { severity: "success", text: reach === "every-space" ? `/${skill.slug} can now be used in every Space.` : `/${skill.slug} is now only in ${active.name}.` }
+        : { severity: "error", text: "That Skill isn't in this Space any more." }
+    );
+    await refresh();
+  };
+
+  const copyTo = async (skill: UserSkill, spaceId: string) => {
+    setMore(null);
+    const copy = await copySkillToSpace(skill.id, spaceId, active.id, RESERVED);
+    const name = spaces.find((space) => space.id === spaceId)?.name ?? "that Space";
+    setNotice(
+      copy
+        ? { severity: "success", text: `Copied to ${name} as /${copy.slug}. The copy is separate: changing one won't change the other.` }
+        : { severity: "error", text: "Couldn't copy that Skill." }
+    );
+    await refresh();
+  };
 
   const importFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -107,7 +145,7 @@ export function SkillsView({
         setNotice({ severity: "error", text: `${file.name}: ${parsed.error}` });
         continue;
       }
-      const saved = await saveSkill(parsed.skill, RESERVED);
+      const saved = await saveSkill(parsed.skill, RESERVED, active.id);
       added.push(`/${saved.slug}`);
     }
     if (added.length) setNotice({ severity: "success", text: `Imported ${added.join(", ")}. Nothing runs until you start it.` });
@@ -122,7 +160,7 @@ export function SkillsView({
       setNotice({ severity: "error", text: parsed.error });
       return;
     }
-    const saved = await saveSkill(parsed.skill, RESERVED);
+    const saved = await saveSkill(parsed.skill, RESERVED, active.id);
     setNotice({ severity: "success", text: `Imported /${saved.slug} from ${new URL(link.trim()).hostname}. Read its steps before you run it; nothing runs until you start it.` });
     setLink(null);
     await refresh();
@@ -130,7 +168,7 @@ export function SkillsView({
 
   const finishRename = async () => {
     if (!editing) return;
-    await renameSkill(editing.id, editing.name, RESERVED);
+    await renameSkill(editing.id, editing.name, RESERVED, active.id);
     setEditing(null);
     await refresh();
   };
@@ -165,7 +203,8 @@ export function SkillsView({
         <>
           A Skill is a task BrowserHarness has learned and can repeat. Run one here, or type <code>/</code> and its name
           in the chat. When you ask for something similar, it follows the Skill by itself. A shorter way updates the
-          Skill, and a run that goes wrong teaches it a lesson.
+          Skill, and a run that goes wrong teaches it a lesson. A Skill stays in the Space it was made in; use the
+          ⋯ button to use it in every Space or copy it to another Space.
         </>
       }
     >
@@ -242,6 +281,7 @@ export function SkillsView({
                 )}
                 <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
                   <Chip size="small" label={`/${skill.slug}`} variant="outlined" />
+                  <Chip size="small" label={reachText(skill)} data-testid="skill-reach" />
                   {skill.source === "auto" && <Chip size="small" color="info" label="Learned on its own" />}
                   <Typography variant="caption" color="text.secondary">
                     {runSummary(skill)}
@@ -261,7 +301,7 @@ export function SkillsView({
                     <Button
                       size="small"
                       onClick={async () => {
-                        await saveSkill({ ...skill, source: "chat" }, RESERVED);
+                        await saveSkill({ ...skill, source: "chat" }, RESERVED, active.id);
                         await refresh();
                       }}
                     >
@@ -287,11 +327,26 @@ export function SkillsView({
                       size="small"
                       aria-label={`Delete ${skill.name}`}
                       onClick={async () => {
-                        await deleteSkill(skill.id);
+                        if (
+                          skill.visibility === "all" &&
+                          !(await confirm({
+                            title: `Delete /${skill.slug}?`,
+                            body: "This Skill is used in every Space, so it will be gone from all of them. Copies you made in other Spaces stay.",
+                            confirmLabel: "Delete it everywhere",
+                            danger: true
+                          }))
+                        )
+                          return;
+                        await deleteSkill(skill.id, active.id);
                         await refresh();
                       }}
                     >
                       <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Where it can be used">
+                    <IconButton size="small" aria-label={`More for ${skill.name}`} onClick={(event) => setMore({ anchor: event.currentTarget, skill })}>
+                      <MoreIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                 </Stack>
@@ -300,6 +355,25 @@ export function SkillsView({
           ))}
         </Stack>
       )}
+
+      <Menu anchorEl={more?.anchor} open={Boolean(more)} onClose={() => setMore(null)}>
+        {more && ownedBySpace(more.skill, active.id) && (
+          <MenuItem onClick={() => void changeReach(more.skill, "every-space")}>Use it in every Space</MenuItem>
+        )}
+        {more && more.skill.visibility === "all" && (
+          <MenuItem onClick={() => void changeReach(more.skill, "this-space")}>Use it only in this Space</MenuItem>
+        )}
+        {more &&
+          otherSpaces.map((space) => (
+            <MenuItem key={space.id} onClick={() => void copyTo(more.skill, space.id)}>
+              Copy to {space.name}
+            </MenuItem>
+          ))}
+        {more && otherSpaces.length === 0 && more.skill.visibility !== "all" && (
+          <MenuItem disabled>Make another Space to copy this Skill into it</MenuItem>
+        )}
+      </Menu>
+      {dialog}
 
       {recordings.length > 0 && (
         <>
@@ -320,7 +394,7 @@ export function SkillsView({
                   <Button
                     size="small"
                     onClick={async () => {
-                      const saved = await saveSkill(skillFromRecording(workflow), RESERVED);
+                      const saved = await saveSkill(skillFromRecording(workflow), RESERVED, active.id);
                       setNotice({ severity: "success", text: `Saved as /${saved.slug}.` });
                       await refresh();
                     }}
