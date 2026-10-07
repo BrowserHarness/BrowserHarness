@@ -550,7 +550,7 @@ No migration. Episodes saved before Phase 8 load, search and recall exactly as b
 
 Phase 8 final baseline: main 138bb9d, 695 unit tests, all 13 Chromium smokes green, provenance smoke 14/14.
 
-## 3h. Phase 9: complete Space backup and restore (PR #PRNUM)
+## 3h. Phase 9: complete Space backup and restore (PR #45)
 
 **A Space backup restores the Space's own memory and learned capabilities, not everything the Space can currently see.** Restoring creates an independent clone with new shared-store identities while preserving the internal relationships that make its memory trustworthy. This is the last planned core Memory v2 phase.
 
