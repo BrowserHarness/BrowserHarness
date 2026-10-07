@@ -225,18 +225,40 @@ export async function applyLearningPlan(plan: LearningPlan, reserved: string[] =
   return { saved: null };
 }
 
-/** The person chose to add a held lesson or new steps to the shared Skill, for every Space. */
-export async function addRefinementToSharedSkill(held: HeldRefinement, reserved: string[] = []): Promise<UserSkill | null> {
+/** What happened to a held refinement; "changed" when the Skill was deleted, unshared or moved out of reach meanwhile. */
+export type RefinementResult = { ok: true; skill: UserSkill } | { ok: false; reason: "gone" | "changed" };
+
+/**
+ * The person chose to add a held lesson or new steps to the shared Skill, for
+ * every Space. It is only applied if the Skill is still shared with every Space.
+ */
+export async function addRefinementToSharedSkill(held: HeldRefinement, reserved: string[] = []): Promise<RefinementResult> {
   const current = (await loadAllSkills()).find((skill) => skill.id === held.skillId);
-  if (!current) return null;
-  if (held.improved) return saveSkill({ ...current, instructions: held.improved.instructions, start_url: held.improved.start_url ?? current.start_url, lessons: [] }, reserved);
-  return held.lesson ? addSkillLesson(current.id, held.lesson) : current;
+  if (!current) return { ok: false, reason: "gone" };
+  if (current.visibility !== "all") return { ok: false, reason: "changed" };
+  const skill = held.improved
+    ? await saveSkill({ ...current, instructions: held.improved.instructions, start_url: held.improved.start_url ?? current.start_url, lessons: [] }, reserved)
+    : held.lesson
+      ? await addSkillLesson(current.id, held.lesson)
+      : current;
+  return skill ? { ok: true, skill } : { ok: false, reason: "gone" };
 }
 
-/** The person chose to keep the refinement in this Space only: a copy of the shared Skill for this Space, with it. */
-export async function keepRefinementInSpace(held: HeldRefinement, reserved: string[] = []): Promise<UserSkill | null> {
+/**
+ * The person chose to keep the refinement in this Space only: a copy of the
+ * shared Skill for this Space, with it. Only while the Skill still exists and
+ * is still shared with this Space.
+ */
+export async function keepRefinementInSpace(held: HeldRefinement, reserved: string[] = []): Promise<RefinementResult> {
+  const current = (await loadAllSkills()).find((skill) => skill.id === held.skillId);
+  if (!current) return { ok: false, reason: "gone" };
+  if (current.visibility !== "all") return { ok: false, reason: "changed" };
   const copy = await copySkillToSpace(held.skillId, held.spaceId, held.spaceId, reserved);
-  if (!copy) return null;
-  if (held.improved) return saveSkill({ ...copy, instructions: held.improved.instructions, start_url: held.improved.start_url ?? copy.start_url, lessons: [] }, reserved);
-  return held.lesson ? addSkillLesson(copy.id, held.lesson) : copy;
+  if (!copy) return { ok: false, reason: "changed" };
+  const skill = held.improved
+    ? await saveSkill({ ...copy, instructions: held.improved.instructions, start_url: held.improved.start_url ?? copy.start_url, lessons: [] }, reserved)
+    : held.lesson
+      ? await addSkillLesson(copy.id, held.lesson)
+      : copy;
+  return skill ? { ok: true, skill } : { ok: false, reason: "gone" };
 }

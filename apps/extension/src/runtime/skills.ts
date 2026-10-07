@@ -159,8 +159,11 @@ function capped(skills: UserSkill[]): UserSkill[] {
   });
 }
 
-async function store(skills: UserSkill[]): Promise<void> {
-  await chrome.storage.local.set({ [KEY]: capped(skills) });
+/** Saves the store, capped per shelf; returns what was kept. */
+async function store(skills: UserSkill[]): Promise<UserSkill[]> {
+  const kept = capped(skills);
+  await chrome.storage.local.set({ [KEY]: kept });
+  return kept;
 }
 
 /**
@@ -205,6 +208,10 @@ export async function deleteSkill(id: string, spaceId?: string): Promise<void> {
  * same Skill either way: id, name, steps, lessons, run counts and origin stay.
  * Making it available everywhere is only offered for a Skill of this Space;
  * "only this Space" moves a shared Skill into the Space it is used from.
+ *
+ * The moved Skill goes first, like any Skill just saved, so it always keeps
+ * its place on a full shelf: the one saved longest ago on that shelf makes
+ * room. Other shelves are not touched.
  */
 export async function setSkillReach(id: string, reach: SkillReach, spaceId?: string): Promise<UserSkill | null> {
   const space = await resolveSpace(spaceId);
@@ -214,11 +221,12 @@ export async function setSkillReach(id: string, reach: SkillReach, spaceId?: str
   if (reach === "every-space" && !ownedBySpace(skill, space)) return skill.visibility === "all" ? skill : null;
   const next: UserSkill =
     reach === "every-space"
-      ? { ...skill, visibility: "all" }
-      : { ...skill, visibility: "space", space_id: space, legacy: undefined };
+      ? { ...skill, visibility: "all", updated_at: new Date().toISOString() }
+      : { ...skill, visibility: "space", space_id: space, legacy: undefined, updated_at: new Date().toISOString() };
   if (!next.legacy) delete next.legacy;
-  await store(skills.map((item) => (item.id === id ? next : item)));
-  return next;
+  const kept = await store([next, ...skills.filter((item) => item.id !== id)]);
+  // Never report a move the store didn't keep.
+  return kept.some((item) => item.id === id) ? next : null;
 }
 
 /**
@@ -256,7 +264,8 @@ export async function copySkillToSpace(id: string, toSpaceId: string, fromSpaceI
       space_id: toSpaceId,
       at: now,
       source_skill_id: original.id,
-      source_space_id: original.visibility === "all" ? from : recordSpace(original),
+      // Where the original was made, never the Space it happened to be viewed from; unknown for a legacy Skill.
+      ...(original.space_id ? { source_space_id: original.space_id } : {}),
       copied_at: now
     }
   };

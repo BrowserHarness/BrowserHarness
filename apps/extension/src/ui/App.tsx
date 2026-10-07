@@ -599,12 +599,14 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
   const placeHeldSkill = async (message: Message, where: "every-space" | "this-space") => {
     const held = message.heldSkill?.held;
     if (!held || message.heldSkill?.done) return;
-    const saved = where === "every-space" ? await addRefinementToSharedSkill(held, RESERVED_COMMANDS) : await keepRefinementInSpace(held, RESERVED_COMMANDS);
-    const done = !saved
-      ? "That Skill was deleted."
+    const result = where === "every-space" ? await addRefinementToSharedSkill(held, RESERVED_COMMANDS) : await keepRefinementInSpace(held, RESERVED_COMMANDS);
+    const done = !result.ok
+      ? result.reason === "gone"
+        ? "That Skill was deleted, so nothing was changed."
+        : `/${held.slug} isn't used in every Space any more, so nothing was changed.`
       : where === "every-space"
-        ? `Added to /${saved.slug} for every Space.`
-        : `Kept in a copy for this Space: /${saved.slug}.`;
+        ? `Added to /${result.skill.slug} for every Space.`
+        : `Kept in a copy for this Space: /${result.skill.slug}.`;
     setMessages((items) => items.map((item) => (item.id === message.id && item.heldSkill ? { ...item, heldSkill: { ...item.heldSkill, done } } : item)));
   };
 

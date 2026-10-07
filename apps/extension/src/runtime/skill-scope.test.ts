@@ -333,11 +333,13 @@ describe("a shared Skill doesn't pick up one Space's details on its own", () => 
     expect(inB).toMatchObject({ runs: 2, successes: 1, failures: 1 });
 
     // Kept for this Space only: a copy in Acme carries it; the shared Skill and Home never see it.
-    const copy = await keepRefinementInSpace(held!);
+    const kept = await keepRefinementInSpace(held!);
+    if (!kept.ok) throw new Error(kept.reason);
+    const copy = kept.skill;
     expect(copy).toMatchObject({ space_id: A, provenance: { origin: "copied", source_skill_id: global.id }, lessons: ["The form needs department code FIN-44", "Attach the receipt first"] });
     expect(JSON.stringify(await loadSkills(B))).not.toContain("FIN-44");
     // From now on Acme's own copy wins the match in Acme.
-    expect(matchSkill("submit expense report", await loadSkills(A))?.skill.id).toBe(copy!.id);
+    expect(matchSkill("submit expense report", await loadSkills(A))?.skill.id).toBe(copy.id);
   });
 
   it("a shorter way found in one Space is held too; the person can add it for every Space", async () => {
@@ -352,7 +354,7 @@ describe("a shared Skill doesn't pick up one Space's details on its own", () => 
     expect(unchanged.instructions).toBe(global.instructions);
     expect(unchanged.runs).toBe(2);
     // The person chose "Add it for every Space".
-    await addRefinementToSharedSkill(held!);
+    expect((await addRefinementToSharedSkill(held!)).ok).toBe(true);
     const [changed] = await loadSkills(B);
     expect(changed).toMatchObject({ id: global.id, visibility: "all", runs: 2 });
     expect(changed.instructions).toContain("Quick submit");
@@ -410,5 +412,91 @@ describe("performance", () => {
     await localMemorySource.relevantSkills("task report", A, 1);
     expect(visible).toHaveLength(MAX_SKILLS);
     expect(performance.now() - started).toBeLessThan(100);
+  });
+});
+
+describe("review fixes", () => {
+  it("a copy of a shared Skill records where the Skill was made, not the Space it was viewed from", async () => {
+    const { A, B } = await spaces();
+    const c = await createSpace("Client", { switchTo: false });
+    if (!c.ok) throw new Error("space");
+    const C = c.space.id;
+    const original = await saveSkill(skill("Submit expense report"), [], A);
+    await setSkillReach(original.id, "every-space", A);
+    await switchSpace(B);
+    const copy = await copySkillToSpace(original.id, C, B);
+    expect(copy).toMatchObject({ space_id: C, provenance: { origin: "copied", space_id: C, source_skill_id: original.id, source_space_id: A } });
+  });
+
+  it("a copy of a legacy Skill names the Skill it came from but no source Space, since nobody knows it", async () => {
+    const { B } = await spaces();
+    const c = await createSpace("Client", { switchTo: false });
+    if (!c.ok) throw new Error("space");
+    store[SKILLS_STORAGE_KEY] = [{ ...skill("Old helper"), slug: "old-helper", id: "legacy-1" }];
+    const copy = await copySkillToSpace("legacy-1", c.space.id, B);
+    expect(copy?.provenance).toMatchObject({ origin: "copied", source_skill_id: "legacy-1", space_id: c.space.id });
+    expect(copy?.provenance).not.toHaveProperty("source_space_id");
+  });
+
+  it("sharing into a full every-Space shelf keeps the shared Skill; the oldest shared one makes room; other shelves untouched", async () => {
+    const { A, B } = await spaces();
+    const shared = Array.from({ length: MAX_SKILLS }, (_, index) => ({ ...skill(`Shared ${index}`), slug: `shared-${index}`, space_id: B, visibility: "all" as const }));
+    const homeOwn = { ...skill("Home own"), slug: "home-own", space_id: B, visibility: "space" as const };
+    const acmeOther = { ...skill("Acme other"), slug: "acme-other", space_id: A, visibility: "space" as const };
+    const mover = { ...skill("Acme old", { lessons: ["x"], runs: 5, successes: 4, failures: 1 }), slug: "acme-old", space_id: A, visibility: "space" as const, provenance: { origin: "saved" as const } };
+    // The Skill to share sits at the very end of the store, behind a full shelf of shared Skills.
+    store[SKILLS_STORAGE_KEY] = [...shared, homeOwn, acmeOther, mover];
+    const promoted = await setSkillReach(mover.id, "every-space", A);
+    const all = await loadAllSkills();
+    const kept = all.find((item) => item.id === mover.id);
+    expect(promoted).not.toBeNull();
+    expect(kept).toMatchObject({ visibility: "all", instructions: mover.instructions, lessons: ["x"], runs: 5, successes: 4, failures: 1, created_at: mover.created_at, provenance: { origin: "saved" } });
+    expect(all.filter((item) => item.visibility === "all")).toHaveLength(MAX_SKILLS);
+    expect(all.some((item) => item.slug === `shared-${MAX_SKILLS - 1}`)).toBe(false);
+    expect(all.some((item) => item.slug === "shared-0")).toBe(true);
+    expect(names(all.filter((item) => item.visibility === "space")).sort()).toEqual(["Acme other", "Home own"]);
+  });
+
+  it("moving a shared Skill into a full Space keeps it there; that Space's oldest makes room; other shelves untouched", async () => {
+    const { A, B } = await spaces();
+    const full = Array.from({ length: MAX_SKILLS }, (_, index) => ({ ...skill(`Home ${index}`), slug: `home-${index}`, space_id: B, visibility: "space" as const }));
+    const otherShared = { ...skill("Other shared"), slug: "other-shared", space_id: A, visibility: "all" as const };
+    const acme = { ...skill("Acme own"), slug: "acme-own", space_id: A, visibility: "space" as const };
+    const mover = { ...skill("Shared mover", { runs: 3, successes: 3 }), slug: "shared-mover", space_id: A, visibility: "all" as const };
+    store[SKILLS_STORAGE_KEY] = [...full, otherShared, acme, mover];
+    const demoted = await setSkillReach(mover.id, "this-space", B);
+    const all = await loadAllSkills();
+    expect(demoted).toMatchObject({ id: mover.id, visibility: "space", space_id: B });
+    expect(all.find((item) => item.id === mover.id)).toMatchObject({ visibility: "space", space_id: B, runs: 3, successes: 3 });
+    expect(all.filter((item) => item.space_id === B && item.visibility === "space")).toHaveLength(MAX_SKILLS);
+    expect(all.some((item) => item.slug === `home-${MAX_SKILLS - 1}`)).toBe(false);
+    expect(names(all.filter((item) => item.space_id === A)).sort()).toEqual(["Acme own", "Other shared"]);
+  });
+
+  it("legacy Skills saved back to the store never gain an invented Space", async () => {
+    const { A } = await spaces();
+    store[SKILLS_STORAGE_KEY] = [{ ...skill("Old helper"), slug: "old-helper", id: "legacy-1" }];
+    // Any later write of the store (here, saving another Skill) persists the read-time legacy marks.
+    await saveSkill(skill("New one"), [], A);
+    const stored = (store[SKILLS_STORAGE_KEY] as UserSkill[]).find((item) => item.id === "legacy-1");
+    expect(stored).toMatchObject({ visibility: "all", legacy: true, provenance: { origin: "legacy" } });
+    expect(stored).not.toHaveProperty("space_id");
+    expect(stored?.provenance).toEqual({ origin: "legacy" });
+    expect((await loadSkills(A)).some((item) => item.id === "legacy-1")).toBe(true);
+  });
+
+  it("a held lesson isn't applied 'for every Space' once the Skill was made private or deleted meanwhile", async () => {
+    const { A, B } = await spaces();
+    const global = await saveSkill(skill("Submit expense report", { visibility: "all" }), [], A);
+    const { held } = await applyLearningPlan({ kind: "lesson", skillId: global.id, lesson: "Needs FIN-44" }, [], A);
+    await setSkillReach(global.id, "this-space", B);
+    expect(await addRefinementToSharedSkill(held!)).toEqual({ ok: false, reason: "changed" });
+    expect(await keepRefinementInSpace(held!)).toEqual({ ok: false, reason: "changed" });
+    expect(JSON.stringify(await loadAllSkills())).not.toContain("FIN-44");
+    expect(await loadAllSkills()).toHaveLength(1);
+    await deleteSkill(global.id, B);
+    expect(await addRefinementToSharedSkill(held!)).toEqual({ ok: false, reason: "gone" });
+    expect(await keepRefinementInSpace(held!)).toEqual({ ok: false, reason: "gone" });
+    expect(await loadAllSkills()).toEqual([]);
   });
 });
