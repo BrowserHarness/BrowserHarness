@@ -5,7 +5,7 @@
 //
 // Decisions belong to the Space they were made in and stay behind its wall
 // (memory-scope.ts). One for every Space is only made when the person says so.
-import { resolveSpace, visibleInSpace, type SpaceTagged } from "./memory-scope";
+import { recordSpace, resolveSpace, visibleInSpace, type SpaceTagged } from "./memory-scope";
 import { asksAboutThePast, relevance, type Provenance } from "./about-me";
 import { checkSensitive, refusalMessage, type SensitiveReason } from "./memory-write/sensitivity";
 import { SPACE_TAGGED_KEYS } from "./spaces";
@@ -31,7 +31,8 @@ export interface Decision extends SpaceTagged {
 }
 
 const KEY = SPACE_TAGGED_KEYS.decisions;
-const MAX_DECISIONS = 300;
+/** At most this many decisions per Space, and this many for every Space, so one Space never pushes out another's. */
+export const MAX_DECISIONS = 300;
 const MAX_TEXT = 160;
 
 function clean(text: string): string {
@@ -48,8 +49,24 @@ async function loadAll(): Promise<Decision[]> {
   return Array.isArray(value) ? (value as Decision[]) : [];
 }
 
+/** Who a decision's room counts against: its own Space, or the every-Space shelf. */
+function shelf(decision: Decision): string {
+  return decision.visibility === "all" ? "\u0000all" : recordSpace(decision);
+}
+
+/** Newest first, at most MAX_DECISIONS per shelf: a full Space only ever makes room from its own oldest. */
+export function cappedDecisions(decisions: Decision[]): Decision[] {
+  const counts = new Map<string, number>();
+  return decisions.filter((decision) => {
+    const key = shelf(decision);
+    const count = (counts.get(key) ?? 0) + 1;
+    counts.set(key, count);
+    return count <= MAX_DECISIONS;
+  });
+}
+
 async function storeAll(decisions: Decision[]): Promise<void> {
-  await chrome.storage.local.set({ [KEY]: decisions.slice(0, MAX_DECISIONS) });
+  await chrome.storage.local.set({ [KEY]: cappedDecisions(decisions) });
 }
 
 function isCurrent(decision: Decision): boolean {

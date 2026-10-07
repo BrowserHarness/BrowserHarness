@@ -61,9 +61,9 @@ const GLOBAL_KEY = "browserharness.aboutMe.global";
 
 /** Where a fact applies: the Space it was said in, or every Space. */
 export type FactScope = "space" | "global";
-const MAX_FACTS = 60;
+export const MAX_FACTS = 60;
 /** Older facts kept per level, newest first. */
-const MAX_EARLIER = 100;
+export const MAX_EARLIER = 100;
 const MAX_FACT = 200;
 
 

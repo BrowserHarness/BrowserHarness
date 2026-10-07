@@ -5,19 +5,17 @@ import { useSaved } from "../feedback";
 import { AddIcon, CheckIcon, DeleteIcon, EditIcon, RestoreIcon, SaveFileIcon } from "../icons";
 import { NameDialog, saveTextFile, SpaceBadge, useSpaces } from "../spaces-ui";
 import {
-  backupSpace,
   createSpace,
   DEFAULT_SPACE_ID,
   deleteSpace,
   loadSpaces,
-  parseSpaceBackup,
   renameSpace,
-  restoreSpace,
   setSpaceColor,
   SPACE_COLORS,
   switchSpace,
   type Space
 } from "../../runtime/spaces";
+import { backupSpace, parseSpaceBackup, restoreSpace, restoreSummary, spaceContents } from "../../runtime/space-backup";
 import { chatFileName, loadChats } from "../../runtime/chats";
 import type { SectionProps } from "./SettingsShell";
 
@@ -56,7 +54,7 @@ export function SpacesPage(_props: SectionProps) {
   const saved = useSaved();
   const [naming, setNaming] = useState<{ space?: Space } | null>(null);
   const [nameError, setNameError] = useState("");
-  const [restoreNote, setRestoreNote] = useState<{ kind: "success" | "warning"; text: string } | null>(null);
+  const [restoreNote, setRestoreNote] = useState<{ kind: "success" | "warning"; text: string; lines?: string[]; notes?: string[] } | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
 
   // How many chats each Space has, so people know what they are deleting.
@@ -76,8 +74,17 @@ export function SpacesPage(_props: SectionProps) {
   };
 
   const remove = async (space: Space) => {
-    const chats = counts[space.id] ?? 0;
+    const owned = await spaceContents(space.id);
     const first = space.id === DEFAULT_SPACE_ID;
+    const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+    const parts = [
+      plural(owned.chats, "chat"),
+      "its notes about you and its wishes",
+      "its task history",
+      owned.decisions + owned.earlier_decisions ? plural(owned.decisions + owned.earlier_decisions, "decision") : "",
+      owned.skills ? `${plural(owned.skills, "Skill")} made in it` : "",
+      owned.schedules ? plural(owned.schedules, "scheduled task") : ""
+    ].filter(Boolean);
     const ok = await confirm({
       title: first ? `Empty ${space.name}?` : `Delete ${space.name}?`,
       body: (
@@ -85,8 +92,10 @@ export function SpacesPage(_props: SectionProps) {
           {first
             ? `${space.name} is your first Space, so it stays, but everything in it is deleted: `
             : `${space.name} and everything in it are deleted: `}
-          {chats} chat{chats === 1 ? "" : "s"}, its notes about you, its wishes and its task history. Your Skills, your AI
-          and your other Spaces are not touched. This can't be undone.
+          {parts.slice(0, -1).join(", ")}
+          {parts.length > 1 ? " and " : ""}
+          {parts.at(-1)}. Things you set for every Space, your AI and your other Spaces are not touched. This can't be
+          undone.
           <Box mt={1.5}>Tip: press “Save a backup” first if you might want it back.</Box>
         </>
       ),
@@ -171,16 +180,25 @@ export function SpacesPage(_props: SectionProps) {
               </Paper>
             ))}
           </Stack>
+          <Note kind="info" title="About backups">
+            A backup has everything kept inside that Space, so you can bring it back later as a new Space. The backup
+            file may contain private information from this Space. Keep it somewhere you trust.
+          </Note>
         </SettingsCard>
 
         <SettingsCard title="What each Space keeps for itself">
           <Typography variant="body2">
-            <strong>Kept apart in each Space:</strong> your chats, the facts it knows about you, your wishes (how you
-            want it to work), and your task history. When you ask about “last time”, it only looks in the Space you are in.
+            <strong>Kept inside each Space:</strong> your chats, the facts and preferences it knows about you (and what
+            used to be true), your wishes (how you want it to work), your past conversations and tasks with what was
+            checked along the way, the decisions you made there, the Skills made or learned there, and the scheduled
+            tasks made there. When you ask about “last time”, it only looks in the Space you are in.
           </Typography>
           <Typography variant="body2">
-            <strong>Shared by all Spaces:</strong> your connected AI, your Skills, safety choices, scheduled tasks and
-            settings. A scheduled task uses the notes of the Space it was made in.
+            <strong>Shared only when you choose:</strong> facts, wishes, decisions and Skills you set for every Space.
+          </Typography>
+          <Typography variant="body2">
+            <strong>Always shared:</strong> your connected AI, safety choices, settings, Site Skills and Watch Me
+            recordings.
           </Typography>
           <Note kind="tip" title="Example">
             Make a “Work” Space and tell it “I work at Infosys and I prefer short answers”. Your “Home” Space won't know
@@ -190,7 +208,7 @@ export function SpacesPage(_props: SectionProps) {
 
         <SettingsCard
           title="Bring back a backup"
-          intro="Pick a backup file you saved earlier. It comes back as a new Space, so nothing you have now is changed."
+          intro="Pick a backup file you saved earlier. It comes back as a new Space, so nothing you have now is changed. Its scheduled tasks come back paused, so nothing runs twice by surprise."
         >
           <Box>
             <Button variant="outlined" component="label" startIcon={<RestoreIcon fontSize="small" />}>
@@ -217,14 +235,41 @@ export function SpacesPage(_props: SectionProps) {
                     }
                     await refresh();
                     await countChats();
-                    setRestoreNote({ kind: "success", text: `Brought back as “${result.space.name}”. Pick it from your Spaces to use it.` });
+                    const lines = restoreSummary(result);
+                    setRestoreNote({
+                      kind: "success",
+                      text: `Brought back as “${result.space.name}”. Pick it from your Spaces to use it.`,
+                      lines,
+                      notes: [
+                        ...result.renamed_commands.map((item) => `The Skill command /${item.from} was already in use, so this copy is /${item.to}.`),
+                        ...result.warnings
+                      ]
+                    });
                     saved("Backup brought back");
                   });
                 }}
               />
             </Button>
           </Box>
-          {restoreNote && <Note kind={restoreNote.kind}>{restoreNote.text}</Note>}
+          {restoreNote && (
+            <Note kind={restoreNote.kind}>
+              <span data-testid="restore-note">
+                {restoreNote.text}
+                {restoreNote.lines?.length ? (
+                  <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>
+                    {restoreNote.lines.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </Box>
+                ) : null}
+                {restoreNote.notes?.map((note) => (
+                  <Box key={note} mt={0.5}>
+                    {note}
+                  </Box>
+                ))}
+              </span>
+            </Note>
+          )}
         </SettingsCard>
       </Stack>
 

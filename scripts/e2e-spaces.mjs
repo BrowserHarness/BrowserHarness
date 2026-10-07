@@ -327,7 +327,7 @@ try {
   const office = full.getByTestId("space-row").filter({ hasText: "Office" });
   const backup = await saveDownload(full, () => office.getByRole("button", { name: "Save a backup" }).click());
   const parsed = JSON.parse(backup.text);
-  check("a Space saves as a backup file", parsed.kind === "browserharness-space-backup" && parsed.space.name === "Office" && JSON.stringify(parsed.data).includes("Infosys"), backup.name);
+  check("a Space saves as a backup file", parsed.kind === "browserharness-space-backup" && parsed.version === 2 && parsed.source_space.name === "Office" && JSON.stringify(parsed.data).includes("Infosys"), backup.name);
   await office.getByRole("button", { name: "Delete" }).click();
   await full.getByRole("button", { name: "Delete Space" }).click();
   await full.getByTestId("space-row").filter({ hasText: "Office" }).waitFor({ state: "detached", timeout: 5000 });

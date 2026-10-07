@@ -1,19 +1,17 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   activeSpaceId,
-  backupSpace,
   createSpace,
   DEFAULT_SPACE_ID,
   deleteSpace,
   isKeyFor,
   keyForSpace,
   loadSpaces,
-  parseSpaceBackup,
   pinSpace,
   renameSpace,
-  restoreSpace,
   switchSpace
 } from "./spaces";
+import { backupSpace, parseSpaceBackup, restoreSpace } from "./space-backup";
 import { addFacts, loadAboutMe } from "./about-me";
 import { loadInstructions, saveInstructions } from "./instructions";
 import { loadTaskHistory, saveTaskHistoryEntry } from "./history";
@@ -120,7 +118,7 @@ describe("spaces", () => {
     await saveChatMessages("c1", say("kettle prices"));
     const file = JSON.stringify(await backupSpace(DEFAULT_SPACE_ID));
     const parsed = parseSpaceBackup(file);
-    expect(parsed?.space.name).toBe("Personal");
+    expect(parsed?.version === 2 && parsed.source_space.name).toBe("Personal");
     expect(parseSpaceBackup("{}")).toBeNull();
     expect(parseSpaceBackup("not json")).toBeNull();
 
