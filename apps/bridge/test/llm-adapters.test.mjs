@@ -204,3 +204,22 @@ test("Bridge relays llm_request only from the paired extension", async () => {
     await bridge.close();
   }
 });
+
+test("on Windows the npm .cmd is used, not the no-ending copy npm leaves for Git Bash", async () => {
+  const { mkdtemp, writeFile, rm, mkdir } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { windowsLaunch } = await import("../src/llm-adapters.mjs");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "bh-npm-"));
+  try {
+    await writeFile(path.join(dir, "codex"), "#!/bin/sh\nexec node codex.js\n");
+    await writeFile(path.join(dir, "codex.cmd"), '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n');
+    await mkdir(path.join(dir, "node_modules"), { recursive: true });
+    const launch = windowsLaunch("codex", ["--version"], { PATH: dir }, "win32");
+    assert.equal(launch.command, process.execPath);
+    assert.equal(launch.args.at(-1), "--version");
+    assert.match(launch.args[0], /codex\.js$/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

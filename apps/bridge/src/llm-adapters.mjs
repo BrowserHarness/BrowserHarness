@@ -122,7 +122,7 @@ function resolveCommand(id, env = process.env) {
 export function windowsLaunch(command, args, env = process.env, platform = process.platform) {
   if (platform !== "win32") return { command, args };
   const found = /[\\/]/.test(command)
-    ? ["", ".exe", ".cmd", ".bat"].map((ext) => command + ext).find((file) => existsSync(file))
+    ? (/\.[a-z0-9]+$/i.test(command) ? [""] : [".exe", ".cmd", ".bat"]).map((ext) => command + ext).find((file) => existsSync(file))
     : findOnPath(command, env, platform);
   if (!found || !/\.(cmd|bat)$/i.test(found)) return { command: found || command, args };
   let script;
