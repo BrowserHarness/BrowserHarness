@@ -77,7 +77,10 @@ const ADAPTERS = {
         "--color",
         "never",
         "--output-last-message",
-        outputFile
+        outputFile,
+        // Each browser step is a small question; deep thinking only adds wait.
+        "-c",
+        'model_reasoning_effort="low"'
       ];
       if (model && model !== "default") args.push("-m", model);
       args.push("-");
