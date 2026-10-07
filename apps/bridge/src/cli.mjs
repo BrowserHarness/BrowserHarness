@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import {
   mkdir,
   open,
@@ -28,6 +29,7 @@ import { CHAT_APP_NAMES } from "./chat-relay.mjs";
 import { createChatManager } from "./chat-manager.mjs";
 import { createTranscriber, silentWav, voiceServiceUrl } from "./voice.mjs";
 import { createSetupServer, pairingMessage } from "./setup-page.mjs";
+import { findAppBrowser, installShortcuts, openHelperWindow, uninstallShortcuts } from "./helper-window.mjs";
 import {
   detectAgents,
   findOnPath,
@@ -36,6 +38,7 @@ import {
   uninstallLauncher,
   installService,
   registerAgents,
+  serviceDefinition,
   stableCliPath,
   stableNodePath,
   uninstallService,
@@ -57,6 +60,8 @@ const PID_FILE = path.join(HOME, "daemon.pid");
 const ADDR_FILE = path.join(HOME, "daemon.addr");
 const LOG_DIR = path.join(HOME, "logs");
 const LOG_FILE = path.join(LOG_DIR, "daemon.log");
+// The address of the helper window while it is open, so a second open brings it back.
+const WINDOW_FILE = path.join(HOME, "window.url");
 
 function print(value) {
   process.stdout.write(
@@ -184,6 +189,8 @@ async function serve(config) {
   });
 
   const shutdown = async () => {
+    // Never hang on the way out: a stop must really stop.
+    setTimeout(() => process.exit(0), 4000).unref();
     chats.stopAll();
     await bridge.close().catch(() => undefined);
     await Promise.all([
@@ -280,6 +287,16 @@ async function stop(config, { quiet = false } = {}) {
     throw new Error(
       "BrowserHarness Bridge did not stop within the expected window"
     );
+  }
+  // It stops answering before it has tidied up; wait until it has gone, so
+  // a quick start afterwards doesn't lose its files to the old one.
+  for (const deadline = Date.now() + 5000; Date.now() < deadline; ) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
   await Promise.all([
@@ -894,6 +911,7 @@ async function install(config, created, { quiet = false } = {}) {
     cli: cliPath,
     launcher,
     service: { kind: service.kind, file: service.file, starts_at_login: service.kind !== "none" && (service.running || service.kind === "startup-folder") },
+    node: nodePath,
     agents,
     extension_connected: Boolean(status.extension_connected)
   };
@@ -928,21 +946,73 @@ function openInBrowser(url) {
   }
 }
 
+/** Opens a folder in Explorer, Finder or the file manager. */
+function openFolder(folder) {
+  if (process.platform !== "win32") return openInBrowser(folder);
+  try {
+    const child = spawn("explorer.exe", [folder], { detached: true, stdio: "ignore" });
+    child.on("error", () => undefined);
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function showWindow(url) {
+  const browser = findAppBrowser({ home: USER_HOME, which: (name) => findOnPath(name) });
+  return openHelperWindow(url, { browser, fallback: openInBrowser });
+}
+
+/** The apps that let BrowserHarness use a Claude or ChatGPT plan, and how to add them. */
+function planApps() {
+  const windows = process.platform === "win32";
+  const npm = windows ? "npm.cmd" : "npm";
+  const codex = findOnPath("codex");
+  const codexHome = process.env.CODEX_HOME || path.join(USER_HOME, ".codex");
+  return [
+    {
+      id: "codex",
+      name: "ChatGPT plan (Codex)",
+      found: Boolean(codex),
+      signed_in: codex ? existsSync(path.join(codexHome, "auth.json")) : undefined,
+      how: `${npm} install -g @openai/codex`,
+      sign_in: windows ? "codex.cmd login" : "codex login"
+    },
+    {
+      id: "claude",
+      name: "Claude plan (Claude Code)",
+      found: Boolean(findOnPath("claude")),
+      how: `${npm} install -g @anthropic-ai/claude-code`
+    }
+  ];
+}
+
 /**
- * The double-click install: installs quietly, then opens a page in the
- * browser where the person types the pairing code. No terminal typing.
+ * The page behind the helper window, with what its buttons do. `agents` are
+ * the coding tools set up just now; otherwise the ones found on this computer.
  */
-async function setup(config, created) {
-  print("Setting up the BrowserHarness helper app…");
-  const summary = await install(config, created, { quiet: true });
-  const page = createSetupServer({
+function helperWindowServer(config, { cliPath, nodePath, agents }) {
+  const ctx = context(cliPath, nodePath);
+  const startHelper = () => start(config, false, cliPath, { quiet: true, nodePath });
+  const action = (fn, failed) => async (body) => {
+    try {
+      await fn(body);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: `${failed} ${error instanceof Error ? error.message : String(error)}` };
+    }
+  };
+  return createSetupServer({
     status: async () => {
       const status = await readStatus(config);
       return {
         running: Boolean(status.running),
         extension_connected: Boolean(status.extension_connected),
-        starts_at_login: summary.service.starts_at_login,
-        agents: summary.agents.map((agent) => ({ name: agent.name, status: agent.status }))
+        starts_at_login: existsSync(serviceDefinition(ctx).file),
+        agents: agents ?? detectAgents(ctx).filter((agent) => agent.found).map((agent) => ({ name: agent.name, status: "connected" })),
+        plans: planApps(),
+        platform: process.platform
       };
     },
     approve: async (code) => {
@@ -950,29 +1020,121 @@ async function setup(config, created) {
       const result = await bridgeRequest(config, "/pair/approve", { code });
       if (result.ok) await waitForExtension(config, 15_000);
       return pairingMessage(result);
+    },
+    actions: {
+      start: action(startHelper, "The helper app didn't start."),
+      stop: action(() => stop(config, { quiet: true }), "The helper app didn't stop."),
+      restart: action(async () => {
+        if ((await readStatus(config)).running) await stop(config, { quiet: true });
+        await startHelper();
+      }, "The helper app didn't restart."),
+      login: action(async ({ on }) => {
+        // The login service may take over the running helper, so hand it over cleanly.
+        if ((await readStatus(config)).running) await stop(config, { quiet: true });
+        if (on) await installService(ctx);
+        else await uninstallService(ctx);
+        if (!(await waitForState(config, true, on ? 3000 : 300)).running) await startHelper();
+      }, "That setting didn't change."),
+      logs: action(async () => {
+        await mkdir(LOG_DIR, { recursive: true });
+        openFolder(LOG_DIR);
+      }, "The folder didn't open.")
     }
   });
-  const url = await page.listen();
-  if (flag("json")) print({ setup_url: url, ...summary });
-  const opened = !flag("no-open") && openInBrowser(url);
-  print(
-    opened
-      ? `A setup page opened in your browser. Keep this window open until the page says Connected.\nIf no page opened, copy this address into your browser: ${url}`
-      : `Open this address in your browser to finish: ${url}`
-  );
+}
 
-  // Done once Chrome is connected (and the page had time to show it), or
-  // after 30 minutes with nobody on the page.
-  let connectedAt = 0;
-  while (true) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const status = await readStatus(config, 800);
-    if (status.extension_connected && !connectedAt) connectedAt = Date.now();
-    if (connectedAt && Date.now() - connectedAt > 8000) break;
-    if (page.idleSeconds() > 30 * 60) break;
+/**
+ * Serves the helper window until the person closes it (or `until` says the
+ * job is done), then stops. The window asks every 2 seconds; a minimized
+ * window asks less often, so give it a few minutes.
+ */
+async function runHelperWindow(config, { cliPath, nodePath, agents, until, onUrl }) {
+  const page = helperWindowServer(config, { cliPath, nodePath, agents });
+  const url = await page.listen();
+  await writeFile(WINDOW_FILE, `${url}\n`);
+  onUrl?.(url);
+  const opened = !flag("no-open") && showWindow(url);
+  try {
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (until && (await until())) break;
+      if (page.closedByPerson()) break;
+      if (page.idleSeconds() > (page.wasOpened() ? 180 : 30 * 60)) break;
+    }
+  } finally {
+    await page.close();
+    if ((await readFile(WINDOW_FILE, "utf8").catch(() => "")).trim() === url) await rm(WINDOW_FILE, { force: true });
   }
-  await page.close();
-  print(connectedAt ? "✓ Connected. You can close this window." : "The setup page timed out. Double-click the installer again to finish.");
+  return { url, opened };
+}
+
+/** `app`: what the BrowserHarness Helper shortcut runs. */
+async function app(config) {
+  // One window at a time: bring the open one forward instead.
+  const existing = (await readFile(WINDOW_FILE, "utf8").catch(() => "")).trim();
+  if (existing) {
+    const alive = await fetch(`${existing}status`, { signal: AbortSignal.timeout(1500) })
+      .then((response) => response.ok)
+      .catch(() => false);
+    if (alive) {
+      if (!flag("no-open")) showWindow(existing);
+      if (flag("json")) print({ window_url: existing, reused: true });
+      return;
+    }
+  }
+  const nodePath = process.execPath;
+  if (!(await readStatus(config)).running) {
+    await start(config, false, THIS_FILE, { quiet: true, nodePath }).catch(() => undefined);
+  }
+  await runHelperWindow(config, {
+    cliPath: THIS_FILE,
+    nodePath,
+    onUrl: (url) => flag("json") && print({ window_url: url })
+  });
+}
+
+/**
+ * The double-click install: installs quietly, adds the BrowserHarness Helper
+ * shortcut, then opens the helper window where the person types the pairing
+ * code. No terminal typing. With --detach (the launchers) the window runs on
+ * its own, so the installer's black window closes straight away.
+ */
+async function setup(config, created) {
+  print("Setting up the BrowserHarness helper app…");
+  const summary = await install(config, created, { quiet: true });
+  const ctx = context(summary.cli, summary.node);
+  const shortcut = flag("no-shortcuts")
+    ? null
+    : await installShortcuts(ctx).catch((error) => ({ created: false, note: error instanceof Error ? error.message : String(error) }));
+  if (shortcut && !shortcut.created) print(`(The ${process.platform === "darwin" ? "app" : "shortcut"} wasn't added: ${shortcut.note})`);
+
+  if (flag("detach")) {
+    const child = spawn(summary.node, [summary.cli, "app"], { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => undefined);
+    child.unref();
+    print("✓ Installed. The BrowserHarness Helper window is opening.");
+    print("You can open it again any time from your apps: look for BrowserHarness Helper.");
+    return;
+  }
+
+  // Done once Chrome is connected (and the window had time to show it), or
+  // when the person closes the window.
+  let connectedAt = 0;
+  await runHelperWindow(config, {
+    cliPath: summary.cli,
+    nodePath: summary.node,
+    agents: summary.agents.map((agent) => ({ name: agent.name, status: agent.status })),
+    onUrl: (url) => {
+      if (flag("json")) print({ setup_url: url, ...summary, shortcut });
+      else print(`The BrowserHarness Helper window is opening. If it doesn't, copy this address into your browser: ${url}`);
+    },
+    until: async () => {
+      const status = await readStatus(config, 800);
+      if (status.extension_connected && !connectedAt) connectedAt = Date.now();
+      return Boolean(connectedAt && Date.now() - connectedAt > 8000);
+    }
+  });
+  print(connectedAt ? "✓ Connected. You can close this window." : "The window was closed. Open BrowserHarness Helper from your apps to finish.");
 }
 
 async function uninstall(config) {
@@ -982,6 +1144,7 @@ async function uninstall(config) {
   const ctx = context(cliPath);
   const agents = await unregisterAgents(ctx);
   await uninstallLauncher(ctx);
+  await uninstallShortcuts(ctx).catch(() => undefined);
   const service = await uninstallService(ctx);
   if ((await readStatus(config)).running) {
     await stop(config, { quiet: true }).catch(() => undefined);
@@ -1018,6 +1181,8 @@ try {
     await install(config, created);
   } else if (command === "setup") {
     await setup(config, created);
+  } else if (command === "app") {
+    await app(config);
   } else if (command === "uninstall") {
     await uninstall(config);
   } else if (command === "agents") {
@@ -1057,7 +1222,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [setup|install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|voice|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [setup|app|install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|voice|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
     );
   }
 } catch (error) {
