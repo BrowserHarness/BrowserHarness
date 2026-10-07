@@ -964,6 +964,19 @@ function showWindow(url) {
   return openHelperWindow(url, { browser, fallback: openInBrowser });
 }
 
+// Runs each plan app once a minute, as BrowserHarness does, so the window
+// shows the same answer and the real reason when it fails.
+const planChecks = new Map();
+const planManager = createLlmAdapterManager();
+function planCheck(id) {
+  const cached = planChecks.get(id);
+  if (cached && Date.now() - cached.at < 60_000) return cached.result;
+  const entry = { at: Date.now(), result: null };
+  planChecks.set(id, entry);
+  planManager.status(id).then((result) => (entry.result = result), (error) => (entry.result = { installed: false, message: String(error?.message || error) }));
+  return cached?.result ?? null;
+}
+
 /** The apps that let BrowserHarness use a Claude or ChatGPT plan, and how to add them. */
 function planApps() {
   const windows = process.platform === "win32";
@@ -977,12 +990,14 @@ function planApps() {
       found: Boolean(codex),
       signed_in: codex ? existsSync(path.join(codexHome, "auth.json")) : undefined,
       how: `${npm} install -g @openai/codex`,
-      sign_in: windows ? "codex.cmd login" : "codex login"
+      sign_in: windows ? "codex.cmd login" : "codex login",
+      check: codex ? planCheck("codex_cli") : undefined
     },
     {
       id: "claude",
       name: "Claude plan (Claude Code)",
       found: Boolean(findOnPath("claude")),
+      check: findOnPath("claude") ? planCheck("claude_cli") : undefined,
       how: `${npm} install -g @anthropic-ai/claude-code`
     }
   ];

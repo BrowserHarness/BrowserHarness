@@ -320,8 +320,14 @@ const PAGE_HTML = `<!doctype html>
       text.appendChild(name);
       const detail = document.createElement("div");
       detail.className = "muted";
-      if (plan.found && plan.signed_in !== false) {
-        detail.textContent = "Ready. In BrowserHarness, choose it in Settings, then Your AI.";
+      const failed = plan.found && plan.check && plan.check.installed === false;
+      if (failed) {
+        detail.textContent = "Found, but it didn't start when the helper tried it. What it said: ";
+        const code = document.createElement("code");
+        code.textContent = plan.check.message || plan.check.error || "no reason given";
+        detail.appendChild(code);
+      } else if (plan.found && plan.signed_in !== false) {
+        detail.textContent = plan.check ? "Ready. In BrowserHarness, choose it in Settings, then Your AI." : "Checking that it starts…";
       } else if (plan.found) {
         detail.textContent = "Found, but not signed in yet. To sign in, type this in PowerShell or Terminal: ";
         const code = document.createElement("code");
@@ -335,8 +341,9 @@ const PAGE_HTML = `<!doctype html>
       }
       text.appendChild(detail);
       const badge = document.createElement("span");
-      badge.className = "badge " + (plan.found && plan.signed_in !== false ? "ok" : plan.found ? "warn" : "");
-      badge.textContent = plan.found && plan.signed_in !== false ? "Ready" : plan.found ? "Sign in" : "Not added";
+      const ready = plan.found && plan.signed_in !== false && !failed;
+      badge.className = "badge " + (ready ? "ok" : plan.found ? "warn" : "");
+      badge.textContent = failed ? "Problem" : ready ? "Ready" : plan.found ? "Sign in" : "Not added";
       row.appendChild(text);
       row.appendChild(badge);
       box.appendChild(row);

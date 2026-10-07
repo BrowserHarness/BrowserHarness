@@ -252,7 +252,11 @@ export function createLlmAdapterManager({
           id,
           label: adapter.label,
           installed: result.code === 0,
-          version: result.stdout.trim().slice(0, 80)
+          version: result.stdout.trim().slice(0, 80),
+          ...(result.code !== 0 && {
+            error: "ADAPTER_CLI_ERROR",
+            message: `${command} --version exited with code ${result.code}: ${(result.stderr || result.stdout).trim().slice(-300)}`
+          })
         };
       } catch (error) {
         return {
