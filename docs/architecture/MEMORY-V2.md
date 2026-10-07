@@ -46,7 +46,7 @@ Not yet done (later phases):
 8. No Context Compiler: prompts were assembled by string concatenation in `App.tsx` and `scheduled-run.ts` (`instructionsPrompt + aboutMePrompt + recallPrompt + skillHint + chatContextPrompt`), with no authority ranking, token budget or diagnostics (done in Phase 5, see 3d).
 9. No candidate/dedupe/sensitivity pipeline shared by all writers; three separate secret regexes (Phase 6).
 10. Page content: facts are only learned from the person's own typed message, never from pages (good), but nothing formally marks page-derived episode text as untrusted (Phase 6/8).
-11. DAG verifier verdicts and worker ids are not carried into episodes; working memory has no Space (Phase 8).
+11. DAG verifier verdicts and worker ids are not carried into episodes (done in Phase 8, see 3g); working memory has no Space (still open: it is per task session and cleared when the task is saved).
 12. Site Skills, procedural memory and recordings are still shared (deliberate for now, see 3.4).
 13. Space backup/restore covers chats, notes, instructions and history only, not that Space's Skills and episodes (Phase 9).
 
@@ -341,7 +341,7 @@ No migration and no rewrite of old records. New optional fields: `AboutMeFact.ki
 - `runtime/task-memory.test.ts`: episodes and helper findings carry `trust: "observed"`, the parent session and task provenance.
 - Real-Chromium: memory smoke (a friend's quoted home, a one-off "use GitHub to search" and "Remember that my password hunter2" are not kept even when the AI reads the friend's home as the person's; a short stay and a maybe don't replace home even when the AI says so; a standing wish is offered and kept with one tap; a loose decision offered; a settled one kept and undone), spaces smoke (`/remember Across all Spaces, keep answers concise` is kept as a standing wish for every Space and reaches requests in another Space; Space facts stay put), learning smoke (sensitive refused, facts remembered).
 
-## 3f. Phase 7: Skill scope, sharing and copying (Phase 7 PR)
+## 3f. Phase 7: Skill scope, sharing and copying (PR #43, merged at main 584fa4e)
 
 **A Skill learned in one Space stays in that Space unless the person deliberately shares it. Sharing one Skill with every Space and copying it into another Space are different operations: one shared Skill versus two independent Skills.** Site Skills, procedural memory and raw recordings are unchanged (they describe websites, not the person, and stay shared).
 
@@ -404,6 +404,124 @@ No bulk or destructive migration (legacy Skills are normalized on read and may b
 - Space backups don't include Skills yet (Phase 9).
 - The decisions store still has one overall cap of 300 (follow-up 4).
 
+## 3g. Phase 8: task, helper and verifier provenance (Phase 8 PR)
+
+**A remembered task result is only as trustworthy as the evidence and verification attached to it.** A saved task now keeps who found a claim, which sources they used, which verifier checked it and what the verifier concluded, with every edge, inside the task's Space. No second verifier was built: the existing Task DAG (`runtime/task-dag.ts`) and helper batch (`runtime/subagent-supervisor.ts`) are unchanged in how they run; only what survives into memory changed.
+
+### The path, and what survived before Phase 8
+| Stage | Before Phase 8 |
+|---|---|
+| `agent` tool in `agent-task.ts` | Parses `{tasks}` (batch) or `{dag}` (Task DAG). Both launch `runReadOnlySubagent` with a child session `<parent>:worker:<n>:<uuid>` in the parent's Space. DAG nodes always launch read-only. |
+| `runTaskDag` → `TaskDagResult` | Full: node id, type, task, dependencies, status, `child_session_id`, the worker's `finding` (message, sources ≤6, tools ≤20), `verdict` for completed verify nodes (`parseVerifierVerdict`, anything malformed → `insufficient`), `provenance`, `blocked_by`. |
+| `runReadOnlySubagentBatch` → batch result | Full: per worker index, task, finding; no record of read or act mode. |
+| `BrowserSessionActionEvidence.delegation` (`delegationEvidenceFromResult`) | Batch: count fields and per worker task, session, status, sources, tools; **only the first 2 of up to 4 workers**; no mode. **DAG: nothing at all.** The result has no `workers` array, so the agent action was saved with no delegation, and every node, edge, session, source and verdict was lost. |
+| `TaskEpisodeMemory` | `delegations` (batch workers) with `parent_session_id`, `action_id`, `trust: "observed"`, episode `space_id`; no DAG, no verdicts. |
+| Semantic index, search, Context Compiler | Saw only batch workers' tasks and sources. |
+
+### Session evidence (`runtime/session-evidence.ts`)
+`BrowserSessionDelegationEvidence` gains `kind: "batch" | "dag"` (missing on older records, which are batches), `mode: "read" | "act"` (batches; from the batch result's new `mode` field, or the call's own `act` flag; never guessed from tools used), and `dag: BrowserSessionDagEvidence` for a DAG. A DAG keeps `workers: []` and its nodes in `dag`; one is never dressed up as the other. Batches now keep all 4 workers.
+
+`dagEvidenceFromResult` (`runtime/task-provenance.ts`) reads each node defensively and records only what really happened:
+
+- `status` is the scheduler's end state (`completed`, `failed`, `blocked`, `cancelled`); `worker_status` is the worker's own (`stopped` at its step limit, for example) when it ran.
+- `child_session_id` only for a real worker session (a worker that threw has a placeholder `dag-failed-*` id; none is kept).
+- Sources and tools only for a node whose worker ran. A blocked or never-started node has none.
+- `verdict` only for a **completed verify** node. A verify node that completed with no or a malformed verdict is `insufficient` (the scheduler's rule, kept). A research node or a failed verifier never has one, whatever the result claims.
+- `blocked_by` only on a blocked node; `depends_on` in the order given; edges only to nodes that exist.
+- `finding`: a short summary (below), only for completed nodes.
+- Counts are recomputed from the nodes, never taken from the result.
+
+### Persisted schema (`runtime/task-memory.ts`)
+Optional fields only; `schema_version` stays 1.
+```
+TaskEpisodeMemory {
+  ...unchanged...
+  delegations?: TaskEpisodeDelegation[]   // batch workers, as before, + mode?: "read" | "act"
+  dag_runs?: TaskEpisodeDagRun[]          // new, at most 5 per episode
+}
+TaskEpisodeDagRun {
+  action_id            // the parent task's action that launched it
+  parent_session_id    // the parent task's session
+  nodes: TaskEpisodeDagNode[]   // at most 4 (MAX_TASK_DAG_NODES)
+  completed_count, failed_count, blocked_count, cancelled_count, cancelled
+}
+TaskEpisodeDagNode {
+  node_id, type: "research" | "verify", task
+  status: "completed" | "failed" | "blocked" | "cancelled"
+  worker_status?       // the worker's own end state
+  mode: "read"         // DAG workers are always read-only
+  child_session_id?    // the worker's session; absent if it never ran
+  depends_on: string[] // research: what it built on; verify: what it checked, in order
+  blocked_by?
+  sources: {url, title}[]   // ≤ 6, one per URL, cleaned
+  tools_used: string[]      // ≤ 20
+  verdict?: "supported" | "contradicted" | "insufficient"   // completed verify nodes only
+  finding?: string          // ≤ 280 characters, model-derived
+  checked_by?: {node_id, status, verdict?}[]   // research nodes: every verifier that checked it
+  trust: { sources: "observed", finding?: "derived", verdict?: "derived_verification" }
+}
+```
+`checked_by` is derived from the real edges when the episode is saved, so a claim is never stored apart from the verdict on it. Lineage uses existing ids only: Space (`episode.space_id`) → episode → `parent_session_id` → `action_id` → node id → `child_session_id` → sources; a verifier's `depends_on` names the research nodes, whose `child_session_id` and sources are on their own records. No new identifiers were introduced.
+
+### Trust: three different things
+- **Source observation** (`trust.sources: "observed"`): the pages a worker opened. Same meaning as `trust: "observed"` on episodes and batch workers since Phase 6.
+- **Worker finding** (`"derived"`): a model's reading of those sources, never raw page truth.
+- **Verifier verdict** (`"derived_verification"`): a second model's judgment of the finding.
+
+These labels belong to task memory only; they do not change Phase 6's personal-memory trust classes. Verifier output never goes through the Memory Write Pipeline: it never becomes an About you fact, a preference, an instruction, a decision or anything for every Space (tested).
+
+### Worker finding text
+A short summary is kept because without it a verdict says nothing about what was checked. `findingSummary` keeps it only if it is safe: hidden reasoning (`<think>` blocks) and the `VERDICT:` line are removed, markdown is flattened, links are cleaned (below), it is cut to 280 characters at a word, and it is dropped entirely if it looks like a secret (`checkSensitive`, the Phase 6 check) or encoded data (an unbroken run of 80+ characters). Full worker answers, screenshots and page text are never kept.
+
+### Sensitive data
+- **Tool input**: unchanged. `sessionInputForTool` already redacts site Skill parameters, site command arguments and MCP call arguments; typed text never reaches an episode (only target names). `sensitive_payloads_removed: true` still holds.
+- **Worker and node tasks** (written by the model) pass `checkSensitive`; one that looks like it holds a secret is saved as "(left out: it looked like it held a secret)".
+- **Source URLs**: there was no URL cleaner, so `safeSourceUrl` was added. It removes user names and passwords, query parameters named like credentials (`token`, `access_token`, `code`, `state`, `key`, `api_key`, `sig`, `signature`, `session_id`, `sid`, `password`, `otp`, `X-Amz-*`, `X-Goog-*` and similar) or whose value looks like a secret, fragments that carry values (`#access_token=…`), and drops `data:`, `blob:` and `javascript:` links. Ordinary parameters (`?plan=pro&page=2`) are kept. It is applied to batch and DAG sources, to links inside finding summaries, and to the episode's start and end page.
+- **Titles** that look like a secret are kept empty.
+
+### Space
+Every worker and node runs with the parent task's fixed Space (`space_id` on each tool message, unchanged), and their provenance is saved inside the parent's episode, which carries that Space. There is no separate store to leak from: searches, listings, the semantic index and the Context Compiler all filter by Space before reading, as before. A verifier cannot write memory anywhere, in its own Space or another.
+
+### Read-only verifiers and no recursion
+Unchanged policy, now locked by tests: `dagWorkerSpec` launches every node, research and verify, with only a task and a step budget (≤ 8), so `act`, `mode` or any other field in the DAG input or in a stored record can't make one an acting helper; read-only workers can't click, type, press keys, upload, evaluate, use CDP or call `agent` (no recursion); acting helpers can't call `agent` either. Every stored DAG node says `mode: "read"`, whatever a result claims. Approval behavior is unchanged.
+
+### Search and recall
+- `searchTaskEpisodeMemory` also matches node ids, node tasks, verdicts (and "inconclusive"/"unconfirmed" for insufficient), the words "verify/verifier/verification" on verify nodes, findings and sources. So "Which task was contradicted?", "What did the verifier say about pricing?" and "Which sources checked this?" find the right episode. The Space filter still runs first.
+- The meaning index text gets a `verification:` line only for episodes that ran a DAG, so every other episode keeps its stored vector.
+- **Context Compiler** (not redesigned): an episode can now match the request on its DAG's tasks and findings too. When it does, or when the request asks about checking, truth or sources, the episode line gets up to 3 short lines from `verificationSummary`, for example:
+  - `Checked “Vendor A pricing is free for all users.”: CONTRADICTED when checked: treat it as wrong, not as a fact (sources then: vendor-a.example/pricing, regulator.example/vendor-a)`
+  - `… could not be confirmed when checked (inconclusive)`
+  - `… supported by the sources checked then (true at that time; may have changed)`
+  - `Not checked by a verifier: “…”`
+  A claim is never rendered without its verdict. Unrelated requests get no episode and so no verifier history; a related request that is not about the checked claims gets the plain episode line.
+- **Browser agent**: recalled episodes go to it as JSON, as before, now with `dag_runs` and `checked_by`. Its prompt adds: a node's finding is a past worker's reading, not a fact; contradicted means found wrong (never repeat it as true); insufficient means unconfirmed; supported means source-backed at that time only; fresh page evidence always wins over any past verdict. The live page is shown before past episodes.
+
+### Authority
+Unchanged: a recalled episode is `past_task` (40), `temporal: "historical"`, `trust: "observed"`, below the request, the conversation, fresh browser state (read live by the browser agent) and the Space's facts, decisions and instructions. Within past tasks, an episode whose checked claims were supported (and none contradicted) ranks a little higher (+0.05 relevance) than unchecked work; it is still history and is never promoted to personal or semantic memory.
+
+### Migration and compatibility
+No migration. Episodes saved before Phase 8 load, search and recall exactly as before (tested with a Phase 7 episode): no `dag_runs`, no `mode` on their workers, nothing added or guessed. A task that used no helpers saves the same fields as before.
+
+### Bounds and performance
+4 nodes per DAG, 5 DAG runs and 20 batch workers per episode, 6 sources per worker or node (one per URL), 20 tools, 1,000 characters per task, 280 per finding, 240 per title, 500 per URL. A full DAG episode (4 nodes, 6 sources each) is about 3.7 KB. Measured in the unit test: 200 DAG-episode serializations about 30 ms, a search over 500 DAG episodes about 50 ms, a full compile with verifier recall about 60 ms. A task without helpers does no extra work beyond the URL clean of its start and end page.
+
+### Results
+683 unit tests pass (655 before Phase 8; 28 new); typecheck and `validate:mvp` pass. Real-Chromium smokes: provenance 12/12 (new), memory 31/31, spaces 32/32, learning 24/24, phone 18/18, automation 16/16, agent 13/13 (its Task DAG check still passes), helpers 11/11, e2e 13/13, settings 26/26, features 18/18, self-learning 13/13, docs 6/6.
+
+### Tests
+- `runtime/task-provenance.test.ts` (27), through a real `runTaskDag`, a real parent `runBrowserTask` and the real episode store: research → verify keeps both nodes, the edge, both sessions, both source lists and the verdict; supported, contradicted, missing and malformed verdicts persist as supported, contradicted, insufficient, insufficient; two research nodes checked by one verifier keep both edges in order; a failed research node blocks the verifier (`blocked_by`, no session, sources or verdict, no placeholder session); a cancelled DAG keeps only real states (stopped worker → failed, never-started verifier → cancelled); no verdict on research or failed verify nodes; batches keep all 4 workers with parent, action and `mode`; acting helpers are `act` from how they were launched; DAG input can't make a node act; stored nodes are `read` whatever the result says; read-only workers can't click, type or call `agent`; Space A's DAG is never searched, listed or compiled in Space B; search by contradicted, verifier, source and node id; DAG text in the meaning index only for DAG episodes; contradicted claims render only with CONTRADICTED; insufficient renders as inconclusive; supported renders as true at that time and ranks a little higher; unrelated requests get no verifier history; the past task stays below the request and conversation; the browser agent sees the verdict with the claim after the live page, with the fresh-evidence rule; no fact, decision or instruction is written; URL cleaning; no secret task, finding, URL parameter, title or reasoning is kept; findings are short and plain; source and node caps; a Phase 7 episode loads, searches and recalls unchanged; performance.
+- `runtime/agent-task-dag.test.ts` (1): the real `agent` tool path launches research and verifier as read-only workers (even with `act` and `mode: "act"` on the call and on nodes, and a step budget of 99 capped to 8), as children of the parent session, with tool messages in the parent's Space, and the result keeps the lineage and the contradicted verdict.
+- Real-Chromium provenance smoke (`npm run smoke:provenance`, 12 checks): a research worker reads a claim from a local page, a verifier opens a second local page and contradicts it; the saved task keeps the parent and action, the Space, both nodes with their own sessions and pages, the edge, the verdict on the verifier and on the claim, the trust labels; a session id in a source link is dropped; nothing becomes a fact or decision; a later task in the same Space recalls the claim with its contradicted verdict; in another Space a task recalls nothing and its own episode has no DAG.
+
+### Remaining gaps after Phase 8
+- The parent's own final answer (in the chat and task history) is written by the model, which is told to treat contradicted or insufficient verdicts as unverified; it is not rewritten from the verdicts.
+- The verdict is only as good as the verifier model. Verdicts are not re-checked later; a supported verdict says "true at that time".
+- Worker tasks and findings are cleaned by name/shape rules (Phase 6 `checkSensitive`) and the URL cleaner by parameter names; an unusual secret parameter name with an ordinary-looking value would be kept.
+- Batch workers keep their sources and tools, not a finding summary (as before).
+- Episode storage is capped per Space while the episode vector pool is one global pool of 500 (follow-up 2).
+- Space backups don't include task provenance yet (Phase 9).
+- The decisions store still has one overall cap of 300 (follow-up 4).
+
 ## 4. Recorded follow-ups
 1. Done in Phase 7: legacy Skills read as an explicit every-Space Skill marked `legacy`. (Was: Skills saved before Memory v2 have no scope and are read as `visibility: "all"`.) Keep this for compatibility now; once the real All Spaces layer exists, give legacy/global Skills an explicit scope instead of relying on missing fields.
 2. Episodes are capped per Space, but the episode vector index (`browserharness.taskEpisodeVectors.v1`, 500 entries) is still one global pool. Isolation holds (filtering runs before meaning ranking), but busy Spaces can churn each other's vectors. Address with the Context Compiler / memory-provider work.
@@ -418,7 +536,7 @@ No bulk or destructive migration (legacy Skills are normalized on read and may b
 - Instructions are sent whole per line. Conflicts between an every-Space and a Space instruction are labelled ("this Space's win"), not resolved line by line.
 - Diagnostics have no screen yet, and are not passed to the agent's `memory` tool.
 - Past conversations come from the task history (request + answer), not from inside saved chats.
-- Page-derived text in episodes is labelled "observed" and kept below everything else; Phase 6 adds `trust: "observed"` on write; verifier verdicts are Phase 8.
+- Page-derived text in episodes is labelled "observed" and kept below everything else; Phase 6 adds `trust: "observed"` on write; verifier verdicts are kept since Phase 8.
 
 ### Remaining gaps after Phase 6
 - Relationship detection is word rules plus known topics. Changes said in other words ("I sold my Swift, got a Creta") are not linked; an optional bounded model classifier for ambiguous pairs, and meaning-based comparison, are left for the provider/index work.
@@ -433,5 +551,5 @@ No bulk or destructive migration (legacy Skills are normalized on read and may b
 - The decisions store still has one overall cap of 300 (follow-up 4).
 
 ## 5. Recommended next phases
-- Done: Phase 6, the Memory Write Pipeline; Phase 7, Skill scope, sharing and copying.
-- Next: task/agent records with verifier verdicts (Phase 8), backup of tagged records including decisions (Phase 9). Memory-provider adapters implement `MemorySource`.
+- Done: Phase 6, the Memory Write Pipeline; Phase 7, Skill scope, sharing and copying; Phase 8, task, helper and verifier provenance.
+- Next: backup of tagged records including decisions, Skills, episodes and their provenance (Phase 9). Memory-provider adapters implement `MemorySource`.
