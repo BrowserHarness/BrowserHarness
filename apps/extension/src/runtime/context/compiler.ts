@@ -18,6 +18,7 @@ import { classifyTaskIntent } from "../intent";
 import { looksBack } from "../recall";
 import type { UserSkill } from "../skills";
 import type { TaskEpisodeMemory } from "../task-memory";
+import { rememberedAnswer, verificationNotes, type RecalledHistoryEntry } from "../history-verification";
 import { ASKS_ABOUT_VERIFICATION, dagRecallText, verificationSummary } from "../task-provenance";
 import { budgetForRoute, estimateTokens, SECTION_SHARE, type RouteInput } from "./budget";
 import { localMemorySource, type MemorySource } from "./memory-source";
@@ -299,7 +300,7 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
     } else {
       const found = await source.relevantHistory(request, spaceId, MAX_HISTORY);
       inspected.history = { records_scanned: found.inspected };
-      found.entries.forEach((entry: TaskHistoryEntry) =>
+      found.entries.forEach((entry: RecalledHistoryEntry) =>
         items.push(
           item({
             ref: `history:${entry.id}`,
@@ -311,7 +312,8 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
             relevance: looksBack(request) ? 0.8 : 0.6,
             source: { kind: "past_conversation", id: entry.id, space_id: spaceId },
             reason: looksBack(request) ? "the request refers back to it" : "a very close earlier request",
-            text: `${day(entry.timestamp)}: I asked “${clip(entry.task, 160)}” → ${clip(entry.result, 400)}${entry.url ? ` (${entry.url})` : ""}`,
+            // An answer a verifier contradicted is not supplied; others carry their check.
+            text: `${day(entry.timestamp)}: I asked “${clip(entry.task, 160)}” → ${rememberedAnswer(entry, 400)}${entry.url ? ` (${entry.url})` : ""}${verificationNotes(entry).map((line) => `\n  ${line}`).join("")}`,
             payload: entry
           })
         )

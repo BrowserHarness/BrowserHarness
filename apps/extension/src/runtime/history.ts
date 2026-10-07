@@ -1,5 +1,6 @@
 import { loadPreferences } from "../settings/preferences";
 import { keyForSpace, spaceKey, SPACE_SCOPED_KEYS } from "./spaces";
+import { redactSecrets, safeSourceUrl } from "./task-provenance";
 
 export interface TaskHistoryEntry {
   id: string;
@@ -7,6 +8,29 @@ export interface TaskHistoryEntry {
   result: string;
   timestamp: string;
   url?: string;
+  /**
+   * The browser task session that produced this answer (Phase 8), which is
+   * also its task episode's `session_id`. Recall reads the episode's verifier
+   * verdicts through it. Missing on chat-only answers and older entries.
+   */
+  session_id?: string;
+}
+
+const MAX_SAVED_TEXT = 20_000;
+
+/**
+ * What a history entry may keep: links without credentials, and no line or
+ * sentence that looks like a secret. Every writer goes through this.
+ */
+export function safeHistoryEntry(entry: Omit<TaskHistoryEntry, "id" | "timestamp">): Omit<TaskHistoryEntry, "id" | "timestamp"> {
+  const url = entry.url ? safeSourceUrl(entry.url) : "";
+  const sessionId = typeof entry.session_id === "string" ? entry.session_id.slice(0, 200) : "";
+  return {
+    task: redactSecrets(entry.task, MAX_SAVED_TEXT),
+    result: redactSecrets(entry.result, MAX_SAVED_TEXT),
+    ...(url ? { url } : {}),
+    ...(sessionId ? { session_id: sessionId } : {})
+  };
 }
 
 // Each Space keeps its own past conversations (see spaces.ts).
@@ -37,7 +61,7 @@ export async function saveTaskHistoryEntry(
   const stored = (await chrome.storage.local.get(key))[key];
   const previous = Array.isArray(stored) ? (stored as TaskHistoryEntry[]) : [];
   const next: TaskHistoryEntry = {
-    ...entry,
+    ...safeHistoryEntry(entry),
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString()
   };

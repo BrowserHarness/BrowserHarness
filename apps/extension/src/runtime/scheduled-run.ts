@@ -23,6 +23,8 @@ export interface ScheduledRunOutcome {
   status: "worked" | "failed" | "needs you";
   message: string;
   url?: string;
+  /** The browser task's session, also its episode's: history links to it (Phase 8). Missing when no task ran. */
+  session_id?: string;
 }
 
 const RUN_LIMIT_MS = 10 * 60_000;
@@ -153,6 +155,7 @@ export async function runUnattendedTask(
     });
 
     const url = result.session_evidence.actions.at(-1)?.after?.url || result.session_evidence.start?.url;
+    const session_id = result.session_evidence.session_id;
     const learning = (status: "completed" | "stopped") =>
       applyLearningPlan(
         planLearning({
@@ -169,20 +172,22 @@ export async function runUnattendedTask(
     if (result.status === "completed") {
       const saved = (await learning("completed"))?.saved;
       if (saved && !skill && !hinted) log(`Learned this as /${saved.slug}`);
-      return { status: "worked", message: result.message, url };
+      return { status: "worked", message: result.message, url, session_id };
     }
     if (needsYou || result.status === "approval-cancelled") {
       return {
         status: "needs you",
         message: `Stopped before this step, which needs you: ${needsYou || "an approval"}. Open the task's tab to finish it.`,
-        url
+        url,
+        session_id
       };
     }
     if (!controller.signal.aborted && result.status === "stopped") await learning("stopped");
     return {
       status: "failed",
       message: controller.signal.aborted ? "Stopped: the task ran for more than 10 minutes." : result.message,
-      url
+      url,
+      session_id
     };
   } catch (error) {
     if (skill) await recordSkillRun(skill.id, "failed").catch(() => null);

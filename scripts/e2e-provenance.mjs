@@ -3,7 +3,8 @@
 // A small Task DAG: a research worker reads a claim from one local page, a verifier checks it
 // against a second local page and contradicts it. Then the saved task memory is inspected for
 // the parent, both nodes, the edge, sessions, sources and verdict; a later task in the same
-// Space recalls the claim only with its verdict; a task in another Space recalls nothing.
+// Space recalls the claim only with its verdict; /recall never repeats the careless answer the
+// parent gave; a task in another Space recalls nothing.
 // Requires: npm run build, playwright-core. Never runs on GitHub Actions.
 import http from "node:http";
 import os from "node:os";
@@ -60,7 +61,8 @@ const server = http
               note: "Research and verify"
             });
           }
-          return reply(res, { kind: "final", message: "DAG finished: the free-plan claim did not hold up." });
+          // A careless parent answer that repeats the claim its verifier contradicted.
+          return reply(res, { kind: "final", message: "DAG finished. Vendor A has a free plan for everyone." });
         }
         if (user.includes("GOAL_VENDOR_RECALL")) return reply(res, { kind: "final", message: "RECALL finished." });
         return reply(res, { kind: "final", message: "Done." });
@@ -169,6 +171,21 @@ try {
   const decisions = (await storage("browserharness.decisions.v1")) || [];
   check("nothing from the verifier became a fact or a decision", !JSON.stringify([facts, decisions]).includes("Vendor A"));
 
+  // 1b. The saved answer is linked to the task's episode; /recall never repeats it as true.
+  const history = (await storage("browserharness.taskHistory")) || [];
+  const linked = history.find((entry) => entry.result?.includes("Vendor A has a free plan"));
+  check("the saved answer links to its task episode", Boolean(linked) && linked.session_id === episode?.session_id, JSON.stringify(linked && { session_id: linked.session_id }));
+  await page.bringToFront();
+  await side.locator("textarea").first().fill("/recall Vendor A free plan");
+  await side.getByRole("button", { name: "Send" }).click();
+  await side.waitForFunction(() => document.body.innerText.includes("From your past conversations"), null, { timeout: 15000 }).catch(() => {});
+  const recalled = (await side.locator("body").innerText()).split("/recall Vendor A free plan").pop() || "";
+  check(
+    "/recall shows the verifier's contradiction instead of the old answer",
+    recalled.includes("From your past conversations") && recalled.includes("CONTRADICTED") && !recalled.includes("Vendor A has a free plan for everyone"),
+    recalled.slice(0, 300).replace(/\n/g, " | ")
+  );
+
   // 2. A later task in the same Space recalls the claim only with its verdict.
   const before = prompts.length;
   await ask("GOAL_VENDOR_RECALL open the start page and check whether Vendor A has a free plan", "RECALL finished");
@@ -189,7 +206,7 @@ try {
   await ask("GOAL_VENDOR_RECALL open the start page and check whether Vendor A has a free plan", "RECALL finished");
   for (let i = 0; i < 50 && prompts.length === beforeWork; i++) await side.waitForTimeout(100);
   const work = prompts.slice(beforeWork).join("\n");
-  check("a task in another Space gets no verifier history", work.length > 0 && !work.includes("Vendor A offers") && !work.includes("contradicted\"") && work.includes("No relevant past task episodes were recalled"), work.slice(0, 200).replace(/\n/g, " | "));
+  check("a task in another Space gets no verifier history", work.length > 0 && !work.includes("Vendor A offers") && !work.includes("Vendor A has a free plan for everyone") && !work.includes("contradicted\"") && work.includes("No relevant past task episodes were recalled"), work.slice(0, 200).replace(/\n/g, " | "));
   const saved = (await storage("browserharness.taskEpisodes.v1")) || [];
   check("the other Space's task was saved there without the DAG", saved.some((item) => item.space_id === "space-work") && !saved.some((item) => item.space_id === "space-work" && item.dag_runs));
 } catch (error) {

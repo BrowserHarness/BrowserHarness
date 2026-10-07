@@ -180,6 +180,9 @@ describe("tasks from chat apps", () => {
     expect((await listTaskEpisodeMemory(50, A)).map((episode) => episode.session_id)).toEqual(["remote-session"]);
     expect(await listTaskEpisodeMemory(50, B)).toEqual([]);
     expect((await loadTaskHistory(A))[0].task).toBe("From Telegram: publish kettle product like last time");
+    // The answer is linked to the task's episode, so recall carries its verification (Phase 8).
+    expect(outcome.session_id).toBe("remote-session");
+    expect((await loadTaskHistory(A))[0].session_id).toBe("remote-session");
     expect((await loadTaskHistory(B)).map((entry) => entry.task)).toEqual(["publish kettle product"]);
     expect((await loadSkills(A)).find((item) => item.id === shopSkill.id)?.runs).toBe(1);
     expect((await loadSkills(B)).every((item) => item.runs === 0)).toBe(true);
@@ -204,6 +207,8 @@ describe("tasks from chat apps", () => {
     const chatId = await enqueueRemoteTask("what is a good kettle wattage?", "telegram");
     expect((await runRemoteTask((await takeRemoteTask(chatId))!)).status).toBe("worked");
     expect(chatCalls).toEqual([{ primary: "test", fallback: "gemma-4-e2b" }]);
+    // A chat-only answer has no task episode and stays unlinked.
+    expect((await loadTaskHistory(DEFAULT_SPACE_ID))[0].session_id).toBeUndefined();
     expect(routeOf()).toMatchObject({ target: 1024, route: { intent: "chat", limited_by: "fallback", fallback: { model: "gemma-4-e2b" } } });
 
     // A browser task: the same backup passed browser control too, so it limits this budget as well.

@@ -3,7 +3,8 @@ import type {
   BrowserTaskSessionEvidence
 } from "./session-evidence";
 import { resolveSpace, withinSpace } from "./memory-scope";
-import { safeSourceUrl, safeSources, type DagNodeStatus, type Verdict, type WorkerStatus } from "./task-provenance";
+import { isSafeToRemember } from "./memory-write/sensitivity";
+import { redactSecrets, safeSourceUrl, safeSources, safeTitle, type DagNodeStatus, type Verdict, type WorkerStatus } from "./task-provenance";
 
 const KEY = "browserharness.taskEpisodes.v1";
 /** Kept per Space. */
@@ -283,7 +284,7 @@ function dagRuns(
 }
 
 function safeContext(context: BrowserSessionPageContext): BrowserSessionPageContext {
-  return { ...structuredClone(context), url: safeSourceUrl(context.url) || origin(context.url) };
+  return { ...structuredClone(context), url: safeSourceUrl(context.url) || origin(context.url), title: safeTitle(context.title) };
 }
 
 export function taskEpisodeFromSession(
@@ -303,7 +304,9 @@ export function taskEpisodeFromSession(
         action.target?.accessible_name
           ? bounded(action.target.accessible_name, 160)
           : ""
-      ),
+      )
+      // A label like "Password" is fine; one carrying a value ("OTP 482913") is left out.
+      .filter((name) => !name || isSafeToRemember(name)),
     MAX_TARGETS
   );
   const sites = unique(
@@ -330,8 +333,8 @@ export function taskEpisodeFromSession(
     kind: "task_episode",
     recorded_at: recordedAt,
     session_id: evidence.session_id,
-    title: bounded(evidence.title, 160),
-    task: bounded(evidence.task),
+    title: redactSecrets(bounded(evidence.title, 160)),
+    task: redactSecrets(bounded(evidence.task)),
     status: evidence.status,
     start: safeContext(evidence.start),
     ...(endContext(evidence)
@@ -407,6 +410,20 @@ export async function saveTaskEpisodeMemory(
   );
   await chrome.storage.local.set({ [KEY]: next });
   return structuredClone(episode);
+}
+
+/** This Space's episodes for some task sessions, newest first per session. Other Spaces are never read. */
+export async function episodesForSessions(
+  sessionIds: string[],
+  spaceId?: string
+): Promise<Map<string, TaskEpisodeMemory>> {
+  const wanted = new Set(sessionIds.filter(Boolean));
+  const found = new Map<string, TaskEpisodeMemory>();
+  if (!wanted.size) return found;
+  for (const episode of await loadEpisodes(spaceId)) {
+    if (wanted.has(episode.session_id) && !found.has(episode.session_id)) found.set(episode.session_id, structuredClone(episode));
+  }
+  return found;
 }
 
 export async function listTaskEpisodeMemory(

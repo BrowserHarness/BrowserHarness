@@ -64,7 +64,7 @@ async function main() {
 
   const outcome = await runScheduledTask(item, log);
   await recordScheduledRun(item.id, outcome.status, outcome.message);
-  await saveTaskHistoryEntry({ task: `Scheduled: ${item.task}`, result: outcome.message, url: outcome.url }).catch(() => undefined);
+  await saveTaskHistoryEntry({ task: `Scheduled: ${item.task}`, result: outcome.message, url: outcome.url, session_id: outcome.session_id }).catch(() => undefined);
   if (item.deliver_to) {
     await chrome.runtime
       .sendMessage({ type: "CHAT_NOTIFY", app: item.deliver_to, text: deliveryText(item.task, outcome.status, outcome.message) })

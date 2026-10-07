@@ -88,6 +88,27 @@ function withSafeUrls(text: string): string {
   return text.replace(/\b(?:https?|data|blob|javascript):[^\s)"'<>\]]+/gi, (match) => safeSourceUrl(match) || "(link removed)");
 }
 
+/** What stands in for a part of a durable record that looked like a secret. */
+export const SECRET_LEFT_OUT = "(left out: it looked like a secret)";
+
+/**
+ * Text kept in durable task memory or history (a task, an answer, a title):
+ * hidden reasoning removed, links cleaned, and each line or sentence that
+ * looks like a secret replaced by a neutral note. If the whole still reads as
+ * secret-bearing, all of it is replaced. Ordinary words like "Password",
+ * "Order #123456" or "Product ID B0C12345" stay.
+ */
+export function redactSecrets(text: unknown, max = MAX_TASK): string {
+  if (typeof text !== "string") return "";
+  const cleaned = withSafeUrls(text.replace(/<(think|thinking|reasoning)>[\s\S]*?(<\/\1>|$)/gi, " ")).trim();
+  const redacted = cleaned
+    .split(/(\n+|(?<=[.!?])\s+)/)
+    .map((piece) => (!piece.trim() || /^\s+$/.test(piece) || checkSensitive(piece).allowed ? piece : SECRET_LEFT_OUT))
+    .join("")
+    .slice(0, max);
+  return checkSensitive(redacted).allowed ? redacted : SECRET_LEFT_OUT;
+}
+
 /** A worker or node task as kept: bounded, links cleaned, and left out if it holds a secret. */
 export function safeTask(task: string): string {
   const text = withSafeUrls(squash(task)).slice(0, MAX_TASK);

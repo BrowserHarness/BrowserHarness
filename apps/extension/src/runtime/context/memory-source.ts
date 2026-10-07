@@ -17,7 +17,8 @@ import {
   type AboutMeFact
 } from "../about-me";
 import { countDecisionsOutsideSpace, currentDecisions, earlierDecisionsFor, type Decision } from "../decisions";
-import { loadTaskHistory, type TaskHistoryEntry } from "../history";
+import { loadTaskHistory } from "../history";
+import { withVerification, type RecalledHistoryEntry } from "../history-verification";
 import { loadGlobalInstructions, loadInstructions } from "../instructions";
 import { embedTexts } from "../model-client";
 import { recallFor } from "../recall";
@@ -47,7 +48,8 @@ export interface MemorySource {
   currentState(spaceId: string): Promise<CurrentMemory>;
   /** What used to be true and matches a question about the past; nothing for an ordinary request. */
   earlierState(request: string, spaceId: string): Promise<{ facts: EarlierFact[]; decisions: Decision[]; method: "words" | "words+meaning" }>;
-  relevantHistory(request: string, spaceId: string, limit: number): Promise<{ entries: TaskHistoryEntry[]; inspected: number }>;
+  /** Each entry carries its task's verification when it has one; a source without episodes returns entries unchanged. */
+  relevantHistory(request: string, spaceId: string, limit: number): Promise<{ entries: RecalledHistoryEntry[]; inspected: number }>;
   relevantEpisodes(request: string, spaceId: string, limit: number): Promise<{ episodes: TaskEpisodeMemory[]; walled: number }>;
   relevantSkills(request: string, spaceId: string, limit: number): Promise<{ skills: Array<{ skill: UserSkill; score: number }>; inspected: number; walled: number }>;
 }
@@ -110,9 +112,11 @@ export class BrowserHarnessLocalMemorySource implements MemorySource {
       .map((item) => item.fact);
   }
 
-  async relevantHistory(request: string, spaceId: string, limit: number): Promise<{ entries: TaskHistoryEntry[]; inspected: number }> {
+  async relevantHistory(request: string, spaceId: string, limit: number): Promise<{ entries: RecalledHistoryEntry[]; inspected: number }> {
     const entries = await loadTaskHistory(spaceId).catch(() => []);
-    return { entries: recallFor(entries, request).slice(0, limit), inspected: entries.length };
+    const found = recallFor(entries, request).slice(0, limit);
+    // An answer goes with what its task's verifier concluded (read from that task's episode, in this Space).
+    return { entries: await withVerification(found, spaceId).catch(() => found), inspected: entries.length };
   }
 
   async relevantEpisodes(request: string, spaceId: string, limit: number): Promise<{ episodes: TaskEpisodeMemory[]; walled: number }> {
