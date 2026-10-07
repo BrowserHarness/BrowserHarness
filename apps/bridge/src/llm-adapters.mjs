@@ -243,7 +243,8 @@ export function createLlmAdapterManager({
         const result = await runProcess(command, adapter.versionArgs, {
           stdin: "",
           cwd: tmpRoot,
-          timeoutMs: 8_000,
+          // The first run on Windows can be slow while the computer checks the new program.
+          timeoutMs: 30_000,
           spawnImpl,
           env
         });
