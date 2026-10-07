@@ -16,7 +16,7 @@ export async function runRemoteTask(
   pinSpace(request.space_id);
   const source = CHAT_APP_NAMES[request.from] || "your phone";
   const outcome = await runUnattendedTask(request.text, `From ${source}`, log);
-  await saveTaskHistoryEntry({ task: `From ${source}: ${request.text}`, result: outcome.message, url: outcome.url }, request.space_id).catch(
+  await saveTaskHistoryEntry({ task: `From ${source}: ${request.text}`, result: outcome.message, url: outcome.url, session_id: outcome.session_id }, request.space_id).catch(
     () => undefined
   );
   return outcome;

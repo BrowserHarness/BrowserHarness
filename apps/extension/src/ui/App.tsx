@@ -113,11 +113,10 @@ import {
   type WriteContext
 } from "../runtime/memory-write";
 import { resolveSpace } from "../runtime/memory-scope";
-import { loadTaskHistory } from "../runtime/history";
 import { contextFor, localMemorySource } from "../runtime/context";
 import { agentRoute, chatRoute } from "../runtime/route";
 import { decideCommand } from "../runtime/decisions";
-import { recallAnswer } from "../runtime/recall";
+import { recallCommand } from "../runtime/recall";
 import type { BrowserTaskSessionEvidence } from "../runtime/session-evidence";
 import {
   CHAT_APP_LABELS,
@@ -714,7 +713,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         setView("memory");
         return;
       case "recall":
-        addAssistantMessage(recallAnswer(await loadTaskHistory().catch(() => []), command.args));
+        addAssistantMessage(await recallCommand(command.args));
         return;
       case "skills":
         setView("skills");
@@ -1406,7 +1405,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         ).catch(() => undefined);
       }
       if (result.status === "completed") {
-        await saveHistory(typed, result.message, spaceId);
+        // Linked to this task's episode, so recall carries what its verifier concluded.
+        await saveHistory(typed, result.message, spaceId, evidence.session_id);
       }
       learnFactsInBackground(primary);
       return;
@@ -1436,12 +1436,13 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     }
   };
 
-  const saveHistory = async (task: string, result: string, spaceId: string) => {
+  const saveHistory = async (task: string, result: string, spaceId: string, sessionId?: string) => {
     await saveTaskHistoryEntry(
       {
         task,
         result,
-        url: tab?.url
+        url: tab?.url,
+        ...(sessionId ? { session_id: sessionId } : {})
       },
       spaceId
     );

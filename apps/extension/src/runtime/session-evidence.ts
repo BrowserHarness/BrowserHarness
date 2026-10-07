@@ -44,11 +44,47 @@ export interface BrowserSessionDelegationWorkerEvidence {
   tools_used: string[];
 }
 
+/** One node of a Task DAG as it ended (Phase 8). Read-only, like every DAG worker. */
+export interface BrowserSessionDagNodeEvidence {
+  node_id: string;
+  type: "research" | "verify";
+  task: string;
+  /** The scheduler's end state. A node never started has no session, sources or verdict. */
+  status: "completed" | "failed" | "blocked" | "cancelled";
+  /** The worker's own end state when it ran ("stopped" at its step limit, for example). */
+  worker_status?: BrowserSessionDelegationWorkerEvidence["status"];
+  child_session_id?: string;
+  /** The nodes this one built on or checked, in the order given. */
+  depends_on: string[];
+  blocked_by?: string;
+  sources: Array<{ url: string; title: string }>;
+  tools_used: string[];
+  /** Verify nodes that completed only. */
+  verdict?: "supported" | "contradicted" | "insufficient";
+  /** A short, checked summary of what the worker concluded: a model's reading, not a page. */
+  finding?: string;
+}
+
+export interface BrowserSessionDagEvidence {
+  nodes: BrowserSessionDagNodeEvidence[];
+  completed_count: number;
+  failed_count: number;
+  blocked_count: number;
+  cancelled_count: number;
+  cancelled: boolean;
+}
+
 export interface BrowserSessionDelegationEvidence {
+  /** "batch": parallel helpers; "dag": a Task DAG. Missing on older records, which are batches. */
+  kind?: "batch" | "dag";
+  /** Batches only: "read" workers or "act" helpers, as launched. Missing on older records. */
+  mode?: "read" | "act";
   worker_count: number;
   completed_count: number;
   non_completed_count: number;
+  /** Batch workers. Empty for a DAG, whose work is in `dag`. */
   workers: BrowserSessionDelegationWorkerEvidence[];
+  dag?: BrowserSessionDagEvidence;
 }
 
 export interface BrowserSessionActionEvidence {

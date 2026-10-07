@@ -3,6 +3,8 @@ import type {
   BrowserTaskSessionEvidence
 } from "./session-evidence";
 import { resolveSpace, withinSpace } from "./memory-scope";
+import { isSafeToRemember } from "./memory-write/sensitivity";
+import { redactSecrets, safeSourceUrl, safeSources, safeTitle, type DagNodeStatus, type Verdict, type WorkerStatus } from "./task-provenance";
 
 const KEY = "browserharness.taskEpisodes.v1";
 /** Kept per Space. */
@@ -11,6 +13,10 @@ const MAX_TEXT = 1000;
 const MAX_TARGETS = 40;
 const MAX_SITES = 20;
 const MAX_SKILL_REFS = 20;
+const MAX_DELEGATIONS = 20;
+/** Task DAGs per episode; each has at most four nodes. */
+const MAX_DAG_RUNS = 5;
+const MAX_DAG_NODES = 4;
 
 export interface TaskEpisodeSkillRef {
   id: string;
@@ -37,6 +43,54 @@ export interface TaskEpisodeDelegation {
   parent_session_id?: string;
   /** What a helper found on web pages: an observation, never the person's own words. */
   trust?: "observed";
+  /** Batch helpers: "read" workers or "act" helpers, as launched (Phase 8). Missing on older records. */
+  mode?: "read" | "act";
+}
+
+/** Who reached a node's conclusion and how far to trust each part of it. */
+export interface TaskEpisodeDagTrust {
+  /** Pages and tools the worker opened. */
+  sources: "observed";
+  /** The worker's short summary: a model's reading of those sources. */
+  finding?: "derived";
+  /** A verifier's judgment of the nodes it checked. */
+  verdict?: "derived_verification";
+}
+
+/** One Task DAG node, kept with its edges (Phase 8). */
+export interface TaskEpisodeDagNode {
+  node_id: string;
+  type: "research" | "verify";
+  task: string;
+  status: DagNodeStatus;
+  worker_status?: WorkerStatus;
+  /** DAG workers are always read-only. */
+  mode: "read";
+  child_session_id?: string;
+  /** The nodes this one built on, or for a verifier, the nodes it checked. Order kept. */
+  depends_on: string[];
+  blocked_by?: string;
+  sources: Array<{ url: string; title: string }>;
+  tools_used: string[];
+  verdict?: Verdict;
+  /** Short and model-derived: what the worker concluded, never a page's own words. */
+  finding?: string;
+  /** Research nodes: each verifier that checked this one, with what it concluded. */
+  checked_by?: Array<{ node_id: string; status: DagNodeStatus; verdict?: Verdict }>;
+  trust: TaskEpisodeDagTrust;
+}
+
+/** A Task DAG run by one `agent` action of the task (Phase 8). */
+export interface TaskEpisodeDagRun {
+  /** The parent task's action that launched it. */
+  action_id: string;
+  parent_session_id: string;
+  nodes: TaskEpisodeDagNode[];
+  completed_count: number;
+  failed_count: number;
+  blocked_count: number;
+  cancelled_count: number;
+  cancelled: boolean;
 }
 
 export interface TaskEpisodeMemory {
@@ -57,6 +111,8 @@ export interface TaskEpisodeMemory {
   sites: string[];
   skill_refs: TaskEpisodeSkillRef[];
   delegations?: TaskEpisodeDelegation[];
+  /** Task DAGs with their research and verify nodes (Phase 8). Missing on older records. */
+  dag_runs?: TaskEpisodeDagRun[];
   boundary_action_id?: string;
   sensitive_payloads_removed: true;
   /**
@@ -163,22 +219,72 @@ function delegations(
           task: bounded(worker.task),
           session_id: worker.session_id,
           status: worker.status,
-          sources: worker.sources
-            .slice(0, 6)
-            .map((source) => ({
-              url: source.url,
-              title: bounded(source.title, 240)
-            })),
+          sources: safeSources(worker.sources),
           tools_used: unique(
             worker.tools_used,
             20
           ),
           parent_session_id: evidence.session_id,
-          trust: "observed"
+          trust: "observed",
+          ...(action.delegation?.mode ? { mode: action.delegation.mode } : {})
         })
       )
     )
-    .slice(0, 20);
+    .slice(0, MAX_DELEGATIONS);
+}
+
+/** Task DAGs, each with its nodes, edges, sessions, sources and verdicts as they really ended. */
+function dagRuns(
+  evidence: BrowserTaskSessionEvidence
+): TaskEpisodeDagRun[] {
+  return evidence.actions
+    .flatMap((action) => {
+      const dag = action.delegation?.dag;
+      if (action.delegation?.kind !== "dag" || !dag?.nodes.length) return [];
+      const nodes = dag.nodes.slice(0, MAX_DAG_NODES).map((node): TaskEpisodeDagNode => ({
+        node_id: node.node_id,
+        type: node.type,
+        task: bounded(node.task),
+        status: node.status,
+        ...(node.worker_status ? { worker_status: node.worker_status } : {}),
+        mode: "read",
+        ...(node.child_session_id ? { child_session_id: node.child_session_id } : {}),
+        depends_on: [...node.depends_on],
+        ...(node.blocked_by ? { blocked_by: node.blocked_by } : {}),
+        sources: safeSources(node.sources),
+        tools_used: unique(node.tools_used, 20),
+        ...(node.verdict ? { verdict: node.verdict } : {}),
+        ...(node.finding ? { finding: bounded(node.finding, 280) } : {}),
+        trust: {
+          sources: "observed",
+          ...(node.finding ? { finding: "derived" as const } : {}),
+          ...(node.verdict ? { verdict: "derived_verification" as const } : {})
+        }
+      }));
+      // Each claim carries the verifiers that checked it, so it is never read without its verdict.
+      for (const node of nodes) {
+        if (node.type !== "research") continue;
+        const checks = nodes
+          .filter((other) => other.type === "verify" && other.depends_on.includes(node.node_id))
+          .map((other) => ({ node_id: other.node_id, status: other.status, ...(other.verdict ? { verdict: other.verdict } : {}) }));
+        if (checks.length) node.checked_by = checks;
+      }
+      return [{
+        action_id: action.id,
+        parent_session_id: evidence.session_id,
+        nodes,
+        completed_count: dag.completed_count,
+        failed_count: dag.failed_count,
+        blocked_count: dag.blocked_count,
+        cancelled_count: dag.cancelled_count,
+        cancelled: dag.cancelled
+      }];
+    })
+    .slice(0, MAX_DAG_RUNS);
+}
+
+function safeContext(context: BrowserSessionPageContext): BrowserSessionPageContext {
+  return { ...structuredClone(context), url: safeSourceUrl(context.url) || origin(context.url), title: safeTitle(context.title) };
 }
 
 export function taskEpisodeFromSession(
@@ -187,6 +293,7 @@ export function taskEpisodeFromSession(
   spaceId?: string
 ): TaskEpisodeMemory {
   const delegated = delegations(evidence);
+  const dags = dagRuns(evidence);
   const tools = unique(
     evidence.actions.map((action) => action.tool),
     50
@@ -197,7 +304,9 @@ export function taskEpisodeFromSession(
         action.target?.accessible_name
           ? bounded(action.target.accessible_name, 160)
           : ""
-      ),
+      )
+      // A label like "Password" is fine; one carrying a value ("OTP 482913") is left out.
+      .filter((name) => !name || isSafeToRemember(name)),
     MAX_TARGETS
   );
   const sites = unique(
@@ -210,6 +319,9 @@ export function taskEpisodeFromSession(
       ...evidence.tab_evidence.map((item) => item.url),
       ...delegated.flatMap((item) =>
         item.sources.map((source) => source.url)
+      ),
+      ...dags.flatMap((run) =>
+        run.nodes.flatMap((node) => node.sources.map((source) => source.url))
       )
     ].map(origin),
     MAX_SITES
@@ -221,12 +333,12 @@ export function taskEpisodeFromSession(
     kind: "task_episode",
     recorded_at: recordedAt,
     session_id: evidence.session_id,
-    title: bounded(evidence.title, 160),
-    task: bounded(evidence.task),
+    title: redactSecrets(bounded(evidence.title, 160)),
+    task: redactSecrets(bounded(evidence.task)),
     status: evidence.status,
-    start: structuredClone(evidence.start),
+    start: safeContext(evidence.start),
     ...(endContext(evidence)
-      ? { end: endContext(evidence) }
+      ? { end: safeContext(endContext(evidence)!) }
       : {}),
     action_count: evidence.actions.length,
     manual_handoff_count:
@@ -238,6 +350,7 @@ export function taskEpisodeFromSession(
     ...(delegated.length
       ? { delegations: delegated }
       : {}),
+    ...(dags.length ? { dag_runs: dags } : {}),
     ...(evidence.boundary_action_id
       ? { boundary_action_id: evidence.boundary_action_id }
       : {}),
@@ -299,6 +412,20 @@ export async function saveTaskEpisodeMemory(
   return structuredClone(episode);
 }
 
+/** This Space's episodes for some task sessions, newest first per session. Other Spaces are never read. */
+export async function episodesForSessions(
+  sessionIds: string[],
+  spaceId?: string
+): Promise<Map<string, TaskEpisodeMemory>> {
+  const wanted = new Set(sessionIds.filter(Boolean));
+  const found = new Map<string, TaskEpisodeMemory>();
+  if (!wanted.size) return found;
+  for (const episode of await loadEpisodes(spaceId)) {
+    if (wanted.has(episode.session_id) && !found.has(episode.session_id)) found.set(episode.session_id, structuredClone(episode));
+  }
+  return found;
+}
+
 export async function listTaskEpisodeMemory(
   limit = 50,
   spaceId?: string
@@ -320,6 +447,22 @@ export async function getTaskEpisodeMemory(
     (item) => item.id === id
   );
   return found ? structuredClone(found) : null;
+}
+
+/** What a question about a past DAG can match: node ids, tasks, findings, sources and verdict words. */
+export function dagSearchWords(episode: TaskEpisodeMemory): string[] {
+  return (episode.dag_runs || []).flatMap((run) =>
+    run.nodes.flatMap((node) => [
+      node.node_id,
+      node.type === "verify" ? "verify verifier verification" : "research",
+      node.task,
+      node.status,
+      node.verdict || "",
+      node.verdict === "insufficient" ? "inconclusive unconfirmed uncertain" : "",
+      node.finding || "",
+      ...node.sources.flatMap((source) => [source.url, source.title, "source sources"])
+    ])
+  );
 }
 
 function tokens(value: string): string[] {
@@ -363,7 +506,8 @@ function searchScore(
           source.title
         ])
       ]
-    )
+    ),
+    ...dagSearchWords(episode)
   ]
     .join(" ")
     .toLowerCase();

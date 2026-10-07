@@ -70,7 +70,19 @@ export function taskEpisodeEmbeddingText(
           .filter(Boolean)
           .join(" ")
       )
-      .join(" | ")}`
+      .join(" | ")}`,
+    // Only episodes that ran a Task DAG get this line, so others keep their stored vectors.
+    ...(episode.dag_runs?.length
+      ? [`verification: ${episode.dag_runs
+          .flatMap((run) =>
+            run.nodes.map((node) =>
+              [node.node_id, node.type, node.task, node.status, node.verdict || "", node.finding || "", ...node.sources.map((source) => source.url)]
+                .filter(Boolean)
+                .join(" ")
+            )
+          )
+          .join(" | ")}`]
+      : [])
   ].join("\n");
 }
 

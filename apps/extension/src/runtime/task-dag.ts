@@ -419,6 +419,21 @@ export async function runTaskDag(
   };
 }
 
+/**
+ * What a node's worker is launched with. DAG workers, research and verify
+ * alike, are always read-only: no field in the DAG input or a stored record
+ * can turn one into an acting helper, so only the task and step budget go.
+ */
+export function dagWorkerSpec(
+  node: TaskDagNodeSpec,
+  prerequisites: TaskDagNode[]
+): { task: string; max_steps: number } {
+  return {
+    task: buildDagWorkerTask(node, prerequisites),
+    max_steps: boundedSteps(node.step_budget)
+  };
+}
+
 /** Worker prompt for a node; verifier nodes get the claims to check and the verdict contract. */
 export function buildDagWorkerTask(
   node: TaskDagNodeSpec,

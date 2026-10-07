@@ -18,6 +18,8 @@ import { classifyTaskIntent } from "../intent";
 import { looksBack } from "../recall";
 import type { UserSkill } from "../skills";
 import type { TaskEpisodeMemory } from "../task-memory";
+import { rememberedAnswer, verificationNotes, type RecalledHistoryEntry } from "../history-verification";
+import { ASKS_ABOUT_VERIFICATION, dagRecallText, verificationSummary } from "../task-provenance";
 import { budgetForRoute, estimateTokens, SECTION_SHARE, type RouteInput } from "./budget";
 import { localMemorySource, type MemorySource } from "./memory-source";
 import { decisionUsefulness, factUsefulness, isFollowUp, overlap } from "./relevance";
@@ -298,7 +300,7 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
     } else {
       const found = await source.relevantHistory(request, spaceId, MAX_HISTORY);
       inspected.history = { records_scanned: found.inspected };
-      found.entries.forEach((entry: TaskHistoryEntry) =>
+      found.entries.forEach((entry: RecalledHistoryEntry) =>
         items.push(
           item({
             ref: `history:${entry.id}`,
@@ -310,7 +312,8 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
             relevance: looksBack(request) ? 0.8 : 0.6,
             source: { kind: "past_conversation", id: entry.id, space_id: spaceId },
             reason: looksBack(request) ? "the request refers back to it" : "a very close earlier request",
-            text: `${day(entry.timestamp)}: I asked “${clip(entry.task, 160)}” → ${clip(entry.result, 400)}${entry.url ? ` (${entry.url})` : ""}`,
+            // An answer a verifier contradicted is not supplied; others carry their check.
+            text: `${day(entry.timestamp)}: I asked “${clip(entry.task, 160)}” → ${rememberedAnswer(entry, 400)}${entry.url ? ` (${entry.url})` : ""}${verificationNotes(entry).map((line) => `\n  ${line}`).join("")}`,
             payload: entry
           })
         )
@@ -329,13 +332,15 @@ async function gather(input: CompileInput, intent: "chat" | "browser", source: M
       inspected.episodes = { search_results: found.episodes.length };
       if (found.walled) excluded.push({ ref: "episodes:other-spaces", section: "episodes", reason: "another Space", count: found.walled });
       for (const episode of found.episodes) {
-        const score = overlap(request, `${episode.title} ${episode.task}`);
+        // A question about what a helper or verifier looked into can match the DAG's own tasks and findings.
+        const checkedScore = overlap(request, dagRecallText(episode.dag_runs));
+        const score = Math.max(overlap(request, `${episode.title} ${episode.task}`), checkedScore);
         const fits = looksBack(request) ? score > 0 : score >= EPISODE_MATCH;
         if (!fits) {
           excluded.push({ ref: `episode:${episode.id}`, section: "episodes", reason: "not relevant to this request" });
           continue;
         }
-        items.push(episodeItem(episode, score, spaceId));
+        items.push(episodeItem(episode, score, spaceId, checkedScore > 0 || ASKS_ABOUT_VERIFICATION.test(request)));
       }
     }
   }
@@ -359,10 +364,18 @@ function skillItem(skill: UserSkill, score: number, reason: string): ContextItem
   });
 }
 
-function episodeItem(episode: TaskEpisodeMemory, score: number, spaceId: string): ContextItem {
+/** Most lines of verifier detail one recalled episode may add. */
+const MAX_VERIFICATION_LINES = 3;
+
+function episodeItem(episode: TaskEpisodeMemory, score: number, spaceId: string, withChecks = false): ContextItem {
   const helpers = (episode.delegations ?? [])
     .flatMap((delegation) => delegation.sources.map((source) => source.url))
     .slice(0, 3);
+  // Verifier detail only when it helps this request; a claim always goes with its verdict.
+  const checks = withChecks ? verificationSummary(episode.dag_runs, MAX_VERIFICATION_LINES) : [];
+  const verdicts = (episode.dag_runs ?? []).flatMap((run) => run.nodes.map((node) => node.verdict));
+  // Historical evidence a verifier supported ranks a little above unchecked work; it stays a past task.
+  const verified = withChecks && verdicts.includes("supported") && !verdicts.includes("contradicted") ? 0.05 : 0;
   return item({
     ref: `episode:${episode.id}`,
     section: "episodes",
@@ -371,10 +384,10 @@ function episodeItem(episode: TaskEpisodeMemory, score: number, spaceId: string)
     temporal: "historical",
     // What a task saw on websites back then: an observation, not the person's word.
     trust: "observed",
-    relevance: Math.max(0.5, score),
+    relevance: Math.min(1, Math.max(0.5, score) + verified),
     source: { kind: "episode", id: episode.id, space_id: episode.space_id ?? spaceId },
-    reason: "a past task in this Space like this one",
-    text: `${day(episode.recorded_at)}: “${clip(episode.task, 160)}” (${episode.status}${episode.sites.length ? `, on ${episode.sites.slice(0, 3).join(", ")}` : ""}${helpers.length ? `; helpers' sources then: ${helpers.join(", ")}` : ""})`,
+    reason: checks.length ? "a past task in this Space like this one, with what its verifier concluded" : "a past task in this Space like this one",
+    text: `${day(episode.recorded_at)}: “${clip(episode.task, 160)}” (${episode.status}${episode.sites.length ? `, on ${episode.sites.slice(0, 3).join(", ")}` : ""}${helpers.length ? `; helpers' sources then: ${helpers.join(", ")}` : ""})${checks.map((line) => `\n  ${line}`).join("")}`,
     payload: episode
   });
 }

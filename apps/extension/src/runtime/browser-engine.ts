@@ -15,6 +15,14 @@ import {
   registerDecision
 } from "./loop-guard";
 import { clip, unreadablePageObservation } from "./prompt-budget";
+import { MAX_PARALLEL_READ_ONLY_WORKERS } from "./subagent-supervisor";
+import {
+  dagEvidenceFromResult,
+  safeSources,
+  safeTask,
+  safeTools,
+  workerStatus
+} from "./task-provenance";
 import {
   TabEvidenceStore,
   type TabEvidence
@@ -176,7 +184,8 @@ function tabIdFromResult(result: ToolResult): number | undefined {
 
 function delegationEvidenceFromResult(
   tool: ToolName,
-  result: ToolResult
+  result: ToolResult,
+  input: Record<string, unknown> = {}
 ): BrowserSessionDelegationEvidence | undefined {
   if (
     tool !== "agent" ||
@@ -188,16 +197,30 @@ function delegationEvidenceFromResult(
     return undefined;
   }
 
+  // A Task DAG keeps its nodes, edges and verdicts; it is never squeezed into the worker shape.
+  const dag = dagEvidenceFromResult(result.data);
+  if (dag) {
+    return {
+      kind: "dag",
+      worker_count: dag.nodes.length,
+      completed_count: dag.completed_count,
+      non_completed_count: dag.nodes.length - dag.completed_count,
+      workers: [],
+      dag
+    };
+  }
+
   const data = result.data as {
     worker_count?: unknown;
     completed_count?: unknown;
     non_completed_count?: unknown;
     workers?: unknown;
+    mode?: unknown;
   };
   if (!Array.isArray(data.workers)) return undefined;
 
   const workers = data.workers
-    .slice(0, 2)
+    .slice(0, MAX_PARALLEL_READ_ONLY_WORKERS)
     .map((raw, fallbackIndex) => {
       if (
         !raw ||
@@ -226,67 +249,20 @@ function delegationEvidenceFromResult(
         sources?: unknown;
         tools_used?: unknown;
       };
-      const status =
-        finding.status === "completed" ||
-        finding.status === "stopped" ||
-        finding.status === "approval-cancelled" ||
-        finding.status === "failed"
-          ? finding.status
-          : "failed";
-
-      const sources = Array.isArray(finding.sources)
-        ? finding.sources
-            .slice(0, 6)
-            .flatMap((source) => {
-              if (
-                !source ||
-                typeof source !== "object" ||
-                Array.isArray(source)
-              ) {
-                return [];
-              }
-              const item = source as {
-                url?: unknown;
-                title?: unknown;
-              };
-              return typeof item.url === "string"
-                ? [
-                    {
-                      url: item.url,
-                      title:
-                        typeof item.title === "string"
-                          ? item.title
-                          : ""
-                    }
-                  ]
-                : [];
-            })
-        : [];
-
-      const toolsUsed = Array.isArray(
-        finding.tools_used
-      )
-        ? finding.tools_used
-            .filter(
-              (item): item is string =>
-                typeof item === "string"
-            )
-            .slice(0, 20)
-        : [];
 
       return {
         index:
           typeof worker.index === "number"
             ? worker.index
             : fallbackIndex,
-        task: worker.task.slice(0, 1000),
+        task: safeTask(worker.task),
         session_id:
           typeof finding.session_id === "string"
             ? finding.session_id
             : "",
-        status,
-        sources,
-        tools_used: toolsUsed
+        status: workerStatus(finding.status) ?? "failed",
+        sources: safeSources(finding.sources),
+        tools_used: safeTools(finding.tools_used)
       };
     })
     .filter(
@@ -296,7 +272,17 @@ function delegationEvidenceFromResult(
         Boolean(worker)
     );
 
+  // How the helpers were launched, from the call itself; never guessed from the tools they used.
+  const mode =
+    data.mode === "act" || data.mode === "read"
+      ? data.mode
+      : input.act === true
+        ? "act"
+        : "read";
+
   return {
+    kind: "batch",
+    mode,
     worker_count:
       typeof data.worker_count === "number"
         ? data.worker_count
@@ -760,6 +746,11 @@ export async function runBrowserTask(
         decision.input.element_id
       );
       const resultTabId = tabIdFromResult(result);
+      const delegation = delegationEvidenceFromResult(
+        decision.tool,
+        result,
+        decision.input
+      );
       sessionActions.push({
         id: `action-${sessionActions.length + 1}`,
         ordinal: sessionActions.length + 1,
@@ -775,17 +766,7 @@ export async function runBrowserTask(
           ...(approval ? { description: approval } : {})
         },
         ...(resultTabId ? { result_tab_id: resultTabId } : {}),
-        ...(delegationEvidenceFromResult(
-          decision.tool,
-          result
-        )
-          ? {
-              delegation: delegationEvidenceFromResult(
-                decision.tool,
-                result
-              )
-            }
-          : {}),
+        ...(delegation ? { delegation } : {}),
         ...(verifiedContext ? { after: verifiedContext } : {})
       });
       await persistWorkingMemory();

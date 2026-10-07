@@ -2,7 +2,8 @@
 // find last week about kettles?") or closely matches earlier work, the best
 // matching history entries go to the model as context, and it answers from
 // them. /recall lists them without a model.
-import type { TaskHistoryEntry } from "./history";
+import { loadTaskHistory, type TaskHistoryEntry } from "./history";
+import { rememberedAnswer, verificationNotes, withVerification, type RecalledHistoryEntry } from "./history-verification";
 import { contentWords } from "./skill-learning";
 
 const MAX_RECALLED = 5;
@@ -61,7 +62,7 @@ function day(timestamp: string): string {
 }
 
 /** The context block for the model. */
-export function recallPrompt(entries: TaskHistoryEntry[]): string {
+export function recallPrompt(entries: RecalledHistoryEntry[]): string {
   if (!entries.length) return "";
   return [
     "",
@@ -69,7 +70,7 @@ export function recallPrompt(entries: TaskHistoryEntry[]): string {
     "FROM OUR PAST CONVERSATIONS (saved on this device; use them when the request refers to earlier work, and say when something may be out of date):",
     ...entries.map(
       (entry) =>
-        `- ${day(entry.timestamp)}: I asked “${clip(entry.task, 160)}” → ${clip(entry.result, MAX_RESULT_CHARS)}${entry.url ? ` (${entry.url})` : ""}`
+        `- ${day(entry.timestamp)}: I asked “${clip(entry.task, 160)}” → ${rememberedAnswer(entry, MAX_RESULT_CHARS)}${entry.url ? ` (${entry.url})` : ""}${verificationNotes(entry).map((line) => `\n  ${line}`).join("")}`
     )
   ].join("\n");
 }
@@ -84,8 +85,12 @@ export function recallFor(entries: TaskHistoryEntry[], request: string, now = Da
     : recallHistory(entries, request, { minScore: 0.75, limit: 2, now, minShared: 3 });
 }
 
-/** The chat answer for /recall: plain matches, newest first, no model. */
-export function recallAnswer(entries: TaskHistoryEntry[], query: string): string {
+/**
+ * The chat answer for /recall: plain matches, newest first, no model. Pass
+ * entries through `withVerification` first (as `recallCommand` does) so an
+ * answer a verifier contradicted is never repeated as it was.
+ */
+export function recallAnswer(entries: RecalledHistoryEntry[], query: string): string {
   if (!query.trim()) return "Tell me what to look for, like `/recall kettle prices`.";
   const found = recallHistory(entries, query, { minScore: 0.5, limit: 8 }).sort((a, b) =>
     b.timestamp.localeCompare(a.timestamp)
@@ -94,6 +99,17 @@ export function recallAnswer(entries: TaskHistoryEntry[], query: string): string
   return [
     `From your past conversations about “${query.trim()}”:`,
     "",
-    ...found.map((entry) => `- **${day(entry.timestamp)}**: ${clip(entry.task, 120)} → ${clip(entry.result, 240)}`)
+    ...found.map(
+      (entry) =>
+        `- **${day(entry.timestamp)}**: ${clip(entry.task, 120)} → ${rememberedAnswer(entry, 240)}${verificationNotes(entry).map((line) => `\n  - ${line}`).join("")}`
+    )
   ].join("\n");
+}
+
+/** /recall in a Space: its history, each answer with what its task's verifier concluded. */
+export async function recallCommand(query: string, spaceId?: string): Promise<string> {
+  const entries = await loadTaskHistory(spaceId).catch(() => []);
+  const found = recallHistory(entries, query, { minScore: 0.5, limit: 8 });
+  const checked = await withVerification(found, spaceId).catch(() => found);
+  return recallAnswer(checked, query);
 }

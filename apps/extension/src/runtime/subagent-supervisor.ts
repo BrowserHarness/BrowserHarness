@@ -23,6 +23,8 @@ export interface ReadOnlySubagentBatchWorker {
 }
 
 export interface ReadOnlySubagentBatchResult {
+  /** How these helpers were launched: read-only workers or acting helpers. */
+  mode: "read" | "act";
   worker_count: number;
   completed_count: number;
   non_completed_count: number;
@@ -228,6 +230,7 @@ export async function runReadOnlySubagentBatch(
   );
 
   return {
+    mode: tasks.some((spec) => spec.act) ? "act" : "read",
     worker_count: workers.length,
     completed_count: workers.filter(
       (worker) =>

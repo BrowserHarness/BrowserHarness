@@ -35,6 +35,7 @@
     "package:helper": "node scripts/package-helper.mjs",
     "smoke:setup": "node scripts/e2e-setup.mjs",
     "smoke:spaces": "node scripts/e2e-spaces.mjs",
-    "smoke:phone": "node scripts/e2e-phone.mjs"
+    "smoke:phone": "node scripts/e2e-phone.mjs",
+    "smoke:provenance": "node scripts/e2e-provenance.mjs"
   }
 }

@@ -23,7 +23,7 @@ import { discoverMcpCatalog as buildMcpCatalog } from "./mcp-catalog";
 import { getMcpServerTrustMode } from "../settings/mcp-trust-store";
 import { clearBrowserWorkingMemory, saveBrowserWorkingMemory } from "./working-memory";
 import { runReadOnlySubagent } from "./subagent-runner";
-import { buildDagWorkerTask, parseTaskDag, runTaskDag } from "./task-dag";
+import { dagWorkerSpec, parseTaskDag, runTaskDag } from "./task-dag";
 import { parseReadOnlySubagentTasks, runReadOnlySubagentBatch } from "./subagent-supervisor";
 
 export const APPROVAL_WORDS =
@@ -339,15 +339,9 @@ export async function runAgentTask(
             }
             const outcome = await runTaskDag(
               dag.nodes,
-              ({ node, prerequisites }, ) =>
+              ({ node, prerequisites }) =>
                 launchWorker(
-                  {
-                    task: buildDagWorkerTask(
-                      node,
-                      prerequisites
-                    ),
-                    max_steps: node.step_budget
-                  },
+                  dagWorkerSpec(node, prerequisites),
                   dag.nodes.findIndex(
                     (item) => item.id === node.id
                   )
