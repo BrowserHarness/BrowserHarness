@@ -18,7 +18,7 @@ import { findOnPath } from "./install.mjs";
  */
 
 const CODEX_TEXT_ONLY =
-  "Answer with text only. Do not run commands, open files or call any tools or MCP servers (including BrowserHarness): the app that asked you does the browsing itself and acts on your answer.";
+  "You are the decision-maker inside a browser app. Do not run commands, open files or call any tools or MCP servers of your own (including BrowserHarness). Reply in exactly the format the instructions below ask for: when they ask for a JSON object, reply with only that JSON object. The app carries out the action you choose and then asks you for the next one.";
 
 export const LLM_ADAPTER_IDS = ["claude_cli", "codex_cli"];
 

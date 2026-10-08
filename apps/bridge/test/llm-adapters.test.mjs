@@ -140,7 +140,7 @@ process.stdin.on("end", () => {
     prompt: "USER"
   });
   const echoed = JSON.parse(out.text);
-  assert.match(echoed.input, /^Answer with text only\.[^\n]*\n\nSYS/, "Codex is told not to use its own tools, then gets the system prompt");
+  assert.match(echoed.input, /^You are the decision-maker inside a browser app\.[^\n]*\n\nSYS/, "Codex is told not to use its own tools, then gets the system prompt");
   assert.ok(echoed.input.endsWith("USER"));
   assert.deepEqual(echoed.args.slice(0, 2), ["exec", "--skip-git-repo-check"]);
   assert.equal(echoed.args[echoed.args.indexOf("--sandbox") + 1], "read-only");
