@@ -17,6 +17,9 @@ import { findOnPath } from "./install.mjs";
  * command line: the commands below are fixed here.
  */
 
+const CODEX_TEXT_ONLY =
+  "Answer with text only. Do not run commands, open files or call any tools or MCP servers (including BrowserHarness): the app that asked you does the browsing itself and acts on your answer.";
+
 export const LLM_ADAPTER_IDS = ["claude_cli", "codex_cli"];
 
 const MAX_PROMPT_CHARS = 400_000;
@@ -86,9 +89,12 @@ const ADAPTERS = {
       args.push("-");
       return {
         args,
-        // Codex exec has no separate system prompt flag: fold it into the prompt.
+        // Codex exec has no separate system prompt flag: fold it into the
+        // prompt. BrowserHarness drives the browser itself and only needs
+        // Codex's answer, so Codex must not reach for its own tools (its
+        // BrowserHarness tools would be blocked in this mode anyway).
         wrapPrompt: (prompt) =>
-          system ? `${system}\n\n---\n\n${prompt}` : prompt
+          `${CODEX_TEXT_ONLY}\n\n${system ? `${system}\n\n---\n\n${prompt}` : prompt}`
       };
     },
     needsOutputFile: true,
