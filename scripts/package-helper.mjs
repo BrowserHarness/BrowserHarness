@@ -36,9 +36,13 @@ const README = {
    If your Mac says it can't check the app: close the message, open
    System Settings > Privacy & Security, scroll down and press "Open Anyway".
    (This shows because the app isn't signed with an Apple certificate yet.)
-2. A setup page opens in your browser. Follow it: in BrowserHarness press Pair
-   and type the 6-digit code on the page.
-3. When the page says Connected, you can close everything and delete this folder.
+2. The BrowserHarness Helper window opens. Follow it: in BrowserHarness press
+   Pair and type the 6-digit code in the window.
+3. When it says Connected to Chrome, you're done. You can delete this folder.
+
+Later, open "BrowserHarness Helper" from the Applications folder in your home
+folder (or search for it with Spotlight) to see if it's running, start or stop
+it, or pair Chrome again.
 `,
   windows: `BrowserHarness helper app for Windows
 
@@ -46,17 +50,23 @@ const README = {
 2. Double-click "Install BrowserHarness Helper".
    If Windows says it protected your PC: press "More info", then "Run anyway".
    (This shows because the app isn't signed with a certificate yet.)
-3. A setup page opens in your browser. Follow it: in BrowserHarness press Pair
-   and type the 6-digit code on the page.
-4. When the page says Connected, you can close everything and delete this folder.
+3. The BrowserHarness Helper window opens. Follow it: in BrowserHarness press
+   Pair and type the 6-digit code in the window.
+4. When it says Connected to Chrome, you're done. You can delete this folder.
+
+Later, open "BrowserHarness Helper" from the Start menu or your desktop to see
+if it's running, start or stop it, or pair Chrome again.
 `,
   linux: `BrowserHarness helper app for Linux
 
 1. Right-click "Install BrowserHarness Helper.sh" and choose "Run as a program"
    (or open a terminal in this folder and type: ./"Install BrowserHarness Helper.sh").
-2. A setup page opens in your browser. Follow it: in BrowserHarness press Pair
-   and type the 6-digit code on the page.
-3. When the page says Connected, you can close everything and delete this folder.
+2. The BrowserHarness Helper window opens. Follow it: in BrowserHarness press
+   Pair and type the 6-digit code in the window.
+3. When it says Connected to Chrome, you're done. You can delete this folder.
+
+Later, open "BrowserHarness Helper" from your apps menu to see if it's
+running, start or stop it, or pair Chrome again.
 `
 };
 

@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { findOnPath } from "./install.mjs";
 
 /**
  * Subscription adapters.
@@ -14,6 +16,9 @@ import path from "node:path";
  * disabled. The extension can pick an adapter by id and a model name, never a
  * command line: the commands below are fixed here.
  */
+
+const CODEX_TEXT_ONLY =
+  "You are the decision-maker inside a browser app. Do not run commands, open files or call any tools or MCP servers of your own (including BrowserHarness). Reply in exactly the format the instructions below ask for: when they ask for a JSON object, reply with only that JSON object. The app carries out the action you choose and then asks you for the next one.";
 
 export const LLM_ADAPTER_IDS = ["claude_cli", "codex_cli"];
 
@@ -75,15 +80,21 @@ const ADAPTERS = {
         "--color",
         "never",
         "--output-last-message",
-        outputFile
+        outputFile,
+        // Each browser step is a small question; deep thinking only adds wait.
+        "-c",
+        'model_reasoning_effort="low"'
       ];
       if (model && model !== "default") args.push("-m", model);
       args.push("-");
       return {
         args,
-        // Codex exec has no separate system prompt flag: fold it into the prompt.
+        // Codex exec has no separate system prompt flag: fold it into the
+        // prompt. BrowserHarness drives the browser itself and only needs
+        // Codex's answer, so Codex must not reach for its own tools (its
+        // BrowserHarness tools would be blocked in this mode anyway).
         wrapPrompt: (prompt) =>
-          system ? `${system}\n\n---\n\n${prompt}` : prompt
+          `${CODEX_TEXT_ONLY}\n\n${system ? `${system}\n\n---\n\n${prompt}` : prompt}`
       };
     },
     needsOutputFile: true,
@@ -112,6 +123,27 @@ function resolveCommand(id, env = process.env) {
   return String(env[adapter.env] || adapter.command);
 }
 
+/**
+ * On Windows, npm installs CLIs as .cmd scripts, which Node cannot start
+ * without a shell, and a shell would mangle a multi-line system prompt. Run
+ * the JavaScript file the npm script points at with Node directly instead.
+ */
+export function windowsLaunch(command, args, env = process.env, platform = process.platform) {
+  if (platform !== "win32") return { command, args };
+  const found = /[\\/]/.test(command)
+    ? (/\.[a-z0-9]+$/i.test(command) ? [""] : [".exe", ".cmd", ".bat"]).map((ext) => command + ext).find((file) => existsSync(file))
+    : findOnPath(command, env, platform);
+  if (!found || !/\.(cmd|bat)$/i.test(found)) return { command: found || command, args };
+  let script;
+  try {
+    script = readFileSync(found, "utf8").match(/"%~?dp0%?\\([^"]+\.[cm]?js)"/i)?.[1];
+  } catch {
+    // Unreadable script: try to start it as it is.
+  }
+  if (!script) return { command: found, args };
+  return { command: process.execPath, args: [path.join(path.dirname(found), script), ...args] };
+}
+
 function runProcess(
   command,
   args,
@@ -120,7 +152,8 @@ function runProcess(
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnImpl(command, args, {
+      const launch = windowsLaunch(command, args, env);
+      child = spawnImpl(launch.command, launch.args, {
         cwd,
         env,
         stdio: ["pipe", "pipe", "pipe"],
@@ -219,7 +252,8 @@ export function createLlmAdapterManager({
         const result = await runProcess(command, adapter.versionArgs, {
           stdin: "",
           cwd: tmpRoot,
-          timeoutMs: 8_000,
+          // The first run on Windows can be slow while the computer checks the new program.
+          timeoutMs: 30_000,
           spawnImpl,
           env
         });
@@ -227,7 +261,11 @@ export function createLlmAdapterManager({
           id,
           label: adapter.label,
           installed: result.code === 0,
-          version: result.stdout.trim().slice(0, 80)
+          version: result.stdout.trim().slice(0, 80),
+          ...(result.code !== 0 && {
+            error: "ADAPTER_CLI_ERROR",
+            message: `${command} --version exited with code ${result.code}: ${(result.stderr || result.stdout).trim().slice(-300)}`
+          })
         };
       } catch (error) {
         return {

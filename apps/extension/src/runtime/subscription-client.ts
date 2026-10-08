@@ -156,11 +156,11 @@ export async function checkSubscriptionReady(
         };
   }
 
-  const data = (result.data || {}) as { installed?: boolean; version?: string };
+  const data = (result.data || {}) as { installed?: boolean; version?: string; message?: string };
   return data.installed
     ? { state: "ready", message: `${appName} found${data.version ? ` (${data.version})` : ""}.` }
     : {
         state: "cli_missing",
-        message: `${appName} was not found on the computer running the Bridge. Install it and sign in once, then check again.`
+        message: data.message || `${appName} was not found on the computer running the Bridge. Install it and sign in once, then check again.`
       };
 }

@@ -323,6 +323,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
   const spaces = useSpaces();
   const [chatId, setChatId] = useState<string>(() => crypto.randomUUID());
   const chatSpace = useRef<string | null>(null);
+  // Whether the last request in this chat ran in the browser, so a follow-up can carry it on.
+  const lastIntent = useRef<"chat" | "browser">("chat");
   const skipNextSave = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(fullPage);
   const [saveMenu, setSaveMenu] = useState<HTMLElement | null>(null);
@@ -340,6 +342,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
 
   const startNewChat = (closeMenu = true) => {
     if (running) return;
+    lastIntent.current = "chat";
     setMessages([]);
     setActivities([]);
     setLastWorkflow(null);
@@ -351,6 +354,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
 
   const openChat = (chat: SavedChat) => {
     if (running) return;
+    lastIntent.current = "chat";
     if (chat.id !== chatId) {
       skipNextSave.current = true;
       setMessages(chat.messages.map(fromStored));
@@ -1249,8 +1253,11 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
 
     // What goes with the request (this chat, wishes, facts, decisions, past
     // conversations, a matching Skill): compiled for this Space and model.
+    // "Proceed" or "try again" right after a browser task carries that task on.
+    const followUp = !skillRun && lastIntent.current === "browser" && classifyTaskIntent(typed, { continuing: true }) === "browser" && classifyTaskIntent(typed) === "chat";
     const compiledContext = await contextFor({
       request: typed,
+      ...(followUp && { intent: "browser" as const }),
       spaceId,
       chatId,
       conversation: skillRun
@@ -1292,7 +1299,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     // A saved Skill that looks like this request guides the agent.
     const hinted = skillRun ? null : compiledContext?.compiled.skill ?? null;
     const usedSkill = skillRun ?? hinted;
-    const intent = compiledContext?.compiled.intent ?? (usedSkill ? "browser" : classifyTaskIntent(task));
+    const intent = followUp ? "browser" : compiledContext?.compiled.intent ?? (usedSkill ? "browser" : classifyTaskIntent(task));
+    lastIntent.current = intent;
 
     try {
       if (intent === "chat") {

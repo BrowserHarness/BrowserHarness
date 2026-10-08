@@ -17,6 +17,8 @@ function field(frontmatter: string, name: string): string {
 }
 
 export function parseGuide(text: string): Guide {
+  // Windows checkouts can turn the articles' line endings into CRLF.
+  text = text.replace(/\r\n/g, "\n");
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   const frontmatter = match?.[1] || "";
   let body = match ? match[2] : text;
