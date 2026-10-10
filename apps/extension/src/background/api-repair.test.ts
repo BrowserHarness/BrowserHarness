@@ -115,7 +115,9 @@ describe("API repair", () => {
       ok: true,
       data: { proposed_revision_id: "rev-2", active_revision_unchanged: true, verification: "verified", changes: ["path /api/search → /api/v2/search"] }
     });
-    expect(saved[0]["SK:search"].attempts).toEqual([{ at: 5_000_000_000, outcome: "repaired" }]);
+    // reserved before learning, then replaced by the outcome
+    expect(saved[0]["SK:search"].attempts).toEqual([{ at: 5_000_000_000, outcome: "running" }]);
+    expect(saved.at(-1)!["SK:search"].attempts).toEqual([{ at: 5_000_000_000, outcome: "repaired" }]);
   });
 
   it("refuses writes, missing inputs and a cooled-down operation, without learning", async () => {
@@ -142,7 +144,7 @@ describe("API repair", () => {
     const { deps: d, saved } = deps({ ok: false, error: { code: "API_LEARN_FAILED", message: "no request carries the example values" } });
     const outcome = await repairApiOperation(d, { skill_id: "SK", recipe_id: "r", contract: taught });
     expect(outcome).toMatchObject({ ok: false, error: { code: "API_LEARN_FAILED" } });
-    expect(saved[0]["SK:search"].attempts[0].outcome).toBe("failed");
+    expect(saved.at(-1)!["SK:search"].attempts.map((item) => item.outcome)).toEqual(["failed"]);
   });
 
   it("describes changes and next steps in plain words", () => {
@@ -154,5 +156,40 @@ describe("API repair", () => {
     expect(nextForClass("auth", "https://shop.example")).toMatch(/sign in to https:\/\/shop.example/);
     expect(nextForClass("ambiguous_write", "x")).toMatch(/do not run it again/);
     expect(nextForClass("ok", "x")).toBeUndefined();
+  });
+});
+
+describe("API repair under concurrency", () => {
+  it("lets only one of two simultaneous repairs of the same operation learn", async () => {
+    let ledger: RepairLedger = {};
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const learn = vi.fn(async () => {
+      await gate;
+      return { ok: false as const, error: { code: "API_LEARN_FAILED", message: "x" } };
+    });
+    const d: ApiRepairDeps = {
+      learn,
+      ledger: async () => ledger,
+      saveLedger: async (next) => {
+        ledger = next;
+      },
+      now: () => 9_000_000_000
+    };
+    const first = repairApiOperation(d, { skill_id: "SK", recipe_id: "r", contract: taught });
+    const second = repairApiOperation(d, { skill_id: "SK", recipe_id: "r", contract: taught });
+    release();
+    const outcomes = await Promise.all([first, second]);
+    expect(learn).toHaveBeenCalledTimes(1);
+    expect(outcomes.map((item) => (item.ok ? "ok" : item.error.code)).sort()).toEqual(["API_LEARN_FAILED", "API_REPAIR_COOLDOWN"]);
+  });
+});
+
+describe("a repair that never reported back", () => {
+  it("holds its reservation for a while, then lets a new repair start", () => {
+    const t0 = 2_000_000_000;
+    const ledger = recordRepair({}, "op", "running", t0);
+    expect(repairAllowed(ledger, "op", t0 + 60_000)).toMatchObject({ allowed: false, reason: expect.stringMatching(/running/) });
+    expect(repairAllowed(ledger, "op", t0 + 11 * 60_000).allowed).toBe(true);
   });
 });

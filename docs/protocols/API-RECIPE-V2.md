@@ -131,7 +131,7 @@ When a run fails with `schema_drift` or `endpoint_drift`, the failure says `repa
 `site_skill repair` (`id`, `recipe_id` when the Skill has several learned operations, optional `examples`, `verify_args`, `page_url`):
 
 1. Refuses writes (`API_REPAIR_WRITE`): a write is re-taught by a person.
-2. Is bounded per operation of a Skill (`browserharness.apiRepair.v1`): at most 3 attempts in 24 hours, a 60-minute pause after a failed one, 5 minutes between any two (`API_REPAIR_COOLDOWN` with `retry_after_minutes`).
+2. Is bounded per operation of a Skill (`browserharness.apiRepair.v1`): at most 3 attempts in 24 hours, a 60-minute pause after a failed one, 5 minutes between any two (`API_REPAIR_COOLDOWN` with `retry_after_minutes`). A repair is reserved before it starts learning (in memory, and as a `running` attempt in the ledger that holds for 10 minutes if it never reports back), so two repairs of one operation started together cannot both run.
 3. Learns the operation again from its trigger page with the taught inputs (two runs, the learner, the live third-input check), exactly as `learn_api`, with `source: "repair"` and `parent_operation_id` set.
 4. Saves the result as a new candidate revision in which the new recipe takes the old one's place. The active revision is never changed; `site_skill compare` and `promote` decide, behind the usual gate. The answer lists what changed in plain words (`path /api/search → /api/v2/search`, `results read from products (was items)`).
 
