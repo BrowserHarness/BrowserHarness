@@ -2,7 +2,7 @@
 // command with typed parameters, like `amazon-search --q kettle`. The side
 // panel runs it with /name, coding agents get it as a tool, and the Bridge
 // CLI runs it with `browserharness-bridge site <name>`.
-import { apiRecipeNeedsApproval } from "./api-recipe";
+import { apiRecipeNeedsApproval, recipeKind } from "./api-recipe";
 import type { SiteSkillParameterType, SiteSkillRecipe } from "./site-skill";
 import { listSiteSkillFamilies, type SiteSkillFamilyRecord } from "./site-skill-store";
 import { loadAllSkills } from "./skills";
@@ -33,6 +33,16 @@ export interface SiteCommand {
   kind: "read" | "form";
   /** false for a learned API operation (API Recipe v2): it runs without opening the site */
   needs_page?: boolean;
+  /** ui (forms), api (the site's own requests) or hybrid */
+  recipe_kind?: "ui" | "api" | "hybrid";
+  /** a learned API operation: how it was checked and how it is sent */
+  api?: {
+    operation_id: string;
+    side_effect: "read" | "write" | "unknown";
+    verification: "unverified" | "verified" | "failed";
+    learned_tier?: 1 | 2 | 3;
+    min_tier: 1 | 2 | 3;
+  };
   status: "proven" | "testing" | "check failed";
   skill_id: string;
   revision_id: string;
@@ -178,7 +188,21 @@ export function buildSiteCommands(
         entry_url: recipe.entry_url || candidate.site.entry_url,
         // a learned API write runs like a form: it asks the person first
         kind: recipe.form_index < 0 && !apiRecipeNeedsApproval(recipe) ? "read" : "form",
-        ...(recipe.steps.some((step) => step.kind === "api_operation") ? { needs_page: false } : {}),
+        recipe_kind: recipeKind(recipe),
+        ...((): Partial<SiteCommand> => {
+          const step = recipe.steps.find((item) => item.kind === "api_operation");
+          if (!step || step.kind !== "api_operation") return {};
+          return {
+            needs_page: false,
+            api: {
+              operation_id: step.contract.operation_id,
+              side_effect: step.contract.side_effect,
+              verification: step.contract.verification.status,
+              ...(step.contract.transport.learned_tier ? { learned_tier: step.contract.transport.learned_tier } : {}),
+              min_tier: step.contract.min_tier
+            }
+          };
+        })(),
         status,
         skill_id: family.id,
         revision_id: revisionId,
@@ -306,6 +330,7 @@ export function describeSiteCommand(command: SiteCommand) {
     site: command.site,
     kind: command.kind,
     status: command.status,
+    ...(command.needs_page === false ? { runs_without_page: true } : {}),
     usage: usage(command),
     parameters: command.parameters.map((parameter) => ({
       name: parameter.name,

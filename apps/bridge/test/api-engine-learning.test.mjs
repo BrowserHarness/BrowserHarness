@@ -262,8 +262,33 @@ test("taught inputs are kept for health checks and repair, unless an input is pr
     const { learned: hidden } = await learnFrom(shop, "rest", { learn: { private_params: ["q"] } });
     assert.equal(hidden.contract.provenance.example_inputs, undefined);
     assert.equal(hidden.contract.params[0].example, undefined);
+    // the learning value is gone from the request too, and a run still fills it
+    assert.ok(!/laptops|keyboards/i.test(JSON.stringify(hidden.contract)), JSON.stringify(hidden.contract.request));
+    const ran = await callTier1(hidden.contract, { q: "monitors" }, { minIntervalMs: 0 });
+    assert.equal(ran.ok, true, ran.reason);
+    assert.equal(ran.data[0].title, "27 inch monitor");
 
     const { learned: repaired } = await learnFrom(shop, "rest", { learn: { source: "repair", parent_operation_id: "op-old" } });
     assert.equal(repaired.contract.provenance.source, "repair");
     assert.equal(repaired.contract.provenance.parent_operation_id, "op-old");
+  }));
+
+test("a demonstrated write keeps none of the values the person typed, however it is labelled", () =>
+  withShop(async (shop) => {
+    const NOTE = "Happy birthday Ada, from Sam";
+    const run = await recordRun(shop.origin, "cart", NOTE);
+    for (const extra of [{}, { private_params: [] }, { private_params: ["unrelated"] }, { side_effect: "write" }]) {
+      const learned = learnApiOperation({ name: "addToCart", captures: [run], examples: [{ note: NOTE }], source: "watch_me", ...extra });
+      const text = JSON.stringify(learned);
+      assert.notEqual(learned.contract.side_effect, "read", JSON.stringify(extra));
+      for (const form of [NOTE, encodeURIComponent(NOTE), JSON.stringify(NOTE).slice(1, -1), "Happy birthday"]) {
+        assert.ok(!text.includes(form), `${JSON.stringify(extra)} kept "${form}" in ${text.slice(0, 300)}`);
+      }
+      assert.equal(learned.contract.provenance.example_inputs, undefined);
+    }
+    // and it still sends what the next run gives it
+    const learned = learnApiOperation({ name: "addToCart", captures: [run], examples: [{ note: NOTE }], source: "watch_me" });
+    const sent = await callTier1(learned.contract, { note: "no rush" }, { approved: true, minIntervalMs: 0 });
+    assert.equal(sent.ok, true, sent.reason);
+    assert.equal(JSON.parse(shop.state.requests.at(-1).body).note, "no rush");
   }));

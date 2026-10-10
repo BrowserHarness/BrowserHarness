@@ -143,6 +143,8 @@ export function readOnlyWorkerToolPolicy(
       typeof input.action === "string"
         ? input.action
         : "list";
+    // a learned API read: the run itself refuses anything else (api_read_only)
+    if (action === "run") return { allowed: true };
     return ALLOWED_SITE_SKILL_ACTIONS.has(action)
       ? { allowed: true }
       : {
@@ -256,7 +258,10 @@ export async function runReadOnlyWorkerTool<T = unknown>(
           ...input,
           active: false
         }
-      : input;
+      : tool === "site_skill" && input.action === "run"
+        ? // workers may run only learned API reads: no page, no form, no write
+          { ...input, api_read_only: true }
+        : input;
 
   // Only an acting helper's own approved steps carry the approval through.
   const result = await baseTool<T>(

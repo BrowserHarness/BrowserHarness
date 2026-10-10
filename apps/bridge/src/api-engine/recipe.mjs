@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import * as z from "zod/v4";
 import { OperationSchema, ParamSchema, ResponseSchema, SlotSchema, TriggerSchema, MatchSchema, VolatileSchema, RequestSchema } from "../../vendor/api-anything/dist/spec.js";
+import { setAt } from "../../vendor/api-anything/dist/codec.js";
 import { sessionSources } from "./session.mjs";
 import { API_ANYTHING_COMMIT } from "./upstream-adapter.mjs";
 
@@ -177,6 +178,27 @@ function keptParams(params, privateParams = []) {
 }
 
 /** A contract from upstream learning output; refs are listed by name only. */
+/**
+ * The learned request with a private input's own value taken out: each of
+ * its slots gets a placeholder (a run fills every slot anyway), so the value
+ * typed while learning is not kept in the contract.
+ */
+function withoutPrivateValues(request, slots, params, privateParams = []) {
+  const hidden = new Set(privateParams);
+  let out = request;
+  for (const slot of slots) {
+    if (!slot.param || !hidden.has(slot.param)) continue;
+    const type = params.find((param) => param.name === slot.param)?.type;
+    const placeholder = type === "number" || type === "integer" ? 0 : type === "boolean" ? false : `{${slot.param}}`;
+    try {
+      out = setAt(out, slot.at, placeholder);
+    } catch {
+      // a slot the learner could not address again: the secret scan below still guards the contract
+    }
+  }
+  return out;
+}
+
 export function contractFromOperation(operation, meta) {
   const origin = new URL(operation.request.url).origin;
   const classified = classifySideEffect(operation.request, {
@@ -199,7 +221,7 @@ export function contractFromOperation(operation, meta) {
     origin,
     side_effect: classified.side_effect,
     side_effect_basis: classified.basis,
-    request: operation.request,
+    request: withoutPrivateValues(operation.request, operation.slots, operation.params, meta.private_params),
     slots: operation.slots,
     volatile: operation.volatile,
     params: keptParams(operation.params, meta.private_params),

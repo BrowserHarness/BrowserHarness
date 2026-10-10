@@ -56,6 +56,7 @@ import { PolishDialog } from "./PolishDialog";
 import { cantUseBrowser, diagnoseAi, type Problem } from "../help/problems";
 import { aiContext } from "./settings/connect-ai";
 import { SkillsView } from "./SkillsView";
+import { watchApiNote } from "./site-command-detail";
 import {
   loadSiteCommands,
   parseCommandArgs,
@@ -905,6 +906,8 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       recording: WorkflowRecordingSummary;
       start_url: string;
       end_url: string;
+      recording_id?: string;
+      api_capture?: { recording_id: string; data_requests: number; inputs: string[] };
     }>({
       type: "WATCH_STOP"
     });
@@ -943,7 +946,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     await saveWorkflow(workflow);
     setLastWorkflow(workflow);
     addAssistantMessage(
-      `Saved “${workflow.name}” with ${steps.length} action step${steps.length === 1 ? "" : "s"}, ${workflow.events?.length || 0} browser-context event${workflow.events?.length === 1 ? "" : "s"}, and ${workflow.inputs?.length || 0} reusable input${workflow.inputs?.length === 1 ? "" : "s"} across ${workflow.recording?.tab_count || 1} tab${workflow.recording?.tab_count === 1 ? "" : "s"}.${(workflow.recording?.dropped_steps || workflow.recording?.dropped_events) ? " Recording limits dropped some excess evidence." : ""}`
+      `Saved “${workflow.name}” with ${steps.length} action step${steps.length === 1 ? "" : "s"}, ${workflow.events?.length || 0} browser-context event${workflow.events?.length === 1 ? "" : "s"}, and ${workflow.inputs?.length || 0} reusable input${workflow.inputs?.length === 1 ? "" : "s"} across ${workflow.recording?.tab_count || 1} tab${workflow.recording?.tab_count === 1 ? "" : "s"}.${(workflow.recording?.dropped_steps || workflow.recording?.dropped_events) ? " Recording limits dropped some excess evidence." : ""}${watchApiNote(result.data.api_capture)}`
     );
   };
 

@@ -332,3 +332,27 @@ describe("procedural memory", () => {
     );
   });
 });
+
+describe("procedural memory of learned API operations", () => {
+  it("keeps the operation's shape only: no example values, headers, session names or contract", async () => {
+    const { withApiRecipe } = await import("./api-recipe");
+    const { searchContract } = await import("./api-recipe.fixture");
+    const contract = {
+      ...searchContract(),
+      session_refs: ["cookie:sid"],
+      provenance: { ...searchContract().provenance, example_inputs: { learning: [{ q: "laptops" }, { q: "keyboards" }], unseen: { q: "monitors" } } }
+    };
+    await saveSiteSkillCandidate(
+      withApiRecipe(null, { contract, entry_url: "https://shop.example/search", title: "Shop", evidence_id: "api-1", captured_at: "2026-10-10T00:00:00.000Z" }),
+      { reason: "create" }
+    );
+    const records = await listProceduralMemory();
+    expect(records).toHaveLength(1);
+    const step = records[0].recipes[0].steps[0];
+    expect(step).toEqual({ kind: "api_operation", method: "GET", action: "/api/search" });
+    const remembered = JSON.stringify(records) + proceduralEmbeddingText(records[0]);
+    for (const leaked of ["laptops", "keyboards", "monitors", "sid", "user-agent", "referer", "op-e7562f40fbcdce1c", "items[]"]) {
+      expect(remembered).not.toContain(leaked);
+    }
+  });
+});
