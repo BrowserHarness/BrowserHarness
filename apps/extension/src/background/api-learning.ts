@@ -5,6 +5,7 @@
 // stays an explicit step behind the existing gate.
 import type { BridgeRpcResult } from "./bridge-client";
 import type { ApiCapture } from "./api-capture";
+import type { WatchApiCapture } from "./api-watch";
 import {
   isApiContract,
   withApiRecipe,
@@ -33,6 +34,8 @@ export interface ApiLearnInput {
   source?: "two_example_learning" | "repair";
   parent_operation_id?: string;
   replace_recipe_id?: string;
+  /** learn from one or two Watch Me recordings instead of running the page */
+  from_watch?: string[];
 }
 
 export interface ApiLearnDeps {
@@ -50,6 +53,9 @@ export interface ApiLearnDeps {
   ): Promise<unknown>;
   now(): string;
   newId(): string;
+  /** a Watch Me recording's kept capture */
+  watchCapture?(recordingId: string): WatchApiCapture | null;
+  forgetWatch?(recordingId: string): void;
 }
 
 export type ApiLearnOutcome =
@@ -92,6 +98,7 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
   if (!/^[A-Za-z][\w-]{0,63}$/.test(name)) {
     return fail("API_LEARN_INPUT", "name the operation with letters, digits, - or _, like \"search\"");
   }
+  if (Array.isArray(input.from_watch) && input.from_watch.length) return learnFromWatch(deps, { ...input, name });
   if (input.side_effect === "write") {
     // a write is learned from what a person does (Watch Me), never by running it twice here
     return fail("API_LEARN_WRITE_REFUSED", "Writes are learned from a demonstration you approve, not by running the page twice. Record it with Watch Me instead.");
@@ -122,50 +129,150 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
     return fail("API_LEARN_RUN_FAILED", error instanceof Error ? error.message : "The page could not be run");
   }
 
-  const base = input.id ? await deps.loadBase(input.id) : null;
-  if (input.id && !base) return fail("SITE_SKILL_NOT_FOUND", "Site Skill candidate was not found");
-
-  const learned = await deps.bridge("learn", {
+  return learnAndSave(deps, input, {
     name,
     captures,
     examples,
-    trigger: { url: input.page_url },
+    trigger_url: input.page_url,
+    entry_url: page.origin + page.pathname,
+    hostname: page.hostname,
+    evidence_id: evidenceId,
+    started_at: startedAt,
+    source: input.source === "repair" ? "repair" : "two_example_learning",
+    verify_args: input.verify_args
+  });
+}
+
+/**
+ * Learn from Watch Me: the recordings' own captures stand in for the two page
+ * runs, and the typed values are the examples. A write is allowed here (the
+ * person did it); it stays unverified, since a write is never sent to check
+ * it, and every run of it asks first.
+ */
+async function learnFromWatch(deps: ApiLearnDeps, input: ApiLearnInput): Promise<ApiLearnOutcome> {
+  const ids = (input.from_watch || []).map(String).slice(0, 3);
+  if (ids.length > 2) return fail("API_LEARN_INPUT", "give one or two Watch Me recordings in from_watch");
+  if (!deps.watchCapture) return fail("API_LEARN_WATCH_MISSING", "Watch Me captures are not available here");
+  const kept = ids.map((id) => deps.watchCapture!(id));
+  const lost = ids.find((_, index) => !kept[index]);
+  if (lost) {
+    return fail("API_LEARN_WATCH_MISSING", `No network capture is kept for recording ${lost}: they are kept for 15 minutes after Watch Me stops, in memory only. Record it again.`);
+  }
+  const recordings = kept as WatchApiCapture[];
+  let examples: Array<Record<string, unknown>>;
+  if (Array.isArray(input.examples) && input.examples.length) {
+    examples = input.examples.filter(plain);
+    if (examples.length !== recordings.length) return fail("API_LEARN_INPUT", "give one example per recording, or leave examples out to use what was typed");
+  } else {
+    const shared = Object.keys(recordings[0].examples).filter((key) => recordings.every((item) => item.examples[key] !== undefined));
+    // with two recordings, the inputs are the fields typed differently
+    const names = recordings.length === 2 ? shared.filter((key) => recordings[0].examples[key].toLowerCase() !== recordings[1].examples[key].toLowerCase()) : shared;
+    if (!names.length) {
+      return fail(
+        "API_LEARN_INPUT",
+        recordings.length === 2
+          ? "the two recordings typed nothing different; record again with a different value, or give examples"
+          : "the recording typed nothing to learn an input from; give examples with the values it used"
+      );
+    }
+    examples = recordings.map((item) => Object.fromEntries(names.map((key) => [key, item.examples[key]])));
+  }
+  let entry: URL;
+  try {
+    entry = new URL(fillPageUrl(String(input.page_url || recordings[0].start_url), {}).replace(/\{|\}/g, ""));
+  } catch {
+    return fail("API_LEARN_INPUT", "page_url must be an http(s) address");
+  }
+  const write = input.side_effect === "write";
+  if (!write && input.verify_args !== undefined && (!plain(input.verify_args) || !Object.keys(input.verify_args).length)) {
+    return fail("API_LEARN_INPUT", "verify_args must name the same inputs as the examples");
+  }
+  const outcome = await learnAndSave(deps, input, {
+    name: input.name,
+    captures: recordings.map((item) => item.capture),
+    examples,
+    ...(input.page_url ? { trigger_url: input.page_url } : {}),
+    entry_url: entry.origin + entry.pathname,
+    hostname: entry.hostname,
+    evidence_id: `watch-${ids[0]}`,
+    started_at: deps.now(),
+    source: "watch_me",
+    ...(plain(input.verify_args) && !write ? { verify_args: input.verify_args } : {}),
+    // what a person typed into a write is theirs: keep no example values for it
+    ...(write && !input.private_params ? { private_params: Object.keys(examples[0]) } : {})
+  });
+  if (outcome.ok) for (const id of ids) deps.forgetWatch?.(id);
+  return outcome;
+}
+
+interface LearnRun {
+  name: string;
+  captures: ApiCapture[];
+  examples: Array<Record<string, unknown>>;
+  trigger_url?: string;
+  entry_url: string;
+  hostname: string;
+  evidence_id: string;
+  started_at: string;
+  source: "two_example_learning" | "repair" | "watch_me";
+  verify_args?: Record<string, unknown>;
+  private_params?: string[];
+}
+
+async function learnAndSave(deps: ApiLearnDeps, input: ApiLearnInput, run: LearnRun): Promise<ApiLearnOutcome> {
+  const { name, examples } = run;
+  const evidenceId = run.evidence_id;
+  const startedAt = run.started_at;
+  const base = input.id ? await deps.loadBase(input.id) : null;
+  if (input.id && !base) return fail("SITE_SKILL_NOT_FOUND", "Site Skill candidate was not found");
+
+  const privateParams = input.private_params || run.private_params;
+  const learned = await deps.bridge("learn", {
+    name,
+    captures: run.captures,
+    examples,
+    ...(run.trigger_url ? { trigger: { url: run.trigger_url } } : {}),
     ...(input.side_effect ? { side_effect: input.side_effect } : {}),
     ...(input.description ? { description: input.description } : {}),
-    ...(input.private_params ? { private_params: input.private_params } : {}),
+    ...(privateParams ? { private_params: privateParams } : {}),
     evidence_ids: [evidenceId],
-    source: input.source === "repair" ? "repair" : "two_example_learning",
+    source: run.source,
     ...(input.parent_operation_id ? { parent_operation_id: input.parent_operation_id } : {})
   });
-  // the captures held cookies and storage: drop them now
-  captures.length = 0;
   if (!learned.ok) {
     return { ok: false, error: learned.error || { code: "API_ENGINE_FAILED", message: "Learning failed" } };
   }
   const data = learned.data as { contract?: unknown; warnings?: string[]; example_fingerprints?: string[] };
   if (!isApiContract(data?.contract)) return fail("API_ENGINE_FAILED", "The helper app returned no operation contract");
 
-  // the unseen input, live, through the same tiers a run uses (a signed-in read answers in the page)
-  const response = await deps.dispatch(data.contract, input.verify_args);
-  const checked = await deps.bridge("verify", {
-    contract: data.contract,
-    args: input.verify_args,
-    examples,
-    example_fingerprints: data.example_fingerprints || [],
-    response
-  });
-  if (!checked.ok) return { ok: false, error: checked.error || { code: "API_ENGINE_FAILED", message: "Verification failed" } };
-  const verifiedData = checked.data as { contract?: unknown; check?: ApiVerificationCheck };
-  if (!isApiContract(verifiedData?.contract)) return fail("API_ENGINE_FAILED", "The helper app returned no operation contract");
-  const contract = verifiedData.contract;
-  const check = verifiedData.check;
+  // the unseen input, live, through the same tiers a run uses (a signed-in read
+  // answers in the page); never for a write, which is not sent to check it
+  const verifyArgs = data.contract.side_effect === "read" ? run.verify_args : undefined;
+  let contract: ApiOperationContract = data.contract;
+  let check: ApiVerificationCheck | undefined;
+  let response: ApiCallResult | undefined;
+  if (verifyArgs) {
+    response = await deps.dispatch(data.contract, verifyArgs);
+    const checked = await deps.bridge("verify", {
+      contract: data.contract,
+      args: verifyArgs,
+      examples,
+      example_fingerprints: data.example_fingerprints || [],
+      response
+    });
+    if (!checked.ok) return { ok: false, error: checked.error || { code: "API_ENGINE_FAILED", message: "Verification failed" } };
+    const verifiedData = checked.data as { contract?: unknown; check?: ApiVerificationCheck };
+    if (!isApiContract(verifiedData?.contract)) return fail("API_ENGINE_FAILED", "The helper app returned no operation contract");
+    contract = verifiedData.contract;
+    check = verifiedData.check;
+  }
 
   let candidate: SiteCandidateSkill;
   try {
     candidate = withApiRecipe(base?.candidate || null, {
       contract,
-      entry_url: page.origin + page.pathname,
-      title: input.skill_name || page.hostname,
+      entry_url: run.entry_url,
+      title: input.skill_name || run.hostname,
       ...(input.skill_name ? { name: input.skill_name } : {}),
       evidence_id: evidenceId,
       captured_at: startedAt,
@@ -198,7 +305,7 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
       evidence_id: evidenceId,
       executed_steps: 1,
       submitted: false,
-      parameter_names: Object.keys(input.verify_args).sort(),
+      parameter_names: Object.keys(verifyArgs || {}).sort(),
       ...(check.passed ? {} : { error_code: `API_${String(check.class).toUpperCase()}`, error_message: check.detail || check.class })
     });
   }
@@ -220,11 +327,15 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
       },
       contract,
       verification: contract.verification,
-      ...(response.ok ? { result_preview: response.data, answered_by_tier: response.tier } : {}),
+      ...(response?.ok ? { result_preview: response.data, answered_by_tier: response.tier } : {}),
       warnings: Array.isArray(data.warnings) ? data.warnings : [],
       promotion: verified
         ? "Saved as a candidate. Promote it with site_skill promote once you are happy with it."
-        : "Saved as a candidate that did not verify; it will not be promoted until it does."
+        : contract.side_effect === "write"
+          ? "Saved as an unverified candidate: a write is never sent to check it, and every run of it asks you first."
+          : verifyArgs
+            ? "Saved as a candidate that did not verify; it will not be promoted until it does."
+            : "Saved as an unverified candidate: give verify_args (an input the demonstration did not use) to check it live."
     }
   };
 }

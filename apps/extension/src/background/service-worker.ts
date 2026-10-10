@@ -98,6 +98,15 @@ import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
 import { collectApiCapture, waitForNetworkQuiet } from "./api-capture";
 import { learnApiOperation, type ApiLearnInput } from "./api-learning";
 import { runTier } from "./api-transports";
+import {
+  examplesFromSteps,
+  forgetWatchCapture,
+  keepWatchCapture,
+  noteWatchStart,
+  takeWatchStart,
+  watchCapture,
+  watchCaptureSummary
+} from "./api-watch";
 import { checkApiHealth, nextForClass, repairApiOperation, type RepairLedger } from "./api-repair";
 import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
 import { apiRecipeNeedsApproval, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
@@ -510,8 +519,53 @@ function apiLearnDeps(session: TaskSession | null) {
     },
     execution: (id: string, revisionId: string, entry: Parameters<typeof recordSiteSkillExecutionEvidence>[2]) => recordSiteSkillExecutionEvidence(id, revisionId, entry),
     now: () => new Date().toISOString(),
-    newId: () => crypto.randomUUID().slice(0, 12)
+    newId: () => crypto.randomUUID().slice(0, 12),
+    watchCapture: (id: string) => watchCapture(id),
+    forgetWatch: (id: string) => forgetWatchCapture(id)
   };
+}
+
+/** Starts capturing the recorded tab's requests, for learning its API later. */
+async function beginWatchApiCapture(recordingId: string, tabId: number): Promise<void> {
+  const already = networkCaptureActive(tabId);
+  if (!already) await startNetworkCapture(tabId, 2000).catch(() => undefined);
+  if (networkCaptureActive(tabId)) noteWatchStart(recordingId, tabId, !already);
+}
+
+/** Keeps the recording's capture in memory, with what was typed, and says what it holds. */
+async function finishWatchApiCapture(
+  recordingId: string,
+  startUrl: string,
+  steps: import("../runtime/workflows").RecordedWorkflowStep[],
+  events: import("../runtime/workflows").WorkflowRecordingEvent[]
+) {
+  const started = takeWatchStart(recordingId);
+  if (!started || !networkCaptureActive(started.tab_id)) return undefined;
+  try {
+    await waitForNetworkQuiet(started.tab_id, 500, 3000);
+    const tab = await chrome.tabs.get(started.tab_id).catch(() => null);
+    const finalUrl = tab?.url || startUrl;
+    const examples = examplesFromSteps(steps);
+    const values = Object.values(examples).map((value) => value.toLowerCase());
+    const visited = events
+      .filter((event) => event.type === "navigation" && event.tab_id === started.tab_id)
+      .map((event) => (event as { url: string }).url);
+    // the page to replay is the one whose address carries what was typed, if any
+    const located = [...visited, finalUrl].find((url) => {
+      try {
+        const decoded = decodeURIComponent(url).toLowerCase();
+        return values.some((value) => decoded.includes(value));
+      } catch {
+        return false;
+      }
+    });
+    const capture = await collectApiCapture(started.tab_id, finalUrl, [located || finalUrl]);
+    return watchCaptureSummary(keepWatchCapture({ recording_id: recordingId, start_url: startUrl, capture, examples }));
+  } catch {
+    return undefined;
+  } finally {
+    if (started.started_capture) await stopNetworkCapture(started.tab_id).catch(() => undefined);
+  }
 }
 
 function apiRecipesOf(candidate: import("../runtime/site-skill").SiteCandidateSkill, recipeId?: string) {
@@ -1435,6 +1489,30 @@ async function runTool(
       if (revision && apiRecipesOf(revision.candidate, recipeId).length && (recipeId || revision.candidate.recipes.every((recipe) => recipe.form_index < 0))) {
         return apiHealthTool(input.id, revision, recipeId);
       }
+    }
+
+    if (action === "run" && input.api_read_only === true) {
+      // a helper's run: only a learned API read, never a form or a write
+      const revision = typeof input.id === "string"
+        ? await getSiteSkillExecutableRevision(input.id, typeof input.revision_id === "string" ? input.revision_id : undefined)
+        : null;
+      let recipe: import("../runtime/site-skill").SiteSkillRecipe | null = null;
+      try {
+        recipe = revision ? selectSiteSkillRecipe(revision.candidate, typeof input.recipe_id === "string" ? input.recipe_id : undefined) : null;
+      } catch {
+        recipe = null;
+      }
+      const step = recipe?.steps.find((item) => item.kind === "api_operation");
+      if (!revision || !recipe || !step || step.kind !== "api_operation" || step.contract.side_effect !== "read") {
+        return {
+          ok: false,
+          error: {
+            code: "SUBAGENT_SCOPE_DENIED",
+            message: "Helpers may run only a Site Skill's learned API reads (recipes whose id starts with recipe-api-v2- and that only get data)."
+          }
+        };
+      }
+      return runApiOperationRecipe(input, revision, recipe.id, { ...options, approvalGranted: false });
     }
 
     if (action === "run" && typeof input.id === "string" && input.id.trim()) {
@@ -3709,6 +3787,7 @@ chrome.runtime.onMessage.addListener(
             sendResponse(armed);
             return;
           }
+          await beginWatchApiCapture(session.id, resolved.tab.id!);
 
           sendResponse({
             ok: true,
@@ -3798,6 +3877,7 @@ chrome.runtime.onMessage.addListener(
           const currentTab = await chrome.tabs
             .get(completed.current_tab_id)
             .catch(() => null);
+          const apiCapture = await finishWatchApiCapture(completed.id, completed.start_url, completed.steps, completed.events);
 
           sendResponse({
             ok: true,
@@ -3813,7 +3893,8 @@ chrome.runtime.onMessage.addListener(
               steps: completed.steps,
               events: completed.events,
               boundary_step_id: completed.boundary_step_id,
-              recording: watchRecordingSummary(completed)
+              recording: watchRecordingSummary(completed),
+              ...(apiCapture ? { api_capture: apiCapture } : {})
             }
           });
           return;

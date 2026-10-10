@@ -3,7 +3,8 @@
 // a local stand-in shop twice in background tabs (two example searches), the
 // Bridge learns the request behind the results, checks it live with a third
 // search, and the saved recipe then runs without opening the site. Covers a
-// plain GET API and a persisted GraphQL query. No AI model, no internet.
+// plain GET API, a persisted GraphQL query, signed-in and page-only reads,
+// repair, and learning from Watch Me demonstrations (a search and a write). No AI model, no internet.
 // Requires: npm run build, npm run build:bridge, playwright-core. Never runs on GitHub Actions.
 import os from "node:os";
 import path from "node:path";
@@ -269,6 +270,83 @@ try {
     side_effect: "write"
   });
   check("learn_api refuses to learn a write by running it", !write.ok && write.error.code === "API_LEARN_WRITE_REFUSED" && shop.state.writes === 0);
+
+  // Watch Me: the person's own demonstration is the learning run
+  const tabIdOf = (url) => side.evaluate(async (prefix) => (await chrome.tabs.query({})).find((tab) => tab.url?.startsWith(prefix))?.id, url);
+  const watch = async (url, act) => {
+    const page = await ctx.newPage();
+    await page.goto(url);
+    await page.bringToFront();
+    const tabId = await tabIdOf(url);
+    const started = await side.evaluate((id) => chrome.runtime.sendMessage({ type: "WATCH_START", tab_id: id }), tabId);
+    await act(page);
+    await page.waitForTimeout(1500);
+    const stopped = await side.evaluate(() => chrome.runtime.sendMessage({ type: "WATCH_STOP" }));
+    await page.close();
+    return { started, stopped };
+  };
+  const searchDemo = (term) =>
+    watch(`${shop.origin}/search`, async (page) => {
+      await page.getByLabel("Search").fill("");
+      await page.getByLabel("Search").pressSequentially(term, { delay: 20 });
+      await page.keyboard.press("Enter");
+      await page.waitForURL(/q=/);
+      await page.locator("#results li").first().waitFor({ timeout: 10000 });
+    });
+  const demoA = await searchDemo("laptops");
+  const demoB = await searchDemo("keyboards");
+  const capA = demoA.stopped?.data?.api_capture;
+  check(
+    "a Watch Me recording keeps its network capture for learning, naming inputs but not values",
+    demoA.started?.ok && capA?.data_requests >= 1 && capA?.inputs?.length === 1 && !JSON.stringify(capA).includes("laptops"),
+    JSON.stringify(demoA.started?.error || capA || demoA.stopped?.error).slice(0, 300)
+  );
+  const watchLearnStarted = performance.now();
+  const fromWatch = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    name: "watchedSearch",
+    from_watch: [capA?.recording_id, demoB.stopped?.data?.api_capture?.recording_id],
+    verify_args: { [capA?.inputs?.[0] || "search"]: "monitors" },
+    skill_name: "Watched shop"
+  });
+  timings.push(["learn_api from two Watch Me recordings (learn + live check, no page runs)", Math.round(performance.now() - watchLearnStarted)]);
+  check(
+    "learn_api learns the search from two Watch Me demonstrations and verifies it live",
+    fromWatch.ok && fromWatch.data.verification.status === "verified" && fromWatch.data.contract.provenance.source === "watch_me",
+    JSON.stringify(fromWatch.error || fromWatch.data?.verification).slice(0, 400)
+  );
+
+  const writesBefore = shop.state.writes;
+  const cartDemo = await watch(`${shop.origin}/cart`, async (page) => {
+    await page.locator("#note").pressSequentially("gift wrap please", { delay: 10 });
+    await page.locator("#add").click();
+    await page.locator("#done").filter({ hasText: "Added" }).waitFor({ timeout: 10000 });
+  });
+  check("the demonstrated write happened once, by the person", shop.state.writes === writesBefore + 1);
+  const cartLearned = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: fromWatch.data?.candidate_id,
+    name: "addToCart",
+    from_watch: [cartDemo.stopped?.data?.api_capture?.recording_id],
+    side_effect: "write"
+  });
+  check(
+    "a write is learned from the demonstration without being sent again, and keeps no typed value",
+    cartLearned.ok && cartLearned.data.operation.side_effect === "write" && shop.state.writes === writesBefore + 1 && !JSON.stringify(cartLearned.data.contract).includes("gift wrap please"),
+    JSON.stringify(cartLearned.error || cartLearned.data?.operation).slice(0, 400)
+  );
+  const cartRun = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: cartLearned.data?.recipe_id, parameters: { note: "no rush" } });
+  check(
+    "running the learned write without approval asks first and sends nothing",
+    !cartRun.ok && /APPROVAL/.test(cartRun.error?.code || "") && shop.state.writes === writesBefore + 1,
+    String(JSON.stringify(cartRun.error)).slice(0, 300)
+  );
+
+  // Helpers (read-only Task DAG workers) may run learned API reads only
+  const helperRead = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id, parameters: { [capA?.inputs?.[0] || "search"]: "tablets" }, api_read_only: true });
+  check("a helper can run a learned API read", helperRead.ok && JSON.stringify(helperRead.data?.run?.output?.data).includes("Slate tablet"), String(JSON.stringify(helperRead.error || helperRead.data?.run?.output)).slice(0, 300));
+  const helperWrite = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: cartLearned.data?.recipe_id, parameters: { note: "x" }, api_read_only: true });
+  check("a helper cannot run a learned write", !helperWrite.ok && helperWrite.error?.code === "SUBAGENT_SCOPE_DENIED" && shop.state.writes === writesBefore + 1, String(JSON.stringify(helperWrite.error)).slice(0, 300));
 } catch (error) {
   check("API engine e2e ran without crashing", false, error instanceof Error ? error.stack : String(error));
 } finally {

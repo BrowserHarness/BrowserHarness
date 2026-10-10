@@ -125,7 +125,7 @@ const TOOL_SPECS = [
     id: optional(z.string(), "Episode id for get/delete"),
     limit: optional(z.number().int().positive(), "Maximum results")
   }],
-  ["site_skill", "Saved website Skills: list, run, create from the current page, learn a website's own API from two examples (learn_api), verify, repair a learned operation the site changed, history, compare, promote, rollback or delete.", {
+  ["site_skill", "Saved website Skills: list, run, create from the current page, learn a website's own API from two examples or a Watch Me demonstration (learn_api), verify, repair a learned operation the site changed, history, compare, promote, rollback or delete.", {
     action: action(
       ["list", "get", "create", "learn_api", "verify", "run", "refine", "repair", "history", "compare", "promote", "rollback", "delete"],
       "What to do"
@@ -138,7 +138,9 @@ const TOOL_SPECS = [
     page_url: optional(z.string(), "learn_api: the page address with {input} where each input goes"),
     examples: optional(z.array(z.record(z.string(), z.unknown())), "learn_api/repair: two example inputs with different values"),
     verify_args: optional(z.record(z.string(), z.unknown()), "learn_api/repair: a third input neither example used, to check the operation live"),
-    skill_name: optional(z.string(), "learn_api: name for a new Skill")
+    skill_name: optional(z.string(), "learn_api: name for a new Skill"),
+    from_watch: optional(z.array(z.string()).max(2), "learn_api: learn from one or two Watch Me recording ids (their api_capture) instead of running the page"),
+    side_effect: optional(z.enum(["read", "write"]), "learn_api: read or write; a write is learned only from Watch Me and asks before every run")
   }],
   ["cdp", "Raw Chrome DevTools Protocol call; last resort when no other tool fits.", {
     method: z.string().min(1).describe("CDP method, e.g. Page.getLayoutMetrics"),

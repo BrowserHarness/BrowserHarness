@@ -262,6 +262,11 @@ test("taught inputs are kept for health checks and repair, unless an input is pr
     const { learned: hidden } = await learnFrom(shop, "rest", { learn: { private_params: ["q"] } });
     assert.equal(hidden.contract.provenance.example_inputs, undefined);
     assert.equal(hidden.contract.params[0].example, undefined);
+    // the learning value is gone from the request too, and a run still fills it
+    assert.ok(!/laptops|keyboards/i.test(JSON.stringify(hidden.contract)), JSON.stringify(hidden.contract.request));
+    const ran = await callTier1(hidden.contract, { q: "monitors" }, { minIntervalMs: 0 });
+    assert.equal(ran.ok, true, ran.reason);
+    assert.equal(ran.data[0].title, "27 inch monitor");
 
     const { learned: repaired } = await learnFrom(shop, "rest", { learn: { source: "repair", parent_operation_id: "op-old" } });
     assert.equal(repaired.contract.provenance.source, "repair");
