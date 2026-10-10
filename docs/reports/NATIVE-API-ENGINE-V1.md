@@ -18,6 +18,17 @@ An independent source review of the stack (2026-10-10) found six problems. Each 
 | #52 | An API write the site answered 2xx was recorded as passed, with no read-back. | It is recorded as `unverified` (which blocks promotion) and returns `sent: true`, `verification: "unverified"` and a `next_action` to check the site and not resend. | `api-recipe.test.ts` (2xx, no state change); `api-engine-hardening.test.mjs` (fixture shop accepts and changes nothing) |
 | #52 | The early-wait matcher for tier 3 escaped `*`, so wildcard operations missed it. | Host and path compared segment by segment, `*` matching one segment, as the Bridge's matcher does. | `api-capture.test.ts`: wildcard segments |
 
+### Second review: write recording
+
+A second review of the write-recording change found two gaps, both reproduced first in real Chromium (the e2e failed 37/39 on the old code) and then fixed in #52:
+
+| Problem | Fix | Regression test |
+|---|---|---|
+| A learned write run as a named site command lost `sent`, `verification` and `next_action`, so it read as a plain HTTP 200. | Site commands keep them; the CLI prints that the change is not verified; the MCP tool descriptions, the Bridge's agent skill text and the agent prompt say a sent write is not a completed task and must not be resent. | e2e: a write approved in the person's real side panel, run by name, against a 200-without-change fixture; `site-commands.test.ts`; `mcp.test.mjs` |
+| Promotion looked only at the revision's latest execution, so a read that passed (and its health check) after an unverified write made the revision promotable. | Promotion is also checked per recipe: while any recipe's latest execution is `unverified`, the revision cannot be promoted. Only API writes are recorded that way, so UI and read-only Skills are unchanged. | e2e: unverified write, then a passing read and health check, then promote is refused; `site-skill-store.test.ts` |
+
+The e2e can now stand in for the person approving: it opens the real side panel with a click and sends the approved run from there. A page open in a tab still cannot claim approval (also checked).
+
 ## What shipped
 
 | PR | Scope |
@@ -80,7 +91,7 @@ How it fits together:
   - refuses a second repair during the cooldown.
 - Watch Me: two search demonstrations learned and verified live. A demonstrated write is learned without being re-sent, keeps no typed value however it is labelled, and asks before running.
 - Tier 3 answers only with the page's request that carried the given inputs.
-- An approved API write is recorded as sent and unverified, never as passed. Approval for it cannot be claimed from a page open in a tab (checked in the e2e).
+- An approved API write is recorded as sent and unverified, never as passed, through `site_skill run` and named site commands alike, and a revision holding one cannot be promoted. Approval for it comes only from the person's side panel; a page open in a tab cannot claim it (both checked in the e2e).
 - A website that calls an API on another host keeps its own origin as the Site Skill's site, and learning reads only that site's cookies.
 - Helpers: may run a learned read and are refused a learned write (`SUBAGENT_SCOPE_DENIED`).
 - Secrets:
@@ -149,18 +160,18 @@ After the review fixes the benchmark was run again with the same settings ([api-
 
 ## Test results at release
 
-All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. These counts are from the corrected integration head, after the review fixes. `npm run gate:api-engine` passed every step:
+All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. These counts are from the corrected integration head, after both reviews' fixes. `npm run gate:api-engine` passed every step:
 
 | Step | Result |
 |---|---|
 | vendor check | Passed |
-| Bridge tests | 101/101 |
-| Extension tests | 784/784 |
+| Bridge tests | 102/102 |
+| Extension tests | 786/786 |
 | Typecheck | Passed |
 | Build | Passed |
 | Bridge bundle | Passed |
 | MV3 contract | Passed |
-| `smoke:api-engine` (real Chromium, local fixture) | 36/36 |
+| `smoke:api-engine` (real Chromium, local fixture) | 39/39 |
 
 Regression suites for the areas the review named, also in real Chromium against local fixtures:
 
@@ -173,6 +184,7 @@ Regression suites for the areas the review named, also in real Chromium against 
 | `smoke:learning` | Watch Me and Skill learning | 24/24 |
 | `smoke:e2e` | extension smoke | 13/13 |
 | `smoke:agent` | agent loop | 13/13 |
+| `smoke:features` | side panel features, including approval cards | 18/18 |
 
 None of these is a real-website test.
 
