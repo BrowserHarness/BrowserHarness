@@ -200,6 +200,13 @@ document.getElementById("add").addEventListener("click", () => {
       return;
     }
 
+    // a write the server takes and then drops the connection on: did it happen?
+    if (url.pathname === "/api/hangup") {
+      state.writes += 1;
+      req.socket.destroy();
+      return;
+    }
+
     if (url.pathname === "/challenge") {
       res.writeHead(403, { "content-type": "text/html" });
       res.end("<html><title>Just a moment...</title><body>Checking your browser before accessing. cf-chl</body></html>");

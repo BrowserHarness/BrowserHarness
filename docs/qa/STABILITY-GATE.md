@@ -58,3 +58,6 @@ Current mandatory suites cover:
 
 ## User acceptance rule
 Do not ask the user to install another build for every individual fix. Batch related fixes into a stability candidate and request the smallest possible acceptance check only after the full gate passes.
+
+## Native API engine gate
+`npm run gate:api-engine` runs, locally and never on GitHub Actions: the vendored upstream check, Bridge and extension tests, typecheck, build, Bridge bundle, MV3 contract and the real-Chromium fixture test (`smoke:api-engine`). `--quick` skips the browser test. Fixture results never count as real-site acceptance.

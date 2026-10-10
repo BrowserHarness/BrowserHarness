@@ -1,6 +1,7 @@
 import type { RecordedWorkflowStep } from "../runtime/workflows";
 import {
   changesPage,
+  ranWithoutPage,
   observationInputAfter,
   settleMsAfter
 } from "../runtime/post-action";
@@ -3568,7 +3569,7 @@ async function handleBridgeCommand(
   // a separate observe_page call per step. observe:false turns this off.
   const { observe: returnPage, ...args } = command.args;
   const result = await runTool(tool, args, command.session, command.title);
-  if (!result.ok || returnPage === false || !changesPage(tool, args)) {
+  if (!result.ok || returnPage === false || !changesPage(tool, args) || ranWithoutPage(tool, result)) {
     return result;
   }
   const settleMs = settleMsAfter(tool);

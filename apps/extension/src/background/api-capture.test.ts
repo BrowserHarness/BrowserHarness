@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("./cdp-manager", () => ({ cdpCommand: mocks.cdpCommand, subscribeCdpEvents: mocks.subscribe }));
 vi.mock("./page-evaluate", () => ({ evaluatePageExpression: mocks.evaluatePageExpression }));
 
-import { collectApiCapture } from "./api-capture";
+import { collectApiCapture, looksLikeOperation } from "./api-capture";
 import { startNetworkCapture, stopNetworkCapture } from "./network-capture";
 
 function emit(tabId: number, method: string, params: object) {
@@ -69,5 +69,16 @@ describe("API learning capture", () => {
     expect(mocks.cdpCommand).toHaveBeenCalledWith(7, "Network.getCookies", { urls: ["https://shop.example"] });
     // an image body is never read
     expect(mocks.cdpCommand.mock.calls.filter(([, method]) => method === "Network.getResponseBody")).toHaveLength(2);
+  });
+});
+
+describe("spotting the operation's request in a page run", () => {
+  it("matches method and path, with {holes} as one segment", () => {
+    expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/search?q=x" }, { method: "GET", path: "/api/search" })).toBe(true);
+    expect(looksLikeOperation({ method: "POST", url: "https://shop.example/api/search" }, { method: "GET", path: "/api/search" })).toBe(false);
+    expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/items/42/reviews" }, { path: "/api/items/{id}/reviews" })).toBe(true);
+    expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/items/4/2/reviews" }, { path: "/api/items/{id}/reviews" })).toBe(false);
+    expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/search.json" }, { path: "/api/search" })).toBe(false);
+    expect(looksLikeOperation({ method: "GET", url: "https://shop.example/x" }, {})).toBe(false);
   });
 });
