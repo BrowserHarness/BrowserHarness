@@ -16,7 +16,7 @@ import {
   isLoopbackHost,
   REMOTE_MIN_TOKEN_LENGTH
 } from "./core.mjs";
-import { serveBrowserHarnessMcp } from "./mcp.mjs";
+import { serveBrowserHarnessMcp, siteRunText } from "./mcp.mjs";
 import { createTelegramRelay, telegramApi } from "./telegram.mjs";
 import { createDiscordRelay, discordApi, discordInviteUrl } from "./discord.mjs";
 import { createSlackRelay, slackApi } from "./slack.mjs";
@@ -440,11 +440,7 @@ async function sitesCommand(config, name, args = []) {
   if (flag("json") || (name && result.data.kind === "read" && typeof result.data.output === "object")) {
     process.stdout.write(`${JSON.stringify(name ? result.data.output ?? result.data : result.data, null, 2)}\n`);
   } else if (name) {
-    process.stdout.write(
-      result.data.kind === "read"
-        ? `${result.data.output ?? ""}\n`
-        : `${result.data.submitted ? "Filled and sent the form" : "Filled the form without sending it"} on ${result.data.site}.\n`
-    );
+    process.stdout.write(siteRunText(result.data));
   } else if (!result.data.commands.length) {
     process.stdout.write(`${result.data.hint}\n`);
   } else {

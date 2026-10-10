@@ -18,7 +18,8 @@ import {
   findSiteCommand,
   loadSiteCommands,
   parseCommandArgs,
-  recipeParameters
+  recipeParameters,
+  siteCommandAnswer
 } from "../runtime/site-commands";
 import {
   ALARM_PREFIX,
@@ -404,22 +405,7 @@ async function siteCommandsTool(
     options
   );
   if (!result.ok) return result;
-  const run = (result.data as { run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> } })?.run;
-  return {
-    ok: true,
-    data: {
-      command: command.name,
-      site: command.site,
-      kind: command.kind,
-      ...(run?.output
-        ? {
-            http_status: run.output.http_status,
-            truncated: run.output.truncated,
-            output: run.output.data
-          }
-        : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 })
-    }
-  };
+  return { ok: true, data: siteCommandAnswer(command, result.data) };
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {

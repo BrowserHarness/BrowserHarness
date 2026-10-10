@@ -24,6 +24,20 @@ const lastJson = (text) => {
   }
 };
 
+async function evaluateIn(url, expression) {
+  const socket = new WebSocket(url);
+  await new Promise((resolve, reject) => {
+    socket.onopen = resolve;
+    socket.onerror = reject;
+  });
+  const reply = new Promise((resolve) => (socket.onmessage = (message) => resolve(JSON.parse(message.data))));
+  socket.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } }));
+  const answer = await reply;
+  socket.close();
+  if (answer.result?.exceptionDetails) throw new Error(answer.result.exceptionDetails.text);
+  return answer.result?.result?.value;
+}
+
 /** Starts everything; `check(name, ok, detail)` records setup steps. */
 export async function startHarness({ check = () => undefined, title = "API engine test" } = {}) {
   for (const file of [path.join(dist, "manifest.json"), bundle]) {
@@ -37,6 +51,7 @@ export async function startHarness({ check = () => undefined, title = "API engin
 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "bh-api-home-"));
   const port = 11_300 + Math.floor(Math.random() * 500);
+  const debugPort = 12_000 + Math.floor(Math.random() * 500);
   const token = "e2e-" + Math.random().toString(36).slice(2);
   fs.mkdirSync(path.join(home, ".browserharness-bridge"));
   fs.writeFileSync(path.join(home, ".browserharness-bridge", "config.json"), JSON.stringify({ host: "127.0.0.1", port, allow_remote: false, token }));
@@ -81,7 +96,7 @@ export async function startHarness({ check = () => undefined, title = "API engin
     ctx = await chromium.launchPersistentContext(profile, {
       executablePath: process.env.CHROME || "/opt/pw-browsers/chromium",
       headless: false,
-      args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, "--headless=new", "--no-sandbox"]
+      args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, "--headless=new", "--no-sandbox", `--remote-debugging-port=${debugPort}`]
     });
     // a signed-in-looking session on the shop, to prove its values are not kept
     await ctx.addCookies([{ name: "sid", value: SESSION_COOKIE, url: shop.origin }]);
@@ -104,7 +119,36 @@ export async function startHarness({ check = () => undefined, title = "API engin
     await shopPage.goto(`${shop.origin}/search`);
     await shopPage.evaluate((value) => localStorage.setItem("authToken", value), STORAGE_TOKEN);
     await shopPage.close();
-    return { ctx, side, shop, command, close };
+    /**
+     * Opens the person's real side panel (with a click, as a person would) and
+     * runs `expression` inside it. Unlike sidepanel.html opened in a tab, the
+     * panel is not a tab, so approval it grants is honoured: this is how a
+     * test stands in for the person approving in Chrome.
+     */
+    const inSidePanel = async (expression) => {
+      await side.evaluate(() => {
+        if (document.getElementById("bh-test-open-panel")) return;
+        const button = document.createElement("button");
+        button.id = "bh-test-open-panel";
+        button.textContent = "open panel";
+        button.onclick = async () => chrome.sidePanel.open({ windowId: (await chrome.windows.getCurrent()).id });
+        document.body.append(button);
+      });
+      await side.click("#bh-test-open-panel");
+      const url = `chrome-extension://${extId}/sidepanel.html`;
+      let panel;
+      for (let attempt = 0; attempt < 20 && !panel; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json();
+        // the tab copy of sidepanel.html is listed too: the panel is the one that is not a tab
+        for (const target of targets.filter((item) => item.type === "page" && item.url === url)) {
+          if ((await evaluateIn(target.webSocketDebuggerUrl, "new Promise((r) => chrome.tabs.getCurrent((t) => r(Boolean(t))))")) === false) panel = target;
+        }
+      }
+      if (!panel) throw new Error("the side panel did not open");
+      return evaluateIn(panel.webSocketDebuggerUrl, expression);
+    };
+    return { ctx, side, shop, command, inSidePanel, close };
   } catch (error) {
     await close();
     throw error;

@@ -346,3 +346,40 @@ export function describeSiteCommand(command: SiteCommand) {
 }
 
 export const SITE_COMMAND_NAMES_KEY = NAMES_KEY;
+
+/**
+ * What a site command answers after its Site Skill run. A write the site
+ * accepted keeps its `sent`, `verification: "unverified"` and `next_action`:
+ * an HTTP 200 is never presented as a verified change.
+ */
+export function siteCommandAnswer(
+  command: Pick<SiteCommand, "name" | "site" | "kind">,
+  data: unknown
+): Record<string, unknown> {
+  const result = (data || {}) as {
+    run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> };
+    sent?: boolean;
+    verification?: string;
+    next_action?: string;
+  };
+  const run = result.run;
+  return {
+    command: command.name,
+    site: command.site,
+    kind: command.kind,
+    ...(run?.output
+      ? {
+          http_status: run.output.http_status,
+          truncated: run.output.truncated,
+          output: run.output.data
+        }
+      : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 }),
+    ...(result.verification === "unverified"
+      ? {
+          sent: result.sent === true,
+          verification: "unverified",
+          next_action: result.next_action || "the site accepted the request; check the site to confirm the change, and do not resend it"
+        }
+      : {})
+  };
+}

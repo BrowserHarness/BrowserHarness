@@ -758,6 +758,29 @@ export function siteSkillPromotionGate(
     );
   }
 
+  // Per recipe: a write that was sent but never verified keeps the revision
+  // from promotion, whatever the revision's other recipes did since. Only
+  // API writes are recorded "unverified", so UI and read-only Skills are
+  // unaffected.
+  const recipes =
+    family.revisions.find(
+      (revision) => revision.revision_id === revisionIdInput
+    )?.candidate.recipes || [];
+  for (const recipe of recipes) {
+    const last = [...(family.executions || [])]
+      .reverse()
+      .find(
+        (item) =>
+          item.revision_id === revisionIdInput &&
+          item.recipe_id === recipe.id
+      );
+    if (last?.outcome === "unverified") {
+      reasons.push(
+        `write “${recipe.name}” was sent but its change was never verified`
+      );
+    }
+  }
+
   return {
     revision_id: revisionIdInput,
     eligible: reasons.length === 0,

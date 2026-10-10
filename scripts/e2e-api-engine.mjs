@@ -18,7 +18,7 @@ const check = (name, ok, detail = "") => {
 let harness;
 try {
   harness = await startHarness({ check });
-  const { ctx, side, shop, command } = harness;
+  const { ctx, side, shop, command, inSidePanel } = harness;
 
   const tabsBefore = ctx.pages().length;
   const learned = await command("learn-api", "site_skill", {
@@ -270,6 +270,38 @@ try {
     "a page in a tab cannot claim approval for a learned write; nothing is sent",
     claimed?.ok === false && claimed.error?.code === "APPROVAL_REQUIRED" && !shop.state.unappliedWrites && shop.state.writes === writesBefore + 1,
     String(JSON.stringify(claimed?.error)).slice(0, 300)
+  );
+
+  // The person approves the learned write in their side panel and runs it as
+  // a named site command; the site answers 200 but changes nothing. The
+  // command's answer must say sent and unverified, and nothing is resent.
+  const writeCommand = (await command("agent", "site_commands")).data?.commands?.find((item) => item.kind !== "read" && /cart/i.test(item.name));
+  shop.state.acceptWithoutChange = true;
+  const approvedCommand = await inSidePanel(
+    `chrome.runtime.sendMessage(${JSON.stringify({ type: "BROWSER_TOOL", tool: "site_commands", input: { name: writeCommand?.name, parameters: { [writeCommand?.parameters?.[0]?.name || "note"]: "no rush" } }, approval_granted: true })})`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  shop.state.acceptWithoutChange = false;
+  check(
+    "a named write command approved in the side panel, answered 200 with no change, says sent and unverified (not done)",
+    approvedCommand?.ok === true &&
+      approvedCommand.data?.http_status === 200 &&
+      approvedCommand.data?.sent === true &&
+      approvedCommand.data?.verification === "unverified" &&
+      /do not resend/.test(approvedCommand.data?.next_action || "") &&
+      shop.state.writes === writesBefore + 1,
+    String(JSON.stringify(approvedCommand)).slice(0, 500)
+  );
+  check("the approved write was sent exactly once and never resent", shop.state.unappliedWrites === 1);
+
+  // A read in the same Skill that passes afterwards does not make the write promotable
+  const laterRead = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id, parameters: { [capA?.inputs?.[0] || "search"]: "monitors" } });
+  const readHealth = await command("agent", "site_skill", { action: "verify", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id });
+  const promoteMixed = await command("agent", "site_skill", { action: "promote", id: fromWatch.data?.candidate_id });
+  check(
+    "a passing read afterwards does not make the revision with the unverified write promotable",
+    laterRead.ok && readHealth.ok && !promoteMixed.ok && promoteMixed.error?.code === "SITE_SKILL_PROMOTION_EVIDENCE_REQUIRED" && /never verified/.test(promoteMixed.error?.message || ""),
+    String(JSON.stringify({ health: readHealth.ok || readHealth.error, promote: promoteMixed.error || promoteMixed.data?.promotion_gate || "promoted" })).slice(0, 500)
   );
 
   // Helpers (read-only Task DAG workers) may run learned API reads only
