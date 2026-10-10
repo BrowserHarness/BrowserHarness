@@ -28,6 +28,7 @@
     "smoke:learning": "node scripts/e2e-learning.mjs",
     "smoke:automation": "node scripts/e2e-automation.mjs",
     "smoke:sites": "node scripts/e2e-sites.mjs",
+    "smoke:api-engine": "node scripts/e2e-api-engine.mjs",
     "smoke:self-learning": "node scripts/e2e-self-learning.mjs",
     "smoke:memory": "node scripts/e2e-memory.mjs",
     "smoke:helpers": "node scripts/e2e-helpers.mjs",

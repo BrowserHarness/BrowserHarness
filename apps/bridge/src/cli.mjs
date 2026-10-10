@@ -48,6 +48,7 @@ import {
 } from "./mcp-client.mjs";
 import { API_ANYTHING_SERVER_ID } from "./api-engine/upstream-adapter.mjs";
 import { seedBundledSites, serveApiAnythingMcp, upstreamLogin } from "./api-engine/upstream-mcp.mjs";
+import { createApiEngine } from "./api-engine/service.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 // Set by the single-file build (scripts/build-bridge.mjs).
@@ -158,6 +159,7 @@ async function serve(config) {
     allowRemote: config.allow_remote === true,
     llmManager: createLlmAdapterManager(),
     mcpManager,
+    apiEngine: createApiEngine(),
     chatApps: () => chats.relays().map((relay) => relay.app),
     chatManager: chats,
     onExtensionEvent: async (message) => {

@@ -1,6 +1,7 @@
 import type { AxSnapshot } from "../background/cdp-semantic";
 import type { NetworkRecord } from "../background/network-capture";
 import { deriveApiRecipes } from "./site-skill-api";
+import type { ApiOperationContract } from "./api-recipe";
 
 export interface SiteFormFieldEvidence {
   tag: string;
@@ -121,11 +122,20 @@ export type SiteSkillRecipeStep =
         max_chars: number;
       };
       approval: "none_read_only";
+    }
+  | {
+      /** API Recipe v2: a learned operation contract, run by tier (Bridge HTTP, in-page fetch, UI). */
+      kind: "api_operation";
+      contract: ApiOperationContract;
+      /** reads run without a prompt; anything else asks the person first */
+      approval: "none_read_only" | "browserharness_runtime";
     };
 
 export interface SiteSkillRecipe {
   id: string;
   name: string;
+  /** ui, api or hybrid; derived from the steps when absent (recipeKind) */
+  kind?: "ui" | "api" | "hybrid";
   entry_url: string;
   form_index: number;
   method: string;
@@ -166,7 +176,7 @@ export interface SiteCandidateSkill {
     structural_analysis_is_not_execution_proof: true;
   };
   provenance: {
-    source_kind: "site_analysis_v1";
+    source_kind: "site_analysis_v1" | "api_learning_v2";
     evidence_id: string;
     captured_at: string;
     ax_target_count: number;

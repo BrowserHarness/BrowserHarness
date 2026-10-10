@@ -14,6 +14,11 @@ import {
   apiFetchExpression,
   buildApiFetchUrl
 } from "./site-skill-api";
+import {
+  contractArgs,
+  type ApiCallResult,
+  type ApiOperationContract
+} from "./api-recipe";
 import type {
   SiteCandidateSkill,
   SiteSkillParameter,
@@ -31,8 +36,16 @@ export interface SiteSkillRunResult {
     content_type: string;
     truncated: boolean;
     data: unknown;
+    /** API Recipe v2: which tier answered and how */
+    api?: Pick<ApiCallResult, "tier" | "class" | "item_count" | "ms" | "fetched_at">;
   };
 }
+
+/** Sends a learned operation by tier; the caller owns approval and transport choice. */
+export type SiteSkillApiCall = (
+  contract: ApiOperationContract,
+  args: Record<string, unknown>
+) => Promise<ApiCallResult>;
 
 export class SiteSkillRunError extends Error {
   readonly executed_steps: number;
@@ -224,6 +237,7 @@ export async function runSiteSkillRecipe(input: {
   candidate: SiteCandidateSkill;
   recipe_id?: string;
   parameters: Record<string, unknown>;
+  api_call?: SiteSkillApiCall;
 }): Promise<SiteSkillRunResult> {
   let executedSteps = 0;
   let submitted = false;
@@ -296,6 +310,40 @@ export async function runSiteSkillRecipe(input: {
         continue;
       }
 
+      if (step.kind === "api_operation") {
+        if (!input.api_call) {
+          throw new Error("API_ENGINE_UNAVAILABLE: this recipe needs the helper app");
+        }
+        const result = await input.api_call(
+          step.contract,
+          contractArgs(step.contract, input.parameters)
+        );
+        // a write that left the browser counts as submitted, answered or not
+        if (step.contract.side_effect !== "read" && result.class !== "approval_required" && result.class !== "input" && result.class !== "unavailable") {
+          submitted = true;
+        }
+        if (!result.ok) {
+          throw new Error(
+            `API_${result.class.toUpperCase()}: ${result.reason || result.class}${result.next ? ` (${result.next})` : ""}`
+          );
+        }
+        output = {
+          http_status: result.status ?? 0,
+          content_type: "application/json",
+          truncated: Boolean(result.truncated),
+          data: result.data,
+          api: {
+            tier: result.tier,
+            class: result.class,
+            item_count: result.item_count,
+            ms: result.ms,
+            fetched_at: result.fetched_at
+          }
+        };
+        executedSteps += 1;
+        continue;
+      }
+
       if (step.kind === "input") {
         const parameter = parameterDefinition(
           input.candidate,
@@ -359,6 +407,7 @@ export async function runSiteSkillRecipe(input: {
         continue;
       }
 
+      if (step.kind !== "submit") continue;
       if (step.target) {
         const target = await freshTarget(
           input.tab_id,
