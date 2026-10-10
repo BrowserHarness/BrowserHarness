@@ -4,6 +4,20 @@ Date: 2026-10-10. Scope: the six-PR plan from the master implementation brief ("
 
 **Status:** v1 is built and verified against local fixtures in real Chromium. It has **not** been accepted on any real website. That test is the release-candidate acceptance milestone at the end of this report and has not been performed.
 
+## Fixes after the independent review
+
+An independent source review of the stack (2026-10-10) found six problems. Each was first reproduced with a failing test, then fixed on the PR that introduced it and merged up the stack:
+
+| PR | Problem | Fix | Regression test |
+|---|---|---|---|
+| #48 | The Site Skill's website origin was set to the API host, so a page on `www.example.com` calling `api.example.com` clashed with that site's Skill. | `site.origin` is the website (the learning page); `contract.origin` stays the API destination; the approval prompt names both when they differ. | `api-recipe.test.ts`: "keeps the visible website and the API host apart" |
+| #48 | Learning read cookies for up to 20 origins seen on the page, including trackers. | Only the page's own origin and same-site origins (`api.shop.example` for `www.shop.example`). | `api-capture.test.ts`: cookie origins exclude analytics, ads and other sites |
+| #49 | Tier 3 answered with the last matching request, even one sent with other inputs. | The Bridge receives the inputs and accepts only a request whose every input slot holds them; otherwise `endpoint_drift`, with no data. | `api-engine-transport.test.mjs`: ignored input, two same-path requests, missing inputs, unseen-input check over tier 3 fails |
+| #50 | Two concurrent repairs could both pass the cooldown check. | A repair is reserved (in memory and in the ledger, as `running`) before learning starts. | `api-repair.test.ts`: concurrent repairs learn once; an expired reservation is not a block |
+| #51 | A Watch Me write could keep typed values when unlabelled, or with an empty or partial `private_params`. | The Bridge classifies the request before saving; anything not proven a read gets every input made private; a final sweep refuses to save (`API_LEARN_PRIVATE_VALUE`) if a typed value remains in any encoding. | `api-engine-learning.test.mjs`: no label, empty, partial and declared write; `api-learning.test.ts` |
+| #52 | An API write the site answered 2xx was recorded as passed, with no read-back. | It is recorded as `unverified` (which blocks promotion) and returns `sent: true`, `verification: "unverified"` and a `next_action` to check the site and not resend. | `api-recipe.test.ts` (2xx, no state change); `api-engine-hardening.test.mjs` (fixture shop accepts and changes nothing) |
+| #52 | The early-wait matcher for tier 3 escaped `*`, so wildcard operations missed it. | Host and path compared segment by segment, `*` matching one segment, as the Bridge's matcher does. | `api-capture.test.ts`: wildcard segments |
+
 ## What shipped
 
 | PR | Scope |
@@ -37,10 +51,11 @@ How it fits together:
 5. Writes:
    - need approval on every run;
    - are never resent after they reach the site;
-   - are never learned by running the page.
+   - are never learned by running the page;
+   - are recorded as sent and unverified when the site accepts them, never as passed.
 6. Drift leads to `site_skill repair`, which re-learns the operation as a new candidate revision. Repair:
    - is limited to reads;
-   - has a cap and a cooldown;
+   - has a cap and a cooldown, and is reserved before it starts so two repairs cannot run at once;
    - never changes the active revision.
 
 ## Verified vs experimental
@@ -63,7 +78,10 @@ How it fits together:
   - learns the moved endpoint again into a candidate revision;
   - leaves the active revision unchanged until promotion;
   - refuses a second repair during the cooldown.
-- Watch Me: two search demonstrations learned and verified live. A demonstrated write is learned without being re-sent, keeps no typed value, and asks before running.
+- Watch Me: two search demonstrations learned and verified live. A demonstrated write is learned without being re-sent, keeps no typed value however it is labelled, and asks before running.
+- Tier 3 answers only with the page's request that carried the given inputs.
+- An approved API write is recorded as sent and unverified, never as passed. Approval for it cannot be claimed from a page open in a tab (checked in the e2e).
+- A website that calls an API on another host keeps its own origin as the Site Skill's site, and learning reads only that site's cookies.
 - Helpers: may run a learned read and are refused a learned write (`SUBAGENT_SCOPE_DENIED`).
 - Secrets:
   - cookie and storage values never appear in the Skill library (checked in the e2e);
@@ -101,6 +119,8 @@ Not used:
 
 ## Measured performance
 
+**These are fixture numbers, not a speedup claim.** The "about 8 times" figure below compares one small, local fixture page with one local HTTP call. It is not a universal or real-site speedup, and it should not be quoted as one.
+
 Measured on 2026-10-10 with `npm run bench:api-engine -- --runs 20` on the local fixture shop, in Chromium launched with `--headless=new` on a Linux cloud container. Raw measurements are in [api-engine-benchmark-2026-10-10.json](data/api-engine-benchmark-2026-10-10.json). Each figure is one Bridge `/command` round trip measured by the script, for one search with a correct answer (all 160 runs were correct).
 
 | Mode | Back to back, median (p90) | Spaced 1.1 s, median (p90) |
@@ -114,7 +134,7 @@ Learning one operation took 2656 ms (search), 2705 ms (signed-in orders) and 312
 
 How to read these numbers:
 
-- **Back-to-back tier 1 is about 1 s by design.** The engine waits at least 1 s between calls to one site (upstream's politeness default). Spaced 1.1 s apart, tier 1 is about 8 times faster than driving the page here.
+- **Back-to-back tier 1 is about 1 s by design.** The engine waits at least 1 s between calls to one site (upstream's politeness default). Spaced 1.1 s apart, tier 1 was about 8 times faster than driving this fixture page. That ratio belongs to this fixture only.
 - **Tier 3 is slower than the plain browser path.** It loads the whole page, then waits for the operation's request and a short quiet before judging it. It is the fallback for requests only the page can make, not a speed path.
 - **The fixture is local, small and fast.** On real sites, page loads cost far more and HTTP latency is real. These ratios are not a prediction for any real website.
 
@@ -125,22 +145,36 @@ The benchmark found two problems, which this PR fixes:
 
 The before-fix run (3 runs per mode) is kept in [api-engine-benchmark-2026-10-10-before-fixes.json](data/api-engine-benchmark-2026-10-10-before-fixes.json).
 
+After the review fixes the benchmark was run again with the same settings ([api-engine-benchmark-2026-10-10-after-review.json](data/api-engine-benchmark-2026-10-10-after-review.json)); all 160 runs were correct and the medians moved by a few milliseconds: browser 428 / 429 ms, tier 1 1001 / 53 ms, tier 2 101 / 120 ms, tier 3 573 / 586 ms (back to back / spaced). Checking tier 3's inputs costs nothing measurable here.
+
 ## Test results at release
 
-All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. `npm run gate:api-engine` passed every step:
+All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. These counts are from the corrected integration head, after the review fixes. `npm run gate:api-engine` passed every step:
 
 | Step | Result |
 |---|---|
 | vendor check | Passed |
-| Bridge tests | 98/98 |
-| Extension tests | 777/777 |
+| Bridge tests | 101/101 |
+| Extension tests | 784/784 |
 | Typecheck | Passed |
 | Build | Passed |
 | Bridge bundle | Passed |
 | MV3 contract | Passed |
-| `smoke:api-engine` (real Chromium, local fixture) | 35/35 |
-| `smoke:sites` | 21/21 |
-| `smoke:bridge` | 53/53 |
+| `smoke:api-engine` (real Chromium, local fixture) | 36/36 |
+
+Regression suites for the areas the review named, also in real Chromium against local fixtures:
+
+| Suite | Covers | Result |
+|---|---|---|
+| `smoke:sites` | ordinary form Site Skills and site commands | 21/21 |
+| `smoke:bridge` | Bridge commands and approval | 53/53 |
+| `smoke:memory` | Memory v2 | 31/31 |
+| `smoke:helpers` | helper (Task DAG worker) policy | 11/11 |
+| `smoke:learning` | Watch Me and Skill learning | 24/24 |
+| `smoke:e2e` | extension smoke | 13/13 |
+| `smoke:agent` | agent loop | 13/13 |
+
+None of these is a real-website test.
 
 ## Limitations
 
@@ -164,9 +198,10 @@ This should be done once, by a person, on the release-candidate build, in their 
 4. **A protected site:** on a site with bot protection, confirm the result is `blocked`, or that it falls through to tier 3, and that it never loops.
 5. **Watch Me:**
    - demonstrate a search twice and learn it with `from_watch`;
-   - demonstrate a harmless write (for example, adding an item to a wishlist, then removing it by hand). Confirm the learned write asks before it runs and is not sent while learning.
+   - demonstrate a harmless write (for example, adding an item to a wishlist, then removing it by hand). Confirm the learned write asks before it runs and is not sent while learning, that no typed value appears in the exported Skill, and that an approved run is reported as sent and unverified (then check the site by hand).
 6. **Repair on a real site:** if a learned operation drifts during the acceptance window, run `site_skill repair`. Then compare and promote by hand.
-7. **Multiple profiles:** confirm that a Skill learned in one Chrome profile does not carry that profile's session into another.
+7. **A site whose API is on another host** (for example `www.` calling `api.`): confirm the Skill is filed under the website, the approval names both hosts, and no tracker cookies were read.
+8. **Multiple profiles:** confirm that a Skill learned in one Chrome profile does not carry that profile's session into another.
 
 ---
 
