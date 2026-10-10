@@ -16,7 +16,7 @@ function sameValues(a, b) {
  * runs' data. call: the transport (tier 1 by default; the extension passes a
  * tier-2 result in when a page has to send it).
  */
-export async function verifyUnseenInput(contractInput, args, { examples = [], example_fingerprints: fingerprints = [], provided, call, fetchImpl, minIntervalMs } = {}) {
+export async function verifyUnseenInput(contractInput, args, { examples = [], example_fingerprints: fingerprints = [], provided, call, response: given, fetchImpl, minIntervalMs } = {}) {
   const contract = parseContract(contractInput);
   const checkedAt = new Date().toISOString();
   const argNames = Object.keys(args || {});
@@ -36,7 +36,8 @@ export async function verifyUnseenInput(contractInput, args, { examples = [], ex
   } else if (examples.some((example) => sameValues(args, example))) {
     outcome = { check: check(false, "the third input repeats a learning example; give a value neither run used") };
   } else {
-    const response = call ? await call(contract, args) : await callTier1(contract, args, { provided, fetchImpl, minIntervalMs });
+    // `given`: the extension already ran it (tier 2 or 3, through the dispatcher)
+    const response = given || (call ? await call(contract, args) : await callTier1(contract, args, { provided, fetchImpl, minIntervalMs }));
     const extra = { tier: response.tier, class: response.class, ...(response.ok ? { item_count: response.item_count } : {}) };
     if (!response.ok) {
       outcome = { check: check(false, response.reason || response.class, extra), response };

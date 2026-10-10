@@ -85,6 +85,44 @@ if (q) req.then((r) => r.json()).then((data) => {
       return;
     }
 
+    // a signed-in page: its API answers only with the session cookie
+    if (url.pathname === "/orders" || url.pathname === "/guarded") {
+      const api = url.pathname === "/orders" ? "/api/orders" : "/api/guarded";
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Shop</title><ul id="results"></ul>
+<script>
+const q = new URLSearchParams(location.search).get("q");
+// /guarded: a one-time value made fresh by each page load, as anti-bot scripts do
+const headers = ${url.pathname === "/guarded" ? '{ accept: "application/json", "x-page-nonce": crypto.randomUUID() }' : '{ accept: "application/json" }'};
+if (q) fetch(${JSON.stringify(api)} + "?q=" + encodeURIComponent(q), { headers, credentials: "same-origin" })
+  .then((r) => r.json()).then((data) => {
+    for (const item of data.results || []) { const li = document.createElement("li"); li.textContent = item.title; document.getElementById("results").append(li); }
+  });
+</script>`);
+      return;
+    }
+
+    if (url.pathname === "/api/orders") {
+      if (!/(?:^|;\s*)sid=valid-session-123456/.test(req.headers.cookie || "")) {
+        json(401, { error: "Please sign in", require_login: true });
+        return;
+      }
+      json(200, { results: catalog(url.searchParams.get("q")).map((item) => ({ ...item, ordered: true })) });
+      return;
+    }
+
+    if (url.pathname === "/api/guarded") {
+      const nonce = String(req.headers["x-page-nonce"] || "");
+      state.nonces ??= new Set();
+      if (!/^[0-9a-f-]{36}$/.test(nonce) || state.nonces.has(nonce)) {
+        json(403, { error: "request signature rejected" });
+        return;
+      }
+      state.nonces.add(nonce);
+      json(200, { results: catalog(url.searchParams.get("q")) });
+      return;
+    }
+
     if (url.pathname === "/api/config") {
       json(200, { theme: "light", build: "2026.10.1", features: ["search"] });
       return;

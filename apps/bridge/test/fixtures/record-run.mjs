@@ -26,13 +26,25 @@ async function exchange(id, resourceType, url, init = {}) {
 
 /** kind: "rest" (/search), "graphql" (/gql-search), "form" (/form-page). */
 export async function recordRun(origin, kind, term, { queryId = "Qa1B2c3D4e5F6g7H8i9J", cookies = [], storage = {}, searchPath = "/api/search", apiHeaders = {} } = {}) {
-  const page = { rest: "/search", graphql: "/gql-search", form: "/form-page" }[kind];
+  const page = { rest: "/search", graphql: "/gql-search", form: "/form-page", orders: "/orders", guarded: "/guarded" }[kind];
   const pageUrl = `${origin}${page}?q=${encodeURIComponent(term)}`;
   const exchanges = [await exchange(1, "document", pageUrl)];
   exchanges.push(await exchange(2, "xhr", `${origin}/api/config`, { headers: { accept: "application/json", referer: pageUrl } }));
   if (kind === "rest") {
     exchanges.push(
       await exchange(3, "fetch", `${origin}${searchPath}?q=${encodeURIComponent(term)}&page=1&lang=en`, { headers: { accept: "application/json", referer: pageUrl, ...apiHeaders } })
+    );
+  } else if (kind === "orders" || kind === "guarded") {
+    const cookie = cookies.map((item) => `${item.name}=${item.value}`).join("; ");
+    exchanges.push(
+      await exchange(3, "fetch", `${origin}/api/${kind}?q=${encodeURIComponent(term)}`, {
+        headers: {
+          accept: "application/json",
+          referer: pageUrl,
+          ...(cookie ? { cookie } : {}),
+          ...(kind === "guarded" ? { "x-page-nonce": crypto.randomUUID() } : {})
+        }
+      })
     );
   } else if (kind === "graphql") {
     const body = JSON.stringify({

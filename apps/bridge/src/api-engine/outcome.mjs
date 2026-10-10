@@ -72,11 +72,13 @@ export function dataFingerprint(data) {
 }
 
 /** The fields every API result carries, whichever tier produced it. */
-export function result({ ok, cls, tier, status, ms, data, truncated, reason, next, operation_id, fetched_at }) {
+export function result({ ok, cls, tier, status, ms, data, truncated, reason, next, operation_id, fetched_at, sent }) {
   return {
     ok,
     class: cls,
     tier,
+    /** whether a request left for the site; a write that was sent is never sent again */
+    ...(sent !== undefined ? { sent } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(ms !== undefined ? { ms } : {}),
     ...(ok ? { data, item_count: itemCount(data) } : {}),
