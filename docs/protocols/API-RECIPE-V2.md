@@ -91,7 +91,7 @@ Errors: `API_LEARN_INPUT` (bad name, page_url without a `{param}` for each input
 |---|---|---|---|
 | 1 | The Bridge, plain HTTP | none from the browser (no cookie export) | `min_tier` above 1, a page-only value, or a reference with no value (`unavailable`/`auth`, nothing sent) |
 | 2 | A page of the site: a background tab on the trigger page's origin (`/robots.txt`, a light same-origin document) runs `fetch()` with `credentials: "include"` and `redirect: "manual"` | the browser's own cookies; storage references read from that page for this call | `min_tier` 3, or a page-only header |
-| 3 | The site's own page: a background tab loads the trigger URL with the inputs, BrowserHarness records the network and the Bridge finds the request matching the operation and judges its answer | everything the page has | writes, and triggers with UI steps (not replayed yet) |
+| 3 | The site's own page: a background tab loads the trigger URL with the inputs, BrowserHarness records the network and the Bridge finds the request matching the operation **that carries the inputs given** (every param slot holds the requested value) and judges its answer; if the page sent the request with other values, or only its default, the run fails as `endpoint_drift` and no other request's data is returned | everything the page has | writes, and triggers with UI steps (not replayed yet) |
 
 The Bridge builds every request (`page_request`), judges every answer (`call`, `page_answer`, `page_run`) and applies tier 1's redirect policy; the extension only does what needs the browser. Tabs opened for tiers 2 and 3 are closed after the call.
 
