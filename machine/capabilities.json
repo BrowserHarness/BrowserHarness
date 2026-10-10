@@ -206,6 +206,52 @@
           "closes": "task-owned tabs only",
           "preserves": "borrowed user tabs",
           "removes": "task-session state"
+        },
+        "native_api_engine": {
+          "status": "v1, fixture-verified; real-site acceptance pending",
+          "spec": "docs/protocols/API-RECIPE-V2.md",
+          "adr": "docs/architecture/API-ENGINE-ADR.md",
+          "report": "docs/reports/NATIVE-API-ENGINE-V1.md",
+          "upstream": {
+            "repo": "goodnight000/api-anything",
+            "commit": "fe5cca70fe145634e49a1c9ba1f3e8250b291bea",
+            "license": "MIT",
+            "vendored_at": "apps/bridge/vendor/api-anything"
+          },
+          "recipe_step": "api_operation (API Recipe v2 contract, contract_version 2)",
+          "learning": [
+            "site_skill learn_api: two page runs + live unseen-input check",
+            "site_skill learn_api from_watch: one or two Watch Me recordings (only way to learn a write)"
+          ],
+          "tiers": {
+            "1": "Bridge HTTP, no browser cookies",
+            "2": "same request from a background tab of the site (robots.txt document), credentials included",
+            "3": "the site's own page makes the request; Bridge matches and judges it"
+          },
+          "dispatch": "remembered tier first, then cheapest, never below min_tier; reads fall through on unavailable/auth/blocked/network; writes only when nothing was sent",
+          "result_classes": [
+            "ok",
+            "input",
+            "auth",
+            "rate_limited",
+            "blocked",
+            "network",
+            "schema_drift",
+            "endpoint_drift",
+            "ambiguous_write",
+            "approval_required",
+            "unavailable"
+          ],
+          "writes": "approval on every run; never resent after reaching the site; ambiguous_write says check the site",
+          "repair": "site_skill repair: reads only, new candidate revision only, <=3 per 24 h, 60 min after a failure, 5 min apart",
+          "secrets": "cookie/storage values used transiently while learning; contracts hold reference names only; fail-closed secret scan; private inputs removed from the contract",
+          "helpers": "read-only workers may run learned API reads only (api_read_only)",
+          "procedural_memory": "api_operation steps reduced to method + path template",
+          "gates": [
+            "npm run gate:api-engine",
+            "npm run smoke:api-engine",
+            "npm run bench:api-engine"
+          ]
         }
       }
     },

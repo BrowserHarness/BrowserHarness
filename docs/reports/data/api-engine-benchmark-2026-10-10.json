@@ -1,0 +1,1664 @@
+{
+  "kind": "browserharness-api-engine-benchmark",
+  "started_at": "2026-10-10T07:56:11.848Z",
+  "environment": {
+    "node": "v22.22.0",
+    "platform": "linux 6.18.44-fc-v114",
+    "cpus": "4 x Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "browser": "Chromium (playwright-core, --headless=new)",
+    "site": "local fixture shop on 127.0.0.1 (apps/bridge/test/fixtures/api-shop.mjs)"
+  },
+  "runs_per_mode": 20,
+  "learning": [
+    {
+      "operation": "search",
+      "ms": 2656,
+      "verification": "verified",
+      "answered_by_tier": 1,
+      "min_tier": 1
+    },
+    {
+      "operation": "orders",
+      "ms": 2705,
+      "verification": "verified",
+      "answered_by_tier": 2,
+      "min_tier": 1
+    },
+    {
+      "operation": "guarded",
+      "ms": 3122,
+      "verification": "verified",
+      "answered_by_tier": 3,
+      "min_tier": 3
+    }
+  ],
+  "measurements": [
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 426
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 414
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 435
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 415
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 419
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 409
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 419
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 419
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 418
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 421
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 416
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 415
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 420
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 416
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 430
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 419
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 436
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 427
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 429
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 413
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 37,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 999,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 1000,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 998,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 1006,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 994,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 1002,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 995,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 1003,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 999,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 998,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 1004,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 1003,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 1001,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 993,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 1008,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 1000,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 996,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 1000,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 1000,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 124,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 114,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 111,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 99,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 95,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 88,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 119,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 100,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 99,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 106,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 101,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 98,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 106,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 96,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 105,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 94,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 116,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 109,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 100,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 93,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 577,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 563,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 551,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 579,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 596,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 577,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 548,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 555,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 554,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 577,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 570,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 558,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 588,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 575,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 564,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 546,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 557,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 557,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 577,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 564,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 427
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 429
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 438
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 417
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 416
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 416
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 415
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 439
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 415
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 414
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 422
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 413
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 425
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 425
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 413
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 426
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 420
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 433
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 424
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 415
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 46,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 48,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 44,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 56,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 56,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 56,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 58,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 50,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 45,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 50,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 52,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 51,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 50,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 47,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 58,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 54,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 58,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 59,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 64,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 50,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 123,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 115,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 122,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 113,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 115,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 110,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 102,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 109,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 116,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 116,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 125,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 122,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 133,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 111,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 118,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 120,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 119,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 118,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 117,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 123,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 570,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 566,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 575,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 4,
+      "term": "laptops",
+      "ok": true,
+      "ms": 579,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 5,
+      "term": "monitors",
+      "ok": true,
+      "ms": 572,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 6,
+      "term": "tablets",
+      "ok": true,
+      "ms": 575,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 7,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 577,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 8,
+      "term": "laptops",
+      "ok": true,
+      "ms": 563,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 9,
+      "term": "monitors",
+      "ok": true,
+      "ms": 580,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 10,
+      "term": "tablets",
+      "ok": true,
+      "ms": 572,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 11,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 568,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 12,
+      "term": "laptops",
+      "ok": true,
+      "ms": 572,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 13,
+      "term": "monitors",
+      "ok": true,
+      "ms": 593,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 14,
+      "term": "tablets",
+      "ok": true,
+      "ms": 573,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 15,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 604,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 16,
+      "term": "laptops",
+      "ok": true,
+      "ms": 594,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 17,
+      "term": "monitors",
+      "ok": true,
+      "ms": 578,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 18,
+      "term": "tablets",
+      "ok": true,
+      "ms": 571,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 19,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 580,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 20,
+      "term": "laptops",
+      "ok": true,
+      "ms": 594,
+      "tier": 3,
+      "class": "ok"
+    }
+  ],
+  "notes": [
+    "Local fixture only; no real website was measured.",
+    "back_to_back runs include the engine's per-site pacing (1 s minimum between calls to one site); spaced runs wait 1.1 s first, outside the measured time.",
+    "Each measurement is one Bridge /command round trip measured by this script, including the Bridge, the extension and the browser."
+  ],
+  "skill_id": "SK-SITE-API-D8A8E16A-EEC",
+  "summary": [
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 409,
+      "median_ms": 419,
+      "p90_ms": 430,
+      "max_ms": 436
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 37,
+      "median_ms": 1000,
+      "p90_ms": 1004,
+      "max_ms": 1008,
+      "tiers_used": [
+        1
+      ]
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 88,
+      "median_ms": 101,
+      "p90_ms": 116,
+      "max_ms": 124,
+      "tiers_used": [
+        2
+      ]
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 546,
+      "median_ms": 564,
+      "p90_ms": 579,
+      "max_ms": 596,
+      "tiers_used": [
+        3
+      ]
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 413,
+      "median_ms": 422,
+      "p90_ms": 433,
+      "max_ms": 439
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 44,
+      "median_ms": 52,
+      "p90_ms": 58,
+      "max_ms": 64,
+      "tiers_used": [
+        1
+      ]
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 102,
+      "median_ms": 118,
+      "p90_ms": 123,
+      "max_ms": 133,
+      "tiers_used": [
+        2
+      ]
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "runs": 20,
+      "correct": 20,
+      "min_ms": 563,
+      "median_ms": 575,
+      "p90_ms": 594,
+      "max_ms": 604,
+      "tiers_used": [
+        3
+      ]
+    }
+  ],
+  "finished_at": "2026-10-10T07:58:54.501Z"
+}

@@ -35,6 +35,16 @@ export function changesPage(
   return PAGE_CHANGING_TOOLS.includes(tool);
 }
 
+/**
+ * A Site Skill run of a learned API operation answers without any page: there
+ * is nothing to let settle or to look at afterwards.
+ */
+export function ranWithoutPage(tool: ToolName, result: ToolResult): boolean {
+  if (tool !== "site_skill") return false;
+  const run = (result.data as { run?: { output?: { api?: unknown } } } | undefined)?.run;
+  return Boolean(run?.output?.api);
+}
+
 /** How long to let the page react before looking again. */
 export function settleMsAfter(tool: ToolName): number {
   return WAITS_FOR_LOAD.includes(tool) ? 0 : 450;
