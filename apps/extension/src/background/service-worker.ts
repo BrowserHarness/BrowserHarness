@@ -51,7 +51,8 @@ import {
   requestBridgeLlm,
   sendBridgeEvent,
   startBridgeClient,
-  type BridgeCommand
+  type BridgeCommand,
+  requestBridgeApi
 } from "./bridge-client";
 import { originPatternForUrl } from "../settings/browser-access";
 import { readPage } from "./read-page";
@@ -94,6 +95,9 @@ import { captureCdpScreenshot } from "./cdp-screenshot";
 import { selectOptions } from "./cdp-select";
 import { evaluatePageExpression } from "./page-evaluate";
 import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
+import { collectApiCapture, waitForNetworkQuiet } from "./api-capture";
+import { learnApiOperation, type ApiLearnInput } from "./api-learning";
+import { apiRecipeNeedsApproval, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
   runSiteSkillRecipe,
@@ -363,9 +367,10 @@ async function siteCommandsTool(
     ? await chrome.tabs.get(session.current_tab_id).catch(() => null)
     : null;
   const ready =
-    command.kind === "read"
+    command.needs_page === false ||
+    (command.kind === "read"
       ? sameOrigin(current?.url, command.origin)
-      : samePage(current?.url, command.entry_url);
+      : samePage(current?.url, command.entry_url));
   if (!ready) {
     // Never repurpose the person's own tab: open the site in a task tab.
     const opened = await runTool("open_tab", { url: command.entry_url }, taskId, taskTitle);
@@ -449,6 +454,162 @@ async function activeWebTab(openIfNone: boolean): Promise<chrome.tabs.Tab | null
     .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
   if (recent?.id) return recent;
   return openIfNone ? chrome.tabs.create({ active: false }) : null;
+}
+
+/**
+ * One run of a page for API learning in a background tab this task owns: the
+ * capture starts before the page loads and the tab closes afterwards.
+ */
+async function runPageForApiLearning(url: string, session: TaskSession | null) {
+  const tab = await chrome.tabs.create({ url: "about:blank", active: false });
+  if (!tab?.id) throw new Error("Chrome did not open a tab for the run");
+  const tabId = tab.id;
+  let owned = session;
+  try {
+    if (owned) {
+      owned = await ownTab(owned, tabId);
+      owned = await groupOwnedTab(owned, tabId);
+    }
+    await startNetworkCapture(tabId, 800);
+    await chrome.tabs.update(tabId, { url });
+    const ready = await waitForTabUsable(tabId);
+    await waitForNetworkQuiet(tabId);
+    return await collectApiCapture(tabId, ready.url || url, [url]);
+  } finally {
+    await stopNetworkCapture(tabId).catch(() => undefined);
+    await chrome.tabs.remove(tabId).catch(() => undefined);
+    if (owned) await removeSessionTab(owned, tabId).catch(() => undefined);
+  }
+}
+
+async function learnApiTool(
+  input: Record<string, unknown>,
+  session: TaskSession | null
+): Promise<ToolResult> {
+  return learnApiOperation(
+    {
+      runPage: (url) => runPageForApiLearning(url, session),
+      bridge: (action, payload) => requestBridgeApi(action, payload, { timeoutMs: 120_000 }),
+      loadBase: async (id) => {
+        const revision = await getSiteSkillExecutableRevision(id);
+        return revision ? { candidate: revision.candidate, revision_id: revision.revision_id } : null;
+      },
+      save: (candidate, reason) => saveSiteSkillCandidate(candidate, { reason }),
+      evaluate: async (id, revisionId, entry) => {
+        await recordSiteSkillEvaluation(id, revisionId, entry);
+      },
+      execution: (id, revisionId, entry) => recordSiteSkillExecutionEvidence(id, revisionId, entry),
+      now: () => new Date().toISOString(),
+      newId: () => crypto.randomUUID().slice(0, 12)
+    },
+    input as unknown as ApiLearnInput
+  );
+}
+
+/** Tier 1 through the Bridge. Hybrid tiers (in-page fetch, UI) arrive with the dispatcher. */
+async function callApiOperation(
+  contract: ApiOperationContract,
+  args: Record<string, unknown>,
+  approved: boolean
+): Promise<ApiCallResult> {
+  const reply = await requestBridgeApi("call", { contract, args }, { approved });
+  if (reply.ok) return reply.data as ApiCallResult;
+  return {
+    ok: false,
+    class: reply.error?.code === "API_ENGINE_UNAVAILABLE" || reply.error?.code === "BRIDGE_DISCONNECTED" ? "unavailable" : "network",
+    tier: 1,
+    reason: reply.error?.message || "The helper app could not send it",
+    operation_id: contract.operation_id,
+    fetched_at: new Date().toISOString(),
+    fresh: true
+  };
+}
+
+/**
+ * site_skill run for an API Recipe v2 recipe: no page or tab is needed. Reads
+ * run without a prompt; anything else needs the person's approval first, and
+ * one that may have run is never offered again.
+ */
+async function runApiOperationRecipe(
+  input: Record<string, unknown>,
+  revision: { revision_id: string; candidate: import("../runtime/site-skill").SiteCandidateSkill },
+  recipeId: string,
+  options: ToolExecutionOptions
+): Promise<ToolResult> {
+  const existing = revision.candidate;
+  const id = String(input.id);
+  const recipe = existing.recipes.find((item) => item.id === recipeId)!;
+  const step = recipe.steps.find((item) => item.kind === "api_operation");
+  if (apiRecipeNeedsApproval(recipe) && !options.approvalGranted) {
+    return {
+      ok: false,
+      data: { revision_id: revision.revision_id },
+      error: {
+        code: "APPROVAL_REQUIRED",
+        message: `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}? It may change data there (${step && step.kind === "api_operation" ? step.contract.side_effect_basis : "not known to be read-only"}).`
+      }
+    };
+  }
+  const parameters =
+    input.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters)
+      ? (input.parameters as Record<string, unknown>)
+      : {};
+  const startedAt = new Date().toISOString();
+  const evidenceId = existing.provenance.evidence_id;
+  try {
+    const run = await runSiteSkillRecipe({
+      tab_id: -1,
+      candidate: existing,
+      recipe_id: recipe.id,
+      parameters,
+      api_call: (contract, args) => callApiOperation(contract, args, options.approvalGranted === true)
+    });
+    await recordSiteSkillEvaluation(id, revision.revision_id, {
+      kind: "execution",
+      outcome: "passed",
+      detail: `API operation ${recipe.id} answered over tier ${run.output?.api?.tier ?? "?"} with ${run.output?.api?.item_count ?? 0} items`
+    });
+    const execution = await recordSiteSkillExecutionEvidence(id, revision.revision_id, {
+      recipe_id: recipe.id,
+      started_at: startedAt,
+      outcome: "passed",
+      evidence_id: evidenceId,
+      executed_steps: run.executed_steps,
+      submitted: run.submitted,
+      parameter_names: Object.keys(parameters).sort()
+    });
+    return { ok: true, data: { candidate_id: existing.id, revision_id: revision.revision_id, run, execution } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Site Skill API operation failed";
+    const code = error instanceof SiteSkillRunError && error.code ? error.code : "SITE_SKILL_RUN_FAILED";
+    await recordSiteSkillEvaluation(id, revision.revision_id, { kind: "execution", outcome: "failed", detail: message }).catch(() => undefined);
+    await recordSiteSkillExecutionEvidence(id, revision.revision_id, {
+      recipe_id: recipe.id,
+      started_at: startedAt,
+      outcome: "failed",
+      evidence_id: evidenceId,
+      executed_steps: 0,
+      submitted: error instanceof SiteSkillRunError ? error.submitted : false,
+      parameter_names: Object.keys(parameters).sort(),
+      error_code: code,
+      error_message: message
+    }).catch(() => null);
+    const ambiguous = code === "API_AMBIGUOUS_WRITE";
+    return {
+      ok: false,
+      data: {
+        candidate_id: existing.id,
+        revision_id: revision.revision_id,
+        refinement_recommended: !ambiguous && /DRIFT/.test(code),
+        next_action: ambiguous
+          ? "check the site to see whether it happened; do not run it again"
+          : /DRIFT/.test(code)
+            ? "site_skill learn_api again for this operation"
+            : "report the failure"
+      },
+      error: { code, message }
+    };
+  }
 }
 
 async function requestSession(
@@ -1177,6 +1338,31 @@ async function runTool(
         ? input.action
         : "create";
 
+    if (action === "learn_api") {
+      return learnApiTool(input, session);
+    }
+
+    if (action === "run" && typeof input.id === "string" && input.id.trim()) {
+      // an API Recipe v2 recipe needs no tab; others fall through to the page path
+      const revision = await getSiteSkillExecutableRevision(
+        input.id,
+        typeof input.revision_id === "string" ? input.revision_id : undefined
+      );
+      if (revision) {
+        try {
+          const recipe = selectSiteSkillRecipe(
+            revision.candidate,
+            typeof input.recipe_id === "string" ? input.recipe_id : undefined
+          );
+          if (recipe.steps.some((step) => step.kind === "api_operation")) {
+            return runApiOperationRecipe(input, revision, recipe.id, options);
+          }
+        } catch {
+          // reported by the page path below with its usual errors
+        }
+      }
+    }
+
     if (action === "list") {
       return {
         ok: true,
@@ -1467,7 +1653,7 @@ async function runTool(
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, verify, run, refine, list, get, history, compare, promote, rollback, or delete"
+            "site_skill action must be create, learn_api, verify, run, refine, list, get, history, compare, promote, rollback, or delete"
         }
       };
     }
@@ -1736,19 +1922,23 @@ async function runTool(
                 outcome: "failed",
                 evidence_id: apiEvidenceId,
                 executed_steps: 0,
-                submitted: false,
+                submitted: error instanceof SiteSkillRunError ? error.submitted : false,
                 parameter_names: Object.keys(apiParameters).sort(),
                 error_code: code,
                 error_message: message
               }
             ).catch(() => null);
+            // a write that may have run is never offered again
+            const ambiguous = code === "API_AMBIGUOUS_WRITE";
             return {
               ok: false,
               data: {
                 candidate_id: existing.id,
                 revision_id: revision.revision_id,
-                refinement_recommended: true,
-                next_action: "site_skill refine"
+                refinement_recommended: !ambiguous,
+                next_action: ambiguous
+                  ? "check the site to see whether it happened; do not run it again"
+                  : "site_skill refine"
               },
               error: { code, message }
             };

@@ -68,6 +68,28 @@ if (q) fetch(${JSON.stringify(state.searchPath)} + "?q=" + encodeURIComponent(q)
       return;
     }
 
+    if (url.pathname === "/gql-search" || url.pathname === "/form-page") {
+      const graph = url.pathname === "/gql-search";
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Shop</title><ul id="results"></ul>
+<script>
+const q = new URLSearchParams(location.search).get("q");
+const req = ${graph
+        ? `fetch("/graphql", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operationName: "SearchProducts", variables: { filter: { term: q }, first: 10 }, extensions: { persistedQuery: { version: 1, sha256Hash: ${JSON.stringify(state.queryId)} } } }) })`
+        : `fetch("/api/form-search", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: "f.req=" + encodeURIComponent(JSON.stringify({ query: q, lang: "en" })) + "&at=public" })`};
+if (q) req.then((r) => r.json()).then((data) => {
+  const items = (data.data && data.data.search.products) || data.results || [];
+  for (const item of items) { const li = document.createElement("li"); li.textContent = item.name || item.title; document.getElementById("results").append(li); }
+});
+</script>`);
+      return;
+    }
+
+    if (url.pathname === "/api/config") {
+      json(200, { theme: "light", build: "2026.10.1", features: ["search"] });
+      return;
+    }
+
     if (url.pathname === state.searchPath && req.method === "GET") {
       const q = url.searchParams.get("q");
       if (!q) {

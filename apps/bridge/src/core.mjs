@@ -2,6 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { createPairingManager, extensionIdFromOrigin } from "./pairing.mjs";
+import { apiErrorCode } from "./api-engine/service.mjs";
 
 export const BRIDGE_PROTOCOL_VERSION = "0.1";
 
@@ -88,6 +89,7 @@ export function createBridgeServer({
   token,
   commandTimeoutMs = 30_000,
   mcpManager = null,
+  apiEngine = null,
   llmManager = null,
   allowRemote = false,
   onExtensionEvent = null,
@@ -216,7 +218,8 @@ export function createBridgeServer({
           mcp_client_enabled: Boolean(mcpManager),
           mcp_servers_configured: configuredMcpServers,
           // Availability, startup failures, exits and operation errors per server.
-          mcp_server_health: mcpManager?.diagnostics?.() || {}
+          mcp_server_health: mcpManager?.diagnostics?.() || {},
+          api_engine_enabled: Boolean(apiEngine)
         });
         return;
       }
@@ -740,6 +743,33 @@ export function createBridgeServer({
                 }
               })
             );
+          }
+          return;
+        }
+
+        if (message.type === "api_request" && typeof message.id === "string") {
+          const send = (body) => ws.send(JSON.stringify({ type: "api_result", id: message.id, ...body }));
+          if (extension !== ws) {
+            send({ ok: false, error: { code: "API_EXTENSION_REQUIRED", message: "API engine requests must come from the paired BrowserHarness extension" } });
+            return;
+          }
+          if (!apiEngine) {
+            send({ ok: false, error: { code: "API_ENGINE_UNAVAILABLE", message: "This BrowserHarness Bridge has no API engine" } });
+            return;
+          }
+          try {
+            // `approved` is the extension's record that the person approved this write
+            const data = await apiEngine.handle(message.action, message.payload, { approved: message.approved === true });
+            send({ ok: true, data });
+          } catch (error) {
+            send({
+              ok: false,
+              error: {
+                code: apiErrorCode(error),
+                message: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+                ...(Array.isArray(error?.candidates) ? { candidates: error.candidates } : {})
+              }
+            });
           }
           return;
         }

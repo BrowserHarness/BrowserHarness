@@ -7,6 +7,8 @@ export interface NetworkRecord {
   request_id: string;
   url: string;
   method: string;
+  /** CDP resource type, lower-cased: document, xhr, fetch, script, image… */
+  resource_type?: string;
   request_headers?: Record<string, string>;
   post_data?: string;
   status?: number;
@@ -65,6 +67,11 @@ subscribeCdpEvents((tabId, method, params) => {
       request_id: requestId,
       url: String(request.url || existing?.url || ""),
       method: String(request.method || existing?.method || "GET"),
+      ...(typeof payload.type === "string"
+        ? { resource_type: payload.type.toLowerCase() }
+        : existing?.resource_type
+          ? { resource_type: existing.resource_type }
+          : {}),
       request_headers:
         headers(request.headers) || existing?.request_headers,
       ...(typeof request.postData === "string"
