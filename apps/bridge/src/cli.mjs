@@ -46,6 +46,8 @@ import {
   createMcpClientManager,
   DEFAULT_MCP_SERVERS_FILE
 } from "./mcp-client.mjs";
+import { API_ANYTHING_SERVER_ID } from "./api-engine/upstream-adapter.mjs";
+import { seedBundledSites, serveApiAnythingMcp, upstreamLogin } from "./api-engine/upstream-mcp.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 // Set by the single-file build (scripts/build-bridge.mjs).
@@ -991,11 +993,134 @@ async function uninstall(config) {
   print({ uninstalled: true, service: service.file, agents, purged: flag("purge") });
 }
 
+/**
+ * `api-anything enable|disable|status|login <site> [--profile "Chrome/Profile 1"]`:
+ * the read-only API Anything compatibility adapter, registered as the built-in
+ * MCP server "api-anything". Login is a person at a terminal choosing which
+ * browser profile's session the adapter may use; agents can only refresh that.
+ */
+async function apiAnythingCommand(args) {
+  const sub = args[0] || "status";
+  const readConfig = async () => {
+    try {
+      return JSON.parse(await readFile(DEFAULT_MCP_SERVERS_FILE, "utf8"));
+    } catch (error) {
+      if (error?.code === "ENOENT") return { mcpServers: {} };
+      throw error;
+    }
+  };
+  const writeConfig = async (value) => {
+    await mkdir(path.dirname(DEFAULT_MCP_SERVERS_FILE), { recursive: true });
+    await writeFile(DEFAULT_MCP_SERVERS_FILE, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+  };
+  if (sub === "enable" || sub === "disable") {
+    const current = await readConfig();
+    const servers = { ...(current.mcpServers || {}) };
+    if (sub === "enable") servers[API_ANYTHING_SERVER_ID] = { builtin: API_ANYTHING_SERVER_ID };
+    else delete servers[API_ANYTHING_SERVER_ID];
+    await writeConfig({ ...current, mcpServers: servers });
+    print({
+      server: API_ANYTHING_SERVER_ID,
+      enabled: sub === "enable",
+      config: DEFAULT_MCP_SERVERS_FILE,
+      note: sub === "enable"
+        ? "Read-only. Restart the Bridge, then choose its trust level in BrowserHarness Settings."
+        : "Restart the Bridge to apply."
+    });
+    return;
+  }
+  if (sub === "status") {
+    const manager = createMcpClientManager();
+    try {
+      const servers = await manager.listServers();
+      const server = servers.find((item) => item.id === API_ANYTHING_SERVER_ID);
+      if (!server) {
+        print({ server: API_ANYTHING_SERVER_ID, enabled: false, next: "browserharness-bridge api-anything enable" });
+        return;
+      }
+      let tools = [];
+      let error;
+      try {
+        tools = (await manager.listTools(API_ANYTHING_SERVER_ID)).tools.map((tool) => tool.name);
+      } catch (failure) {
+        error = failure instanceof Error ? failure.message : String(failure);
+      }
+      print({
+        server: API_ANYTHING_SERVER_ID,
+        enabled: server.enabled,
+        available: !error,
+        tools,
+        diagnostics: manager.diagnostics(API_ANYTHING_SERVER_ID),
+        ...(error ? { error } : {})
+      });
+    } finally {
+      await manager.closeAll();
+    }
+    return;
+  }
+  if (sub === "login") {
+    const target = args[1];
+    if (!target) throw new Error('Usage: browserharness-bridge api-anything login <site> [--profile "Chrome/Profile 1"]');
+    const [major, minor] = process.versions.node.split(".").map(Number);
+    if (major < 22 || (major === 22 && minor < 13)) {
+      throw new Error(`API_ANYTHING_NODE_UNSUPPORTED: importing a browser session needs Node 22.13 or newer (node:sqlite); this is ${process.versions.node}`);
+    }
+    await seedBundledSites();
+    const login = upstreamLogin;
+    const resolved = login.resolveLoginTarget(target);
+    try {
+      const imported = await login.importSession(resolved.site, resolved.url, {
+        loginCookies: resolved.loginCookies,
+        profile: option("profile"),
+        pushProfile: false
+      });
+      if (!imported) {
+        print({ ok: false, site: resolved.site, error: "no browser profile on this computer is signed in to this site" });
+        process.exitCode = 1;
+        return;
+      }
+      print({
+        ok: true,
+        site: resolved.site,
+        source: imported.source,
+        cookies: login.cookieNames(imported.cookies),
+        logged_in: login.loggedIn(imported.cookies, resolved.loginCookies)
+      });
+    } catch (error) {
+      if (error?.name === "AmbiguousProfile") {
+        print({
+          ok: false,
+          site: resolved.site,
+          error: error.message,
+          next: `browserharness-bridge api-anything login ${resolved.site} --profile "<Browser/Profile>"`
+        });
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+  throw new Error("Usage: browserharness-bridge api-anything [enable|disable|status|login <site> [--profile ...]]");
+}
+
 const command = process.argv[2] || "start";
+
+if (command === "api-anything-mcp") {
+  // Started by the Bridge's MCP client as the built-in "api-anything" server.
+  // stdout is the MCP protocol: nothing else may print there.
+  await serveApiAnythingMcp();
+} else {
+  await runCommand();
+}
+
+async function runCommand() {
 const { config, created } = await ensureConfig();
 
 try {
-  if (command === "serve") {
+  if (command === "api-anything") {
+    await apiAnythingCommand(process.argv.slice(3).filter((arg, index, all) => !arg.startsWith("--") && all[index - 1] !== "--profile"));
+  } else if (command === "serve") {
     await serve(config);
   } else if (command === "mcp") {
     await serveBrowserHarnessMcp({ ...config, host: localHost(config) });
@@ -1057,7 +1182,7 @@ try {
     }
   } else {
     throw new Error(
-      "Usage: browserharness-bridge [setup|install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|voice|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers]"
+      "Usage: browserharness-bridge [setup|install|uninstall|pair|agents|skills|skill <name>|sites|site <name>|chats|voice|telegram|discord|slack|signal|mattermost|matrix|email|start|status|stop|restart|logs|remote|mcp|mcp-servers|api-anything]"
     );
   }
 } catch (error) {
@@ -1065,4 +1190,5 @@ try {
     `${error instanceof Error ? error.message : String(error)}\n`
   );
   process.exitCode = 1;
+}
 }

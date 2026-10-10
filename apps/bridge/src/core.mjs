@@ -214,7 +214,9 @@ export function createBridgeServer({
           extension_version: extensionMeta?.extension_version || "",
           remote_mode: !isLoopbackHost(host),
           mcp_client_enabled: Boolean(mcpManager),
-          mcp_servers_configured: configuredMcpServers
+          mcp_servers_configured: configuredMcpServers,
+          // Availability, startup failures, exits and operation errors per server.
+          mcp_server_health: mcpManager?.diagnostics?.() || {}
         });
         return;
       }

@@ -1,0 +1,65 @@
+{
+  "upstream": "https://github.com/goodnight000/api-anything",
+  "commit": "fe5cca70fe145634e49a1c9ba1f3e8250b291bea",
+  "version": "0.1.0",
+  "license": "MIT, Copyright (c) 2026 Tianjun Zheng (LICENSE in this folder)",
+  "upstream_node_engine": ">=22.13.0",
+  "runtime_dependencies": [
+    "node-html-parser",
+    "tldts",
+    "zod"
+  ],
+  "excluded_modules": [
+    "cli.js",
+    "mcp.js",
+    "index.js"
+  ],
+  "patches": [
+    {
+      "file": "dist/browser.js",
+      "from": "from \"playwright-core\";",
+      "to": "from \"../playwright-unavailable.js\";",
+      "reason": "BrowserHarness has one browser runtime; upstream Playwright tiers are disabled"
+    }
+  ],
+  "files": {
+    "LICENSE": "9c57c501762e9acf850474f081cdd44914f8820f0ca0099d54f8754109a47999",
+    "dist/browser.js": "2c00a603f9a5b75e7a3477d7e570861a4fab2bdd191afac1b60abbe9defa7786",
+    "dist/classify.js": "090da33467772ffaabcefe3e470f50f39e45d70002d26874cb675253bdea024e",
+    "dist/codec.js": "ecbb7e1a01f9ecf622bfb3ef16840832cd845a4b35f74dca21f2baa1f5a39cdf",
+    "dist/execute.js": "13e6a4d64ee36e309f44e358d911f1dcdef1eb5e2e8f3b53f90322a13bf98593",
+    "dist/extract.js": "ca1f50f228b4e7b76d845ec9d5c00a88bc3976c8b2c998d8e967de5a830467c7",
+    "dist/heal.js": "de96dcf766b6be2bd2d4fa10f5840534e1bae48658e76661d402401be8ed5bf2",
+    "dist/http.js": "95a85108b924a29f0a98602ed23b98f0cba637b26da7a90c64a9c5d337f9a98d",
+    "dist/import.js": "3e178592fedc993211912c8035821802473780404db5dba95df076b75d1b010b",
+    "dist/learn.js": "84b5dac5a62841e00026cd289dcd138bd17ba29c3f6a015924896343647ef89c",
+    "dist/login.js": "8168826fc46c97d7de54739340a26756ea48ffd1715eaa0ffb7e6481ee4219d7",
+    "dist/outline.js": "95f3b6b7fbe497198c47d7f4cd1fc103ee365f53b4f393f129a0a1e83b92815f",
+    "dist/secrets.js": "274613000948a7e38c5b82e695743d44b3eb8b5b968b3252070b2494701628d1",
+    "dist/session.js": "296bfaa06674af8cb06847e50a313ae46572d703930a8c1fe271c10e507b8977",
+    "dist/spec.js": "19f217b64fe040383a66e7b2b1cdb928a10173688847f0ac006cf711e4b7ac8f",
+    "dist/store.js": "d4b27cb411dc7c0e4d2926e4fca16112782891a6180f41ab8421c90ae974c880",
+    "dist/types.js": "cabe5d01ac4b7211482a5c586e910c16dc13e109447f591c5e31eaf77eaacbf5",
+    "package.json": "9055ba532aba5cce8b58d480c79f78a6cb148dbef941c31a5175320b55751e5f",
+    "playwright-unavailable.js": "973e4d72eba357186e043a0a91a13f92ef472c2ccf0b7570aaea4fae5ec3d8c2",
+    "sites-index.js": "246435ab8e6f4c9ba95a444270b049891ea7bb331f0281719377156f704af6c4",
+    "sites/airbnb.json": "e9d68f13050f07e4f55809fd243116e448d7f367e01ae391518e56c6b13bbdb2",
+    "sites/airbnb.md": "34e18178f006357f429ba9f2d1703418e3d44ae7c5d9cf975b375f50f103197f",
+    "sites/amazon.json": "10b94693e6ed4cbc068a1834b4d290cf1a377af6a2ee6ca8e94ac0efcb9f0fbe",
+    "sites/amazon.md": "34951b479b9e0799ec453bcb130280bbf24ae756bfc93edfd4c779eb44b69117",
+    "sites/goodreads.json": "16c52c1d65696ad086a9f313e9a940c6d701fa29bef03508853add7608c51012",
+    "sites/goodreads.md": "eeb94dfd7066700384b8714520533d9d4846377721ce7152e0819bb453a53cea",
+    "sites/google-flights.json": "fac0bb79a6f0232e03091499ef6e58d39a199ba2189e273bff0f297a89d8e3fe",
+    "sites/google-flights.md": "9588835fd19fd8cfcd2d8700dd25f0346043c20f0467896d35e5c9cb660fe388",
+    "sites/hacker-news.json": "25d9cbd29478c62eba962002befbd55cad58236c6271faa67881e352bdca430c",
+    "sites/hacker-news.md": "2edb01187bfa3d1a3037129036188b6b74702fa46a6b47b543285282da32f02d",
+    "sites/instagram.json": "28b6e140fc034790ca575a5740885a2b2efe78bb3c113b18c047d087f21b9510",
+    "sites/instagram.md": "baa968d69d061bc9e60fd7e6e5ee88a9ebac1cf01798a2609ac09071ff5a8b8e",
+    "sites/linkedin.json": "93f7a7dadf3f6a6a28dca135e1e25b74ce4e4e50d2b48843e3ede6469909aa62",
+    "sites/linkedin.md": "43abd2a945f63a6cd6a680565bcabc6f359596bdd13d958799f3e3d51040e418",
+    "sites/x.json": "0c348c308f17e96bc6c94c024cf7c7185bb1e111adb5b9a9647a572713487e1b",
+    "sites/x.md": "3cb9b693a3b3d2874e02cba33233d88109fdf002a94123adee233b1861c03aad",
+    "sites/youtube.json": "580fbceca77a4c87e24dce08b24af2028f06e451cda1d82b8ee1dbd3c4c909a8",
+    "sites/youtube.md": "b51324d2e9f22e6689dcc4a6d160792054b6b279211af11ba2427813f2a6376e"
+  }
+}

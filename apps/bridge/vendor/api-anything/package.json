@@ -1,0 +1,8 @@
+{
+  "name": "api-anything",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "description": "Vendored by BrowserHarness; see VENDORED.json"
+}
