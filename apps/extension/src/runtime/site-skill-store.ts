@@ -25,7 +25,8 @@ export interface SiteSkillRevisionRecord {
 export type SiteSkillEvaluationKind =
   | "structural-verification"
   | "execution";
-export type SiteSkillEvaluationOutcome = "passed" | "failed";
+/** "unverified": a write the site accepted, with nothing that read the change back. */
+export type SiteSkillEvaluationOutcome = "passed" | "failed" | "unverified";
 
 export interface SiteSkillEvaluationRecord {
   evaluation_id: string;
@@ -750,9 +751,34 @@ export function siteSkillPromotionGate(
   if (execution?.outcome !== "passed") {
     reasons.push(
       execution
-        ? "latest execution evaluation failed"
+        ? execution.outcome === "unverified"
+          ? "latest execution was sent but not verified"
+          : "latest execution evaluation failed"
         : "successful execution evidence is missing"
     );
+  }
+
+  // Per recipe: a write that was sent but never verified keeps the revision
+  // from promotion, whatever the revision's other recipes did since. Only
+  // API writes are recorded "unverified", so UI and read-only Skills are
+  // unaffected.
+  const recipes =
+    family.revisions.find(
+      (revision) => revision.revision_id === revisionIdInput
+    )?.candidate.recipes || [];
+  for (const recipe of recipes) {
+    const last = [...(family.executions || [])]
+      .reverse()
+      .find(
+        (item) =>
+          item.revision_id === revisionIdInput &&
+          item.recipe_id === recipe.id
+      );
+    if (last?.outcome === "unverified") {
+      reasons.push(
+        `write “${recipe.name}” was sent but its change was never verified`
+      );
+    }
   }
 
   return {

@@ -5,6 +5,7 @@ import {
   parseCommandArgs,
   recipeLabel,
   recipeParameters,
+  siteCommandAnswer,
   siteLabel,
   usage
 } from "./site-commands";
@@ -201,5 +202,21 @@ describe("site commands", () => {
     expect(!missing.ok && missing.error).toContain("needs q");
     const wrong = recipeParameters(search, { colour: "red" });
     expect(!wrong.ok && wrong.error).toContain("has no colour");
+  });
+
+  it("keeps a write's sent-but-unverified answer when run as a named command", () => {
+    const command = { name: "shop-add-to-cart", site: "Shop", kind: "form" as const };
+    const answer = siteCommandAnswer(command, {
+      run: { submitted: true, executed_steps: 1, output: { http_status: 200, truncated: false, data: { ok: true } } },
+      sent: true,
+      verification: "unverified",
+      next_action: "the site accepted the request; check shop.example to confirm the change, and do not resend it"
+    });
+    expect(answer).toMatchObject({ http_status: 200, sent: true, verification: "unverified", next_action: expect.stringMatching(/do not resend/) });
+    // a read answers its data, with no verification note
+    const read = siteCommandAnswer({ ...command, kind: "read" }, { run: { output: { http_status: 200, truncated: false, data: [1] } } });
+    expect(read).toEqual({ command: "shop-add-to-cart", site: "Shop", kind: "read", http_status: 200, truncated: false, output: [1] });
+    // a UI form run is unchanged
+    expect(siteCommandAnswer(command, { run: { submitted: true, executed_steps: 3 } })).toEqual({ command: "shop-add-to-cart", site: "Shop", kind: "form", submitted: true, steps: 3 });
   });
 });

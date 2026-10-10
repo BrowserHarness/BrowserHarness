@@ -5,7 +5,7 @@
 // opens and closes. Cookies and storage are read for the one call and dropped.
 import { requestBridgeApi, type BridgeRpcResult } from "./bridge-client";
 import { cdpCommand } from "./cdp-manager";
-import { collectApiCapture, waitForNetworkQuiet } from "./api-capture";
+import { collectApiCapture, waitForOperationRequest } from "./api-capture";
 import { startNetworkCapture, stopNetworkCapture } from "./network-capture";
 import { evaluatePageExpression } from "./page-evaluate";
 import { waitForTabUsable } from "./navigation";
@@ -71,28 +71,54 @@ export async function runTier1(contract: ApiOperationContract, args: Record<stri
   return reply.ok ? (reply.data as ApiCallResult) : failed(contract, 1, reply);
 }
 
+/** Where tier 2 sends from: a light same-origin document first, the site's home page if that one leaves the origin. */
+export const TIER2_PAGES = ["/robots.txt", "/"];
+
+function onOrigin(url: string | undefined, origin: string): boolean {
+  try {
+    return new URL(url || "").origin === origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Tier 2: the same request sent from a page of the site, with that page's own cookies. */
 export async function runTier2(contract: ApiOperationContract, args: Record<string, unknown>, approved: boolean): Promise<ApiCallResult> {
   const pageOrigin = new URL(contract.trigger.url.replace(/\{[^{}]*\}/g, "x")).origin;
   const started = performance.now();
-  // a light same-origin document: the site's cookies and CORS, without loading its app
-  return withBackgroundTab(`${pageOrigin}/robots.txt`, async (tabId) => {
-    const storage = ((await evaluatePageExpression(tabId, STORAGE, 4_000_000).catch(() => undefined))?.value || {}) as Record<string, string>;
-    const cookieReply = await cdpCommand<{ cookies?: Array<Record<string, unknown>> }>(tabId, "Network.getCookies", { urls: [contract.origin, pageOrigin] }).catch(() => ({ cookies: [] }));
-    const built = await requestBridgeApi("page_request", { contract, args, session: { cookies: cookieReply.cookies || [], storage } }, { approved });
-    if (!built.ok) return failed(contract, 2, built);
-    const plan = built.data as { refused?: ApiCallResult; request?: { url: string; method: string; headers: Record<string, string>; body?: string } };
-    if (plan.refused) return plan.refused;
-    const observed = await evaluatePageExpression(tabId, pageFetchExpression(plan.request!), MAX_BODY + 50_000)
-      .then((value) => value.value as Record<string, unknown>)
-      .catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
-    const judged = await requestBridgeApi("page_answer", { contract, observed: { ...observed, ms: Math.round(performance.now() - started) } });
-    if (!judged.ok) {
-      // the request was sent: a write must not move on to another tier
-      return { ...failed(contract, 2, judged), sent: true, ...(contract.side_effect === "read" ? {} : { class: "ambiguous_write" as const }) };
-    }
-    return judged.data as ApiCallResult;
-  });
+  for (const path of TIER2_PAGES) {
+    const answer = await withBackgroundTab(`${pageOrigin}${path}`, async (tabId) => {
+      // a redirect to another site, a challenge on another host or an error page: never send from there
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!onOrigin(tab?.url, pageOrigin)) return null;
+      const storage = ((await evaluatePageExpression(tabId, STORAGE, 4_000_000).catch(() => undefined))?.value || {}) as Record<string, string>;
+      const cookieReply = await cdpCommand<{ cookies?: Array<Record<string, unknown>> }>(tabId, "Network.getCookies", { urls: [contract.origin, pageOrigin] }).catch(() => ({ cookies: [] }));
+      const built = await requestBridgeApi("page_request", { contract, args, session: { cookies: cookieReply.cookies || [], storage } }, { approved });
+      if (!built.ok) return failed(contract, 2, built);
+      const plan = built.data as { refused?: ApiCallResult; request?: { url: string; method: string; headers: Record<string, string>; body?: string } };
+      if (plan.refused) return plan.refused;
+      const observed = await evaluatePageExpression(tabId, pageFetchExpression(plan.request!), MAX_BODY + 50_000)
+        .then((value) => value.value as Record<string, unknown>)
+        .catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+      const judged = await requestBridgeApi("page_answer", { contract, observed: { ...observed, ms: Math.round(performance.now() - started) } });
+      if (!judged.ok) {
+        // the request was sent: a write must not move on to another tier
+        return { ...failed(contract, 2, judged), sent: true, ...(contract.side_effect === "read" ? {} : { class: "ambiguous_write" as const }) };
+      }
+      return judged.data as ApiCallResult;
+    });
+    if (answer) return answer;
+  }
+  return {
+    ok: false,
+    class: "unavailable",
+    tier: 2,
+    sent: false,
+    reason: `no page of ${pageOrigin} stayed on that site to send the request from`,
+    operation_id: contract.operation_id,
+    fetched_at: new Date().toISOString(),
+    fresh: true
+  };
 }
 
 /** Tier 3: load the operation's page with the inputs and read the answer to the request it makes. Reads only. */
@@ -106,7 +132,7 @@ export async function runTier3(contract: ApiOperationContract, args: Record<stri
     plan.url!,
     async (tabId) => {
       try {
-        await waitForNetworkQuiet(tabId);
+        await waitForOperationRequest(tabId, contract.match);
         const tab = await chrome.tabs.get(tabId);
         return await collectApiCapture(tabId, tab.url || plan.url!, [plan.url!]);
       } finally {

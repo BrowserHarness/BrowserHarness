@@ -7,6 +7,7 @@ import {
   bridgeHttpBase,
   bridgeResultToMcp,
   createBridgeHttpClient,
+  siteRunText,
   siteToolDescription,
   siteToolInput,
   siteToolName
@@ -297,4 +298,13 @@ test("website commands become typed tools", () => {
   assert.equal(shape.tags.safeParse(["a", "b"]).success, true);
   assert.match(siteToolDescription(command), /read-only.*still testing/s);
   assert.match(siteToolDescription({ ...command, kind: "form", status: "proven" }), /approval/);
+});
+
+test("a site command's write that was sent but not verified never reads as done", () => {
+  const text = siteRunText({ kind: "form", site: "shop.example", http_status: 200, sent: true, verification: "unverified" });
+  assert.match(text, /NOT verified/);
+  assert.match(text, /do not send it again/);
+  assert.doesNotMatch(text, /Filled and sent/);
+  assert.match(siteRunText({ kind: "form", site: "shop.example", submitted: true }), /Filled and sent the form/);
+  assert.match(siteToolDescription({ kind: "form", status: "proven", title: "Add", site: "shop.example" }), /unverified.*do not resend/);
 });

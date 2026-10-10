@@ -40,6 +40,8 @@
     "smoke:provenance": "node scripts/e2e-provenance.mjs",
     "smoke:backup": "node scripts/e2e-space-backup.mjs",
     "vendor:check": "node scripts/vendor-api-anything.mjs --check",
-    "vendor:api-anything": "node scripts/vendor-api-anything.mjs"
+    "vendor:api-anything": "node scripts/vendor-api-anything.mjs",
+    "bench:api-engine": "node scripts/bench-api-engine.mjs",
+    "gate:api-engine": "node scripts/gate-api-engine.mjs"
   }
 }

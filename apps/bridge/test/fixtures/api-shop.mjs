@@ -178,6 +178,12 @@ if (q) fetch(${JSON.stringify(api)} + "?q=" + encodeURIComponent(q), { headers, 
     }
 
     if (url.pathname === "/api/cart" && req.method === "POST") {
+      // acceptWithoutChange: a 2xx that changes nothing (a write that silently did not happen)
+      if (state.acceptWithoutChange) {
+        state.unappliedWrites = (state.unappliedWrites || 0) + 1;
+        json(200, { ok: true, cart_size: state.writes, items: [] });
+        return;
+      }
       state.writes += 1;
       let note = "";
       try {
@@ -197,6 +203,13 @@ document.getElementById("add").addEventListener("click", () => {
     .then((r) => r.json()).then((data) => { document.getElementById("done").textContent = "Added (" + data.cart_size + ")"; });
 });
 </script>`);
+      return;
+    }
+
+    // a write the server takes and then drops the connection on: did it happen?
+    if (url.pathname === "/api/hangup") {
+      state.writes += 1;
+      req.socket.destroy();
       return;
     }
 

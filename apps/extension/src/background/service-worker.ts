@@ -1,6 +1,7 @@
 import type { RecordedWorkflowStep } from "../runtime/workflows";
 import {
   changesPage,
+  ranWithoutPage,
   observationInputAfter,
   settleMsAfter
 } from "../runtime/post-action";
@@ -17,7 +18,8 @@ import {
   findSiteCommand,
   loadSiteCommands,
   parseCommandArgs,
-  recipeParameters
+  recipeParameters,
+  siteCommandAnswer
 } from "../runtime/site-commands";
 import {
   ALARM_PREFIX,
@@ -109,7 +111,7 @@ import {
 } from "./api-watch";
 import { checkApiHealth, nextForClass, repairApiOperation, type RepairLedger } from "./api-repair";
 import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
-import { apiRecipeNeedsApproval, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
+import { apiRecipeNeedsApproval, apiRunRecord, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
   runSiteSkillRecipe,
@@ -403,22 +405,7 @@ async function siteCommandsTool(
     options
   );
   if (!result.ok) return result;
-  const run = (result.data as { run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> } })?.run;
-  return {
-    ok: true,
-    data: {
-      command: command.name,
-      site: command.site,
-      kind: command.kind,
-      ...(run?.output
-        ? {
-            http_status: run.output.http_status,
-            truncated: run.output.truncated,
-            output: run.output.data
-          }
-        : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 })
-    }
-  };
+  return { ok: true, data: siteCommandAnswer(command, result.data) };
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -703,21 +690,27 @@ async function runApiOperationRecipe(
       parameters,
       api_call: (contract, args) => callApiOperation(contract, args, options.approvalGranted === true)
     });
-    await recordSiteSkillEvaluation(id, revision.revision_id, {
-      kind: "execution",
-      outcome: "passed",
-      detail: `API operation ${recipe.id} answered over tier ${run.output?.api?.tier ?? "?"} with ${run.output?.api?.item_count ?? 0} items`
-    });
+    const { outcome, detail, result } = apiRunRecord(recipe, run.output, new URL(existing.site.origin).hostname);
+    await recordSiteSkillEvaluation(id, revision.revision_id, { kind: "execution", outcome, detail });
     const execution = await recordSiteSkillExecutionEvidence(id, revision.revision_id, {
       recipe_id: recipe.id,
       started_at: startedAt,
-      outcome: "passed",
+      outcome,
       evidence_id: evidenceId,
       executed_steps: run.executed_steps,
       submitted: run.submitted,
       parameter_names: Object.keys(parameters).sort()
     });
-    return { ok: true, data: { candidate_id: existing.id, revision_id: revision.revision_id, run, execution } };
+    return {
+      ok: true,
+      data: {
+        candidate_id: existing.id,
+        revision_id: revision.revision_id,
+        run,
+        execution,
+        ...result
+      }
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Site Skill API operation failed";
     const code = error instanceof SiteSkillRunError && error.code ? error.code : "SITE_SKILL_RUN_FAILED";
@@ -3568,7 +3561,7 @@ async function handleBridgeCommand(
   // a separate observe_page call per step. observe:false turns this off.
   const { observe: returnPage, ...args } = command.args;
   const result = await runTool(tool, args, command.session, command.title);
-  if (!result.ok || returnPage === false || !changesPage(tool, args)) {
+  if (!result.ok || returnPage === false || !changesPage(tool, args) || ranWithoutPage(tool, result)) {
     return result;
   }
   const settleMs = settleMsAfter(tool);

@@ -190,3 +190,41 @@ export async function collectApiCapture(tabId: number, finalUrl: string, locatio
     storage
   };
 }
+
+/**
+ * Whether a recorded request looks like the operation's own: method, host and
+ * path segment by segment, where `*` (the Bridge matcher's wildcard) or a
+ * `{hole}` stands for any one segment. The Bridge does the real match.
+ */
+export function looksLikeOperation(record: Pick<NetworkRecord, "method" | "url">, match: { method?: string; host?: string; path?: string }): boolean {
+  if (!match.path) return false;
+  if (match.method && record.method.toUpperCase() !== match.method.toUpperCase()) return false;
+  let url: URL;
+  try {
+    url = new URL(record.url);
+  } catch {
+    return false;
+  }
+  if (match.host && match.host.toLowerCase() !== url.hostname.toLowerCase()) return false;
+  const want = match.path.split("/");
+  const got = url.pathname.split("/");
+  return want.length === got.length && want.every((segment, index) => segment === "*" || /^\{[^{}]*\}$/.test(segment) || segment === got[index]);
+}
+
+/**
+ * Waits until the page has finished a request that looks like the operation's,
+ * then a short quiet; without one, the usual network quiet. Saves the full
+ * quiet wait when the page makes its request early.
+ */
+export async function waitForOperationRequest(tabId: number, match: { method?: string; path?: string }, timeoutMs = 15_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const records = listNetworkRecords(tabId, 500);
+    if (records.some((record) => (record.finished_at || record.error_text) && looksLikeOperation(record, match))) {
+      await waitForNetworkQuiet(tabId, 250, 2000);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await waitForNetworkQuiet(tabId, 1200, 5000);
+}

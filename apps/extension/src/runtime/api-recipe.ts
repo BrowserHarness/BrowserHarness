@@ -135,6 +135,32 @@ export function apiRecipeNeedsApproval(recipe: SiteSkillRecipe): boolean {
   return Boolean(step && step.contract.side_effect !== "read");
 }
 
+/**
+ * How a successful API run is recorded. A read's answer is the result. A
+ * write's 2xx only says the site accepted the request, not that the change
+ * happened, and nothing reads it back: it is recorded as sent and unverified,
+ * never as passed, and must not be resent.
+ */
+export function apiRunRecord(
+  recipe: SiteSkillRecipe,
+  output: { http_status?: number; api?: { tier?: number; item_count?: number } } | undefined,
+  hostname: string
+): { outcome: "passed" | "unverified"; detail: string; result: Record<string, unknown> } {
+  const tier = output?.api?.tier ?? "?";
+  if (!apiRecipeNeedsApproval(recipe)) {
+    return { outcome: "passed", detail: `API operation ${recipe.id} answered over tier ${tier} with ${output?.api?.item_count ?? 0} items`, result: {} };
+  }
+  return {
+    outcome: "unverified",
+    detail: `API operation ${recipe.id} was sent over tier ${tier} and the site answered HTTP ${output?.http_status ?? "?"}; nothing read the change back, so it is not verified`,
+    result: {
+      sent: true,
+      verification: "unverified",
+      next_action: `the site accepted the request; check ${hostname} to confirm the change, and do not resend it`
+    }
+  };
+}
+
 const SENSITIVE = /(password|passwd|secret|token|otp|pin|cvv|card|ssn)/i;
 
 /** A skill's parameters are shared by its recipes: an operation's "q" is the skill's "q". */

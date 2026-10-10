@@ -278,6 +278,23 @@ The primary BrowserHarness build now intentionally targets the proven high-capab
 
 The permissions must map to real BrowserHarness capabilities and remain covered by automated tests, but they are no longer deferred into a separate reduced-capability edition.
 
+## Native API Engine v1 — fixture-verified, real-site acceptance pending
+Learn a website's own API from examples or a Watch Me demonstration and run it without driving the page. Report: [docs/reports/NATIVE-API-ENGINE-V1.md](docs/reports/NATIVE-API-ENGINE-V1.md); spec: [docs/protocols/API-RECIPE-V2.md](docs/protocols/API-RECIPE-V2.md); decision: [docs/architecture/API-ENGINE-ADR.md](docs/architecture/API-ENGINE-ADR.md).
+
+### Verified (automated + local real-Chromium fixtures)
+- API Recipe v2 `api_operation` steps in the one Site Skill registry, behind the existing revision and promotion gate
+- `site_skill learn_api`: two page runs, deterministic learning (vendored goodnight000/api-anything, MIT), live unseen-input check
+- learning from Watch Me (`from_watch`), the only way to learn a write; writes ask on every run and are never resent
+- three transports (Bridge HTTP, in-page request, the site's own page) with a remembered tier
+- failure classes, health checks, bounded repair into candidate revisions
+- read-only helpers limited to learned API reads; procedural memory keeps method + path only
+- gate: `npm run gate:api-engine`; benchmark: `npm run bench:api-engine` (raw data in `docs/reports/data/`)
+
+### Next
+1. **Release-candidate acceptance on real sites** — one batched session by a person, per the report's checklist; do not mark it passed until it is performed
+2. Watch Me capture across tabs opened during a recording
+3. Survive service-worker restarts during a recording (capture kept only in memory today, by design)
+
 ## v0.3 — Memory + MCP
 - Working/episodic/semantic/procedural memory
 - Skill reuse/retrieval

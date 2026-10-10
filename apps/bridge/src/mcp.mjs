@@ -26,7 +26,7 @@ const TOOL_SPECS = [
     name: optional(z.string(), "Skill name from the list, e.g. \"check-prices\"; omit to list them"),
     details: optional(z.string(), "Extra details for this run, e.g. \"size 9\"")
   }, true],
-  ["site_commands", "List the commands BrowserHarness learned from websites (each has a name, site, kind and parameters), or run one: pass name and parameters. It opens the site in its own tab. read commands return the site's own data; form commands fill and send a form and may need the person's approval in Chrome (APPROVAL_REQUIRED means they must run it from the side panel).", {
+  ["site_commands", "List the commands BrowserHarness learned from websites (each has a name, site, kind and parameters), or run one: pass name and parameters. It opens the site in its own tab. read commands return the site's own data; form commands fill and send a form and may need the person's approval in Chrome (APPROVAL_REQUIRED means they must run it from the side panel). A learned API write that the site accepted answers sent: true with verification: \"unverified\": the request was sent, but nothing confirmed the change. Never report it as done or verified, never send it again; check the site (next_action).", {
     name: optional(z.string(), "Command name from the list, e.g. \"amazon-search\"; omit to list them"),
     parameters: optional(z.record(z.string(), z.unknown()), "Values by parameter name, e.g. {\"q\": \"kettle\"}"),
     args: optional(z.string(), "Or the values as text: \"kettle\" or \"q=kettle page=2\"")
@@ -411,11 +411,20 @@ export function siteToolName(name) {
   return `browserharness_site_${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
 }
 
+/** What `browserharness-bridge site <name>` prints for a run that is not printed as JSON. */
+export function siteRunText(data) {
+  if (data.kind === "read") return `${data.output ?? ""}\n`;
+  if (data.verification === "unverified") {
+    return `Sent to ${data.site}; the site answered HTTP ${data.http_status ?? "?"}, but the change is NOT verified. Check the site yourself and do not send it again.\n`;
+  }
+  return `${data.submitted ? "Filled and sent the form" : "Filled the form without sending it"} on ${data.site}.\n`;
+}
+
 export function siteToolDescription(command) {
   const what =
     command.kind === "read"
       ? "Returns the site's own data in one call (read-only)."
-      : "Fills and sends a form on the site; may need the person's approval in Chrome.";
+      : "Fills and sends a form on the site; may need the person's approval in Chrome. If it answers verification: \"unverified\", the request was sent but the change is not confirmed: do not resend; check the site.";
   const trust = command.status === "proven" ? "" : " BrowserHarness is still testing this command; check the result.";
   return `${command.title} on ${command.site}. ${what}${trust} Opens the site in its own tab.`;
 }
