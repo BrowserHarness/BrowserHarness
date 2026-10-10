@@ -7,6 +7,7 @@ import { recordRun } from "./fixtures/record-run.mjs";
 import { learnApiOperation } from "../src/api-engine/learn.mjs";
 import { callTier1 } from "../src/api-engine/tier1.mjs";
 import { buildForPage, judgePageAnswer, judgePageRun, triggerFor } from "../src/api-engine/transport.mjs";
+import { verifyUnseenInput } from "../src/api-engine/verify.mjs";
 
 const EXAMPLES = [{ q: "laptops" }, { q: "keyboards" }];
 const SID = [{ name: "sid", value: "valid-session-123456", domain: "127.0.0.1", path: "/" }];
@@ -85,7 +86,7 @@ test("a per-load signature makes min tier 3: tiers 1 and 2 refuse before sending
     assert.equal(trigger.url, `${shop.origin}/guarded?q=monitors`);
     // the page loads and makes its own request with a fresh signature
     const run = await recordRun(shop.origin, "guarded", "monitors");
-    const answer = judgePageRun(contract, run);
+    const answer = judgePageRun(contract, run, { q: "monitors" });
     assert.equal(answer.ok, true, answer.reason);
     assert.equal(answer.tier, 3);
     assert.deepEqual(answer.data.map((item) => item.id), ["m1", "m2"]);
@@ -99,12 +100,41 @@ test("tier 3 says what went wrong: the page stopped sending it, or went to sign 
   try {
     const contract = await learned(shop, "rest");
     const other = await recordRun(shop.origin, "graphql", "monitors");
-    const drift = judgePageRun(contract, other);
+    const drift = judgePageRun(contract, other, { q: "monitors" });
     assert.equal(drift.class, "endpoint_drift");
-    const login = judgePageRun(contract, { exchanges: [], final_url: `${shop.origin}/login?next=/search` });
+    const login = judgePageRun(contract, { exchanges: [], final_url: `${shop.origin}/login?next=/search` }, { q: "monitors" });
     assert.equal(login.class, "auth");
     assert.equal(triggerFor({ ...contract, side_effect: "write" }, { q: "a1a" }).refused.class, "unavailable");
     assert.equal(triggerFor(contract, {}).refused.class, "input");
+  } finally {
+    await shop.close();
+  }
+});
+
+test("tier 3 answers only with the request that carried the inputs it was given", async () => {
+  const shop = await startApiShop();
+  try {
+    const contract = await learned(shop, "guarded");
+    // the page ignored the input (or made its default request): not a success
+    const stale = await recordRun(shop.origin, "guarded", "laptops");
+    const ignored = judgePageRun(contract, stale, { q: "monitors" });
+    assert.equal(ignored.ok, false, "a request for other inputs must not answer");
+    assert.equal(ignored.class, "endpoint_drift");
+    assert.match(ignored.reason, /inputs/);
+
+    // two requests on the same path: the one for these inputs answers, whichever came last
+    const wanted = await recordRun(shop.origin, "guarded", "monitors");
+    const mixed = { ...wanted, exchanges: [...wanted.exchanges, ...stale.exchanges.map((item) => ({ ...item, id: item.id + 1000 }))] };
+    const picked = judgePageRun(contract, mixed, { q: "monitors" });
+    assert.equal(picked.ok, true, picked.reason);
+    assert.deepEqual(picked.data.map((item) => item.id), ["m1", "m2"]);
+
+    // without the inputs it cannot tell, so it fails closed
+    assert.equal(judgePageRun(contract, wanted).ok, false);
+
+    // and the live unseen-input check over tier 3 fails when the page ignored the input
+    const check = await verifyUnseenInput(contract, { q: "monitors" }, { examples: EXAMPLES, example_fingerprints: [], response: ignored });
+    assert.equal(check.contract.verification.status, "failed");
   } finally {
     await shop.close();
   }

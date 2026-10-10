@@ -142,7 +142,7 @@ export async function runTier3(contract: ApiOperationContract, args: Record<stri
     (tabId) => startNetworkCapture(tabId, 800)
   );
   // only the exchanges go to the Bridge: it matches the request, it needs no cookies
-  const judged = await requestBridgeApi("page_run", { contract, capture: { ...capture, cookies: [], storage: {} } });
+  const judged = await requestBridgeApi("page_run", { contract, args, capture: { ...capture, cookies: [], storage: {} } });
   if (!judged.ok) return { ...failed(contract, 3, judged), sent: true };
   const result = judged.data as ApiCallResult;
   return { ...result, ms: Math.round(performance.now() - started) };

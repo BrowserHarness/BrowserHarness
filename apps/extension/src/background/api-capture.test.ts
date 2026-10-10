@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("./cdp-manager", () => ({ cdpCommand: mocks.cdpCommand, subscribeCdpEvents: mocks.subscribe }));
 vi.mock("./page-evaluate", () => ({ evaluatePageExpression: mocks.evaluatePageExpression }));
 
-import { collectApiCapture, looksLikeOperation } from "./api-capture";
+import { collectApiCapture, cookieOrigins, looksLikeOperation } from "./api-capture";
 import { startNetworkCapture, stopNetworkCapture } from "./network-capture";
 
 function emit(tabId: number, method: string, params: object) {
@@ -80,5 +80,30 @@ describe("spotting the operation's request in a page run", () => {
     expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/items/4/2/reviews" }, { path: "/api/items/{id}/reviews" })).toBe(false);
     expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/search.json" }, { path: "/api/search" })).toBe(false);
     expect(looksLikeOperation({ method: "GET", url: "https://shop.example/x" }, {})).toBe(false);
+  });
+});
+
+describe("which sites' cookies a learning run reads", () => {
+  it("only the page's own site, never trackers or other sites the page loaded", () => {
+    const records = [
+      "https://www.shop.example/search?q=laptops",
+      "https://api.shop.example/v1/search?q=laptops",
+      "https://cdn.shop.example/app.js",
+      "https://www.google-analytics.com/collect?v=2",
+      "https://ads.tracker.example/pixel",
+      "https://search-provider.example/api?q=laptops",
+      "data:text/plain,x"
+    ].map((url) => ({ url }));
+    expect(cookieOrigins("https://www.shop.example/search?q=laptops", records)).toEqual([
+      "https://www.shop.example",
+      "https://api.shop.example",
+      "https://cdn.shop.example"
+    ]);
+    // a two-part public suffix keeps sites apart
+    expect(cookieOrigins("https://shop.co.uk/", [{ url: "https://api.shop.co.uk/x" }, { url: "https://other.co.uk/x" }])).toEqual([
+      "https://shop.co.uk",
+      "https://api.shop.co.uk"
+    ]);
+    expect(cookieOrigins("http://127.0.0.1:4000/search", [{ url: "http://127.0.0.1:4000/api" }, { url: "http://127.0.0.2/api" }])).toEqual(["http://127.0.0.1:4000"]);
   });
 });

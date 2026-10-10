@@ -24,10 +24,10 @@ async function exchange(id, resourceType, url, init = {}) {
   };
 }
 
-/** kind: "rest" (/search), "graphql" (/gql-search), "form" (/form-page). */
+/** kind: "rest" (/search), "graphql" (/gql-search), "form" (/form-page), "cart" (a demonstrated write: a note typed on /cart, then Add). */
 export async function recordRun(origin, kind, term, { queryId = "Qa1B2c3D4e5F6g7H8i9J", cookies = [], storage = {}, searchPath = "/api/search", apiHeaders = {} } = {}) {
-  const page = { rest: "/search", graphql: "/gql-search", form: "/form-page", orders: "/orders", guarded: "/guarded" }[kind];
-  const pageUrl = `${origin}${page}?q=${encodeURIComponent(term)}`;
+  const page = { rest: "/search", graphql: "/gql-search", form: "/form-page", orders: "/orders", guarded: "/guarded", cart: "/cart" }[kind];
+  const pageUrl = kind === "cart" ? `${origin}/cart` : `${origin}${page}?q=${encodeURIComponent(term)}`;
   const exchanges = [await exchange(1, "document", pageUrl)];
   exchanges.push(await exchange(2, "xhr", `${origin}/api/config`, { headers: { accept: "application/json", referer: pageUrl } }));
   if (kind === "rest") {
@@ -46,6 +46,9 @@ export async function recordRun(origin, kind, term, { queryId = "Qa1B2c3D4e5F6g7
         }
       })
     );
+  } else if (kind === "cart") {
+    const body = JSON.stringify({ sku: "lt-1", note: term });
+    exchanges.push(await exchange(3, "fetch", `${origin}/api/cart`, { method: "POST", headers: { "content-type": "application/json", referer: pageUrl }, body }));
   } else if (kind === "graphql") {
     const body = JSON.stringify({
       operationName: "SearchProducts",

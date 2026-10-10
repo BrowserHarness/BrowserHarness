@@ -191,6 +191,15 @@ describe("site_skill learn_api from Watch Me", () => {
     if (outcome.ok) expect(outcome.data.promotion).toMatch(/never sent to check it/);
   });
 
+  it("a demonstrated write's typed inputs stay private even with an empty or partial private_params", async () => {
+    for (const given of [[], ["other"]]) {
+      const write = { ...searchContract(), side_effect: "write" as const, verification: { status: "unverified" as const, checks: [] } };
+      const { deps: d } = watchDeps({ bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: [] } })) });
+      await learnApiOperation(d, { name: "post", from_watch: ["a"], side_effect: "write", private_params: given } as never);
+      expect(vi.mocked(d.bridge).mock.calls[0][1].private_params).toEqual(expect.arrayContaining(["search", "note", ...given]));
+    }
+  });
+
   it("says when a recording's capture is gone or typed nothing different", async () => {
     const { deps: d } = watchDeps();
     expect(await learnApiOperation(d, { name: "search", from_watch: ["gone"] } as never)).toMatchObject({ ok: false, error: { code: "API_LEARN_WATCH_MISSING" } });

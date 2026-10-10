@@ -99,6 +99,45 @@ export async function waitForNetworkQuiet(tabId: number, quietMs = 1200, timeout
   }
 }
 
+/**
+ * The registrable part of a host, approximately: the last two labels, or three
+ * under a two-part country suffix (shop.co.uk). An IP address is its own site.
+ */
+function siteOf(hostname: string): string {
+  if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) return hostname;
+  const labels = hostname.split(".");
+  const twoPartSuffix = labels.length >= 3 && labels.at(-1)!.length === 2 && labels.at(-2)!.length <= 3;
+  return labels.slice(twoPartSuffix ? -3 : -2).join(".");
+}
+
+/**
+ * The origins whose cookies a learning run reads: the page's own, and any
+ * other origin the page called on the same site (api.shop.example for
+ * www.shop.example). Analytics, ads and other sites' cookies stay out.
+ */
+export function cookieOrigins(pageUrl: string, records: Array<{ url: string }>): string[] {
+  let page: URL;
+  try {
+    page = new URL(pageUrl);
+  } catch {
+    return [];
+  }
+  const site = siteOf(page.hostname);
+  const origins = [page.origin];
+  for (const record of records) {
+    let url: URL;
+    try {
+      url = new URL(record.url);
+    } catch {
+      continue;
+    }
+    if (!/^https?:$/.test(url.protocol) || origins.includes(url.origin)) continue;
+    const sameSite = /^[\d.]+$/.test(page.hostname) ? url.hostname === page.hostname && url.origin === page.origin : siteOf(url.hostname) === site;
+    if (sameSite) origins.push(url.origin);
+  }
+  return origins.slice(0, 20);
+}
+
 /** Reads the run's capture from the tab's active network capture. */
 export async function collectApiCapture(tabId: number, finalUrl: string, locations: string[] = []): Promise<ApiCapture> {
   const records = listNetworkRecords(tabId, 500);
@@ -121,13 +160,7 @@ export async function collectApiCapture(tabId: number, finalUrl: string, locatio
     }
     exchanges.push(exchangeFrom(record, index, body));
   }
-  const origins = [...new Set(records.map((record) => {
-    try {
-      return new URL(record.url).origin;
-    } catch {
-      return "";
-    }
-  }).filter((origin) => /^https?:/.test(origin)))].slice(0, 20);
+  const origins = cookieOrigins(finalUrl, records);
   const cookieReply = await cdpCommand<{ cookies?: Array<Record<string, unknown>> }>(tabId, "Network.getCookies", { urls: origins.length ? origins : [finalUrl] }).catch(() => ({ cookies: [] }));
   const cookies = (cookieReply.cookies || [])
     .filter((cookie) => typeof cookie.name === "string" && typeof cookie.value === "string")
