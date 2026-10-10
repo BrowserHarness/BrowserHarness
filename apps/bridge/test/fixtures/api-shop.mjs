@@ -178,6 +178,12 @@ if (q) fetch(${JSON.stringify(api)} + "?q=" + encodeURIComponent(q), { headers, 
     }
 
     if (url.pathname === "/api/cart" && req.method === "POST") {
+      // acceptWithoutChange: a 2xx that changes nothing (a write that silently did not happen)
+      if (state.acceptWithoutChange) {
+        state.unappliedWrites = (state.unappliedWrites || 0) + 1;
+        json(200, { ok: true, cart_size: state.writes, items: [] });
+        return;
+      }
       state.writes += 1;
       let note = "";
       try {

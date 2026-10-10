@@ -45,8 +45,8 @@ export interface ProceduralMemoryRecord {
   origin: string;
   entry_url: string;
   captured_at: string;
-  structural_verification: "passed" | "failed" | "missing";
-  latest_execution: "passed" | "failed" | "missing";
+  structural_verification: "passed" | "failed" | "unverified" | "missing";
+  latest_execution: "passed" | "failed" | "unverified" | "missing";
   execution_runs: number;
   execution_passed: number;
   execution_failed: number;
@@ -88,7 +88,7 @@ function latestOutcome(
   family: SiteSkillFamilyRecord,
   revisionId: string,
   kind: "structural-verification" | "execution"
-): "passed" | "failed" | "missing" {
+): "passed" | "failed" | "unverified" | "missing" {
   return (
     [...family.evaluations]
       .reverse()

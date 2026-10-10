@@ -25,7 +25,8 @@ export interface SiteSkillRevisionRecord {
 export type SiteSkillEvaluationKind =
   | "structural-verification"
   | "execution";
-export type SiteSkillEvaluationOutcome = "passed" | "failed";
+/** "unverified": a write the site accepted, with nothing that read the change back. */
+export type SiteSkillEvaluationOutcome = "passed" | "failed" | "unverified";
 
 export interface SiteSkillEvaluationRecord {
   evaluation_id: string;
@@ -750,7 +751,9 @@ export function siteSkillPromotionGate(
   if (execution?.outcome !== "passed") {
     reasons.push(
       execution
-        ? "latest execution evaluation failed"
+        ? execution.outcome === "unverified"
+          ? "latest execution was sent but not verified"
+          : "latest execution evaluation failed"
         : "successful execution evidence is missing"
     );
   }

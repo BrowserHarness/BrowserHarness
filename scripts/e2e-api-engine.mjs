@@ -257,6 +257,21 @@ try {
     String(JSON.stringify(cartRun.error)).slice(0, 300)
   );
 
+  // Approval for a write comes only from the person's own side panel: a page
+  // open in a tab cannot claim it (how a 2xx write is then recorded, sent and
+  // unverified, is covered by the extension's unit tests)
+  shop.state.acceptWithoutChange = true;
+  const claimed = await side.evaluate(
+    async ({ id, recipe }) => chrome.runtime.sendMessage({ type: "BROWSER_TOOL", tool: "site_skill", input: { action: "run", id, recipe_id: recipe, parameters: { note: "no rush" } }, approval_granted: true }),
+    { id: fromWatch.data?.candidate_id, recipe: cartLearned.data?.recipe_id }
+  );
+  shop.state.acceptWithoutChange = false;
+  check(
+    "a page in a tab cannot claim approval for a learned write; nothing is sent",
+    claimed?.ok === false && claimed.error?.code === "APPROVAL_REQUIRED" && !shop.state.unappliedWrites && shop.state.writes === writesBefore + 1,
+    String(JSON.stringify(claimed?.error)).slice(0, 300)
+  );
+
   // Helpers (read-only Task DAG workers) may run learned API reads only
   const helperRead = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id, parameters: { [capA?.inputs?.[0] || "search"]: "tablets" }, api_read_only: true });
   check("a helper can run a learned API read", helperRead.ok && JSON.stringify(helperRead.data?.run?.output?.data).includes("Slate tablet"), String(JSON.stringify(helperRead.error || helperRead.data?.run?.output)).slice(0, 300));

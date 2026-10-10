@@ -81,6 +81,26 @@ test("a write the server took and then hung up on is ambiguous and says not to r
   }
 });
 
+test("a write the site answers 2xx without changing anything looks like any accepted write", async () => {
+  // why the extension records an API write as sent and unverified, not passed:
+  // the answer alone cannot show that the change happened
+  const shop = await startApiShop({ acceptWithoutChange: true });
+  try {
+    const contract = await learned(shop);
+    const write = at(contract, shop.origin, "/api/cart", {
+      side_effect: "write",
+      request: { method: "POST", url: `${shop.origin}/api/cart`, headers: { "content-type": "application/json" }, body: '{"sku":"lt-1","note":"x"}' }
+    });
+    const answer = await callTier1(write, {}, { approved: true, minIntervalMs: 0 });
+    assert.equal(answer.ok, true);
+    assert.equal(answer.sent, true);
+    assert.equal(shop.state.unappliedWrites, 1, "sent once");
+    assert.equal(shop.state.writes, 0, "and nothing changed");
+  } finally {
+    await shop.close();
+  }
+});
+
 test("calls to one site are paced", async () => {
   const shop = await startApiShop();
   try {

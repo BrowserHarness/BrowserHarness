@@ -110,7 +110,7 @@ import {
 } from "./api-watch";
 import { checkApiHealth, nextForClass, repairApiOperation, type RepairLedger } from "./api-repair";
 import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
-import { apiRecipeNeedsApproval, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
+import { apiRecipeNeedsApproval, apiRunRecord, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
   runSiteSkillRecipe,
@@ -704,21 +704,27 @@ async function runApiOperationRecipe(
       parameters,
       api_call: (contract, args) => callApiOperation(contract, args, options.approvalGranted === true)
     });
-    await recordSiteSkillEvaluation(id, revision.revision_id, {
-      kind: "execution",
-      outcome: "passed",
-      detail: `API operation ${recipe.id} answered over tier ${run.output?.api?.tier ?? "?"} with ${run.output?.api?.item_count ?? 0} items`
-    });
+    const { outcome, detail, result } = apiRunRecord(recipe, run.output, new URL(existing.site.origin).hostname);
+    await recordSiteSkillEvaluation(id, revision.revision_id, { kind: "execution", outcome, detail });
     const execution = await recordSiteSkillExecutionEvidence(id, revision.revision_id, {
       recipe_id: recipe.id,
       started_at: startedAt,
-      outcome: "passed",
+      outcome,
       evidence_id: evidenceId,
       executed_steps: run.executed_steps,
       submitted: run.submitted,
       parameter_names: Object.keys(parameters).sort()
     });
-    return { ok: true, data: { candidate_id: existing.id, revision_id: revision.revision_id, run, execution } };
+    return {
+      ok: true,
+      data: {
+        candidate_id: existing.id,
+        revision_id: revision.revision_id,
+        run,
+        execution,
+        ...result
+      }
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Site Skill API operation failed";
     const code = error instanceof SiteSkillRunError && error.code ? error.code : "SITE_SKILL_RUN_FAILED";

@@ -23,6 +23,7 @@ vi.mock("../background/file-tools", () => ({ uploadFiles: mocks.uploadFiles }));
 import {
   apiRecipeFromContract,
   apiRecipeNeedsApproval,
+  apiRunRecord,
   contractArgs,
   isApiContract,
   recipeKind,
@@ -146,6 +147,27 @@ describe("API Recipe v2", () => {
 
     const missing = await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: { q: "x1" } }).catch((caught) => caught);
     expect(missing.code).toBe("API_ENGINE_UNAVAILABLE");
+  });
+
+  it("records a write the site answered 2xx as sent and unverified, never passed (the change was not read back)", async () => {
+    // the site says 200 OK but nothing in its state changed: the run cannot tell, so it must not claim success
+    const write = withApiRecipe(null, { ...learning, contract: { ...searchContract(), side_effect: "write" as const } });
+    const accepted = vi.fn(async () => okResult({ ok: true, items: [] }));
+    const run = await runSiteSkillRecipe({ tab_id: -1, candidate: write, recipe_id: write.recipes[0].id, parameters: { q: "x1" }, api_call: accepted });
+    const record = apiRunRecord(write.recipes[0], run.output, "shop.example");
+    expect(accepted).toHaveBeenCalledTimes(1);
+    expect(record.outcome).toBe("unverified");
+    expect(record.detail).toMatch(/not verified/);
+    expect(record.result).toEqual({ sent: true, verification: "unverified", next_action: expect.stringMatching(/do not resend/) });
+
+    // an unclassified operation is treated the same way
+    const unknown = withApiRecipe(null, { ...learning, contract: { ...searchContract(), side_effect: "unknown" as const } });
+    expect(apiRunRecord(unknown.recipes[0], run.output, "shop.example").outcome).toBe("unverified");
+
+    // a read's answer is its own result
+    const read = withApiRecipe(null, { ...learning, contract: searchContract() });
+    const readRun = await runSiteSkillRecipe({ tab_id: -1, candidate: read, recipe_id: read.recipes[0].id, parameters: { q: "monitors" }, api_call: vi.fn(async () => okResult([{ id: "m1" }])) });
+    expect(apiRunRecord(read.recipes[0], readRun.output, "shop.example")).toEqual({ outcome: "passed", detail: expect.stringMatching(/1 items/), result: {} });
   });
 
   it("lists a learned read as a read command and a learned write as a form-like command", () => {
