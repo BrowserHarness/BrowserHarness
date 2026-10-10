@@ -29,6 +29,10 @@ export interface ApiLearnInput {
   skill_name?: string;
   description?: string;
   private_params?: string[];
+  /** set by repair: the operation this one replaces */
+  source?: "two_example_learning" | "repair";
+  parent_operation_id?: string;
+  replace_recipe_id?: string;
 }
 
 export interface ApiLearnDeps {
@@ -56,6 +60,7 @@ export type ApiLearnOutcome =
         revision_id: string;
         recipe_id: string;
         operation: Pick<ApiOperationContract, "operation_id" | "name" | "side_effect" | "side_effect_basis" | "params" | "session_refs" | "min_tier">;
+        contract: ApiOperationContract;
         verification: ApiOperationContract["verification"];
         result_preview?: unknown;
         answered_by_tier?: number;
@@ -129,7 +134,8 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
     ...(input.description ? { description: input.description } : {}),
     ...(input.private_params ? { private_params: input.private_params } : {}),
     evidence_ids: [evidenceId],
-    source: "two_example_learning"
+    source: input.source === "repair" ? "repair" : "two_example_learning",
+    ...(input.parent_operation_id ? { parent_operation_id: input.parent_operation_id } : {})
   });
   // the captures held cookies and storage: drop them now
   captures.length = 0;
@@ -162,7 +168,8 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
       title: input.skill_name || page.hostname,
       ...(input.skill_name ? { name: input.skill_name } : {}),
       evidence_id: evidenceId,
-      captured_at: startedAt
+      captured_at: startedAt,
+      ...(input.replace_recipe_id ? { replace_recipe_id: input.replace_recipe_id } : {})
     });
   } catch (error) {
     return fail("SITE_SKILL_ORIGIN_MISMATCH", error instanceof Error ? error.message : "The operation is on another site");
@@ -211,6 +218,7 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
         session_refs: contract.session_refs,
         min_tier: contract.min_tier
       },
+      contract,
       verification: contract.verification,
       ...(response.ok ? { result_preview: response.data, answered_by_tier: response.tier } : {}),
       warnings: Array.isArray(data.warnings) ? data.warnings : [],

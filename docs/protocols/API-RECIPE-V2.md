@@ -1,6 +1,6 @@
 # API Recipe v2
 
-Status: implemented for reads (learning, unseen-input verification) and for running at all three tiers. Repair and Watch Me learning of writes are later work packages (see `docs/architecture/API-ENGINE-ADR.md`).
+Status: implemented for reads (learning, unseen-input verification, health checks, repair) and for running at all three tiers. Watch Me learning of writes is a later work package (see `docs/architecture/API-ENGINE-ADR.md`).
 
 An API Recipe v2 is a Site Skill recipe whose one step is a learned website operation: the request a page makes when someone uses it (a search, a lookup, a GraphQL query), with where each input goes, where each credential comes from, what the answer looks like, and how it was checked. It lives in the same Site Skill library as form recipes, with the same revisions, evaluations, promotion gate and rollback. There is one registry.
 
@@ -52,7 +52,7 @@ Owned by the Bridge (`apps/bridge/src/api-engine/recipe.mjs`, zod schema `ApiOpe
 | `learned_logged_in` | Whether the learning runs looked signed in. |
 | `transport` | `{preference: [1,2,3], learned_tier?}`; `learned_tier` is the tier that last answered. |
 | `verification` | `{status: unverified|verified|failed, checks[]}`; see below. |
-| `provenance` | `{source, engine, learned_at, evidence_ids, warnings, parent_operation_id?}`. `engine` names this engine and the vendored upstream commit. |
+| `provenance` | `{source, engine, learned_at, evidence_ids, warnings, parent_operation_id?, example_inputs?}`. `engine` names this engine and the vendored upstream commit. `example_inputs` holds the inputs a person typed to teach it (`learning`, and `unseen` once it verified), for health checks and repair; it is left out when any param was marked private. A repair sets `source: "repair"` and `parent_operation_id`. |
 
 A contract never holds a cookie value, a token, a password, a session storage value or a response body. The learner runs upstream's secret scan over the finished contract with every cookie and storage value from both runs, and refuses to return it (`API_LEARN_SECRET`) if any of them appears anywhere in it.
 
@@ -121,6 +121,21 @@ Every tier returns the same shape:
 ```
 
 Classes: `ok`, `input` (bad or missing input; nothing sent), `auth` (signed out, or a credential reference with no value), `rate_limited`, `blocked` (bot wall or bare 403), `network` (no answer to a read), `schema_drift` (answered without the data), `endpoint_drift` (404/405/410/501, or a redirect off the operation), `ambiguous_write` (a write that may have run: never resent; `next` says to check the site), `approval_required`, `unavailable` (this tier cannot send it: per-load values, or a page-only header).
+
+## Health and repair
+
+`site_skill verify` on a Skill whose recipes are all learned operations (or with a `recipe_id` naming one) calls each read live through the dispatcher with its taught third input (else its first learning input, else the params' examples) and records one structural-verification evaluation: passed only when every checked read answered with items. Writes are skipped, never sent to check them.
+
+When a run fails with `schema_drift` or `endpoint_drift`, the failure says `repair_recommended: true` and `next_action: site_skill repair`. Other classes say what to do: sign in (auth), wait (rate limited), open the site once (blocked), check the site and do not resend (ambiguous write).
+
+`site_skill repair` (`id`, `recipe_id` when the Skill has several learned operations, optional `examples`, `verify_args`, `page_url`):
+
+1. Refuses writes (`API_REPAIR_WRITE`): a write is re-taught by a person.
+2. Is bounded per operation of a Skill (`browserharness.apiRepair.v1`): at most 3 attempts in 24 hours, a 60-minute pause after a failed one, 5 minutes between any two (`API_REPAIR_COOLDOWN` with `retry_after_minutes`).
+3. Learns the operation again from its trigger page with the taught inputs (two runs, the learner, the live third-input check), exactly as `learn_api`, with `source: "repair"` and `parent_operation_id` set.
+4. Saves the result as a new candidate revision in which the new recipe takes the old one's place. The active revision is never changed; `site_skill compare` and `promote` decide, behind the usual gate. The answer lists what changed in plain words (`path /api/search → /api/v2/search`, `results read from products (was items)`).
+
+Failures from the Bridge carry their `data` (next action, failure class) through `/command` and MCP, not only the error.
 
 ## Bridge messages
 
