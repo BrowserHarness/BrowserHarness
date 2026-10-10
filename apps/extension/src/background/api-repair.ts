@@ -11,10 +11,12 @@ import { contractDiff, type ApiCallResult, type ApiOperationContract } from "../
 export const MAX_REPAIRS_PER_DAY = 3;
 export const REPAIR_COOLDOWN_MS = 60 * 60 * 1000;
 export const REPAIR_MIN_GAP_MS = 5 * 60 * 1000;
+/** how long a started repair holds its reservation if it never reports back (the service worker stopped) */
+export const REPAIR_RUNNING_MS = 10 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface RepairLedger {
-  [operationId: string]: { attempts: Array<{ at: number; outcome: "repaired" | "failed" }> };
+  [operationId: string]: { attempts: Array<{ at: number; outcome: "repaired" | "failed" | "running" }> };
 }
 
 export interface ApiHealth {
@@ -67,6 +69,9 @@ export async function checkApiHealth(
 export function repairAllowed(ledger: RepairLedger, operationId: string, now: number): { allowed: true } | { allowed: false; reason: string; retry_after_ms: number } {
   const attempts = (ledger[operationId]?.attempts || []).filter((attempt) => now - attempt.at < DAY_MS);
   const last = attempts.at(-1);
+  if (last?.outcome === "running" && now - last.at < REPAIR_RUNNING_MS) {
+    return { allowed: false, reason: "a repair of it is running", retry_after_ms: last.at + REPAIR_RUNNING_MS - now };
+  }
   if (attempts.length >= MAX_REPAIRS_PER_DAY) {
     const oldest = attempts[0].at;
     return { allowed: false, reason: `${MAX_REPAIRS_PER_DAY} repairs in a day already`, retry_after_ms: oldest + DAY_MS - now };
@@ -80,8 +85,10 @@ export function repairAllowed(ledger: RepairLedger, operationId: string, now: nu
   return { allowed: true };
 }
 
-export function recordRepair(ledger: RepairLedger, operationId: string, outcome: "repaired" | "failed", now: number): RepairLedger {
-  const attempts = [...(ledger[operationId]?.attempts || []).filter((attempt) => now - attempt.at < DAY_MS), { at: now, outcome }];
+export function recordRepair(ledger: RepairLedger, operationId: string, outcome: "repaired" | "failed" | "running", now: number): RepairLedger {
+  // a finished repair replaces its own reservation
+  const earlier = (ledger[operationId]?.attempts || []).filter((attempt) => now - attempt.at < DAY_MS && !(outcome !== "running" && attempt.outcome === "running"));
+  const attempts = [...earlier, { at: now, outcome }];
   const next = { ...ledger, [operationId]: { attempts } };
   // keep the ledger small: operations repaired in the last day only
   return Object.fromEntries(Object.entries(next).filter(([, value]) => value.attempts.some((attempt) => now - attempt.at < DAY_MS)));
@@ -129,9 +136,30 @@ export async function repairApiOperation(
     return { ok: false, error: { code: "API_REPAIR_WRITE", message: "A write is not repaired automatically: teach it again with a demonstration you approve." } };
   }
   const now = deps.now();
-  const ledger = await deps.ledger();
   // one ledger entry per operation of a Skill, across the new ids its repairs get
   const key = `${input.skill_id}:${contract.name}`;
+  // reserved before anything waits, so a second call at the same moment sees it
+  if (inFlight.has(key)) {
+    return { ok: false, error: { code: "API_REPAIR_COOLDOWN", message: `Not repairing ${contract.name} now: a repair of it is running.` }, data: { retry_after_minutes: 1 } };
+  }
+  inFlight.add(key);
+  try {
+    return await reservedRepair(deps, input, key, now);
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+const inFlight = new Set<string>();
+
+async function reservedRepair(
+  deps: ApiRepairDeps,
+  input: Parameters<typeof repairApiOperation>[1],
+  key: string,
+  now: number
+): Promise<ApiRepairOutcome> {
+  const { contract } = input;
+  const ledger = await deps.ledger();
   const allowed = repairAllowed(ledger, key, now);
   if (!allowed.allowed) {
     return {
@@ -152,6 +180,8 @@ export async function repairApiOperation(
       }
     };
   }
+  // the reservation is also written down, for a repair started from another window or after a restart
+  await deps.saveLedger(recordRepair(ledger, key, "running", now));
   const learned = await deps.learn({
     name: contract.name,
     page_url: input.page_url || contract.trigger.url,
@@ -164,7 +194,7 @@ export async function repairApiOperation(
     replace_recipe_id: input.recipe_id
   });
   const verified = learned.ok && learned.data.verification.status === "verified";
-  await deps.saveLedger(recordRepair(ledger, key, verified ? "repaired" : "failed", now));
+  await deps.saveLedger(recordRepair(await deps.ledger(), key, verified ? "repaired" : "failed", now));
   if (!learned.ok) return { ok: false, error: learned.error, data: { repaired_from: contract.operation_id } };
   return {
     ok: true,
