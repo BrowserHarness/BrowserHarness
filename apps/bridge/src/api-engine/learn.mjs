@@ -176,10 +176,12 @@ export function learnApiOperation(input) {
     side_effect: input.side_effect === "read" || input.side_effect === "write" ? input.side_effect : undefined,
     description: typeof input.description === "string" ? input.description.slice(0, 500) : undefined,
     private_params: Array.isArray(input.private_params) ? input.private_params.map(String) : [],
-    source: input.source || "two_example_learning",
+    source: input.source === "repair" || input.source === "watch_me" || input.source === "network_capture" ? input.source : "two_example_learning",
     evidence_ids: Array.isArray(input.evidence_ids) ? input.evidence_ids.map(String).slice(0, 20) : [],
     storage: run1.storage,
-    warnings
+    warnings,
+    ...(typeof input.parent_operation_id === "string" ? { parent_operation_id: input.parent_operation_id } : {}),
+    example_inputs: { learning: args2 ? [args1, args2] : [args1] }
   });
 
   // Fail closed: a live cookie or storage value anywhere in the contract means

@@ -214,6 +214,52 @@ try {
     JSON.stringify(guardedRun.error || guardedRun.data?.run?.output).slice(0, 300)
   );
 
+  // Health, drift and repair: the active revision never changes on its own
+  const skillId = learned.data?.candidate_id;
+  const promoted = await command("agent", "site_skill", { action: "promote", id: skillId });
+  check("the verified Skill can be promoted on request", promoted.ok, JSON.stringify(promoted.error || "").slice(0, 300));
+  const activeBefore = (await side.evaluate(async () => (await chrome.storage.local.get("browserharness.siteSkillLibrary.v2"))["browserharness.siteSkillLibrary.v2"])).families.find((item) => item.id === skillId).active_revision_id;
+  const health = await command("agent", "site_skill", { action: "verify", id: skillId });
+  check(
+    "site_skill verify calls each learned read live with a taught input",
+    health.ok && health.data.health.length === 4 && health.data.health.every((item) => item.passed),
+    JSON.stringify(health.data?.health || health.error).slice(0, 400)
+  );
+
+  shop.state.searchPath = "/api/v2/search";
+  const drifted = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: learned.data?.recipe_id, parameters: { q: "tablets" } });
+  check(
+    "when the site moves its API, the run fails as endpoint drift and suggests repair",
+    !drifted.ok && drifted.error?.code === "API_ENDPOINT_DRIFT" && drifted.data?.repair_recommended === true && /site_skill repair/.test(drifted.data?.next_action),
+    JSON.stringify(drifted).slice(0, 300)
+  );
+  const repairStarted = performance.now();
+  const repaired = await command("agent", "site_skill", { action: "repair", id: skillId, recipe_id: learned.data?.recipe_id });
+  timings.push(["site_skill repair (2 page runs + learn + live check)", Math.round(performance.now() - repairStarted)]);
+  check(
+    "repair learns it again from its page as a verified candidate revision",
+    repaired.ok && repaired.data.verification === "verified" && repaired.data.changes.some((item) => item.includes("/api/v2/search")),
+    JSON.stringify(repaired.error || repaired.data).slice(0, 400)
+  );
+  const libraryAfter = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.siteSkillLibrary.v2"))["browserharness.siteSkillLibrary.v2"]);
+  const familyAfter = libraryAfter.families.find((item) => item.id === skillId);
+  check("the active revision is unchanged by the repair", familyAfter.active_revision_id === activeBefore && familyAfter.latest_revision_id === repaired.data?.proposed_revision_id);
+  const stillActive = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: learned.data?.recipe_id, parameters: { q: "tablets" } });
+  check("until promoted, runs still use the active revision", !stillActive.ok && stillActive.error.code === "API_ENDPOINT_DRIFT");
+  const promotedRepair = await command("agent", "site_skill", { action: "promote", id: skillId, revision_id: repaired.data?.proposed_revision_id });
+  const afterRepair = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: repaired.data?.recipe_id, parameters: { q: "tablets" } });
+  check(
+    "after promotion the repaired operation answers from the new endpoint",
+    promotedRepair.ok && afterRepair.ok && JSON.stringify(afterRepair.data.run.output.data).includes("Slate tablet"),
+    JSON.stringify(promotedRepair.error || afterRepair.error || "").slice(0, 300)
+  );
+  const again = await command("agent", "site_skill", { action: "repair", id: skillId, recipe_id: repaired.data?.recipe_id });
+  check("repairs are bounded: an immediate second repair waits", !again.ok && again.error.code === "API_REPAIR_COOLDOWN", JSON.stringify(again.error));
+  shop.state.field = "products";
+  const schema = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: repaired.data?.recipe_id, parameters: { q: "tablets" } });
+  check("a renamed response field is schema drift", !schema.ok && schema.error.code === "API_SCHEMA_DRIFT", JSON.stringify(schema.error));
+  shop.state.field = "items";
+
   const write = await command("learn-api", "site_skill", {
     action: "learn_api",
     name: "addToCart",

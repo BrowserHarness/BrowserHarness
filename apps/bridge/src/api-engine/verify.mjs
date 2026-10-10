@@ -62,5 +62,9 @@ export async function verifyUnseenInput(contractInput, args, { examples = [], ex
         : contract.transport
   };
   if (contract.side_effect !== "read") verified.verification.status = "unverified";
+  // the unseen input is kept with the learning inputs, for later health checks and repair
+  if (outcome.check.passed && contract.provenance.example_inputs) {
+    verified.provenance = { ...contract.provenance, example_inputs: { ...contract.provenance.example_inputs, unseen: args } };
+  }
   return { contract: parseContract(verified), check: outcome.check, ...(outcome.response ? { response: outcome.response } : {}) };
 }

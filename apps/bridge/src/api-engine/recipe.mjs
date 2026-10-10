@@ -79,7 +79,14 @@ export const ApiOperationContractSchema = z.object({
     learned_at: z.string(),
     evidence_ids: z.array(z.string()).default([]),
     warnings: z.array(z.string().max(500)).default([]),
-    parent_operation_id: z.string().optional()
+    parent_operation_id: z.string().optional(),
+    /** the inputs a person typed to teach it (never kept when a param is private), for health checks and repair */
+    example_inputs: z
+      .object({
+        learning: z.array(z.record(z.string(), z.unknown())).max(2),
+        unseen: z.record(z.string(), z.unknown()).optional()
+      })
+      .optional()
   })
 });
 
@@ -212,7 +219,8 @@ export function contractFromOperation(operation, meta) {
       learned_at: operation.learnedAt || new Date().toISOString(),
       evidence_ids: meta.evidence_ids || [],
       warnings: (meta.warnings || []).map((warning) => String(warning).slice(0, 500)).slice(0, 20),
-      ...(meta.parent_operation_id ? { parent_operation_id: meta.parent_operation_id } : {})
+      ...(meta.parent_operation_id ? { parent_operation_id: meta.parent_operation_id } : {}),
+      ...(meta.example_inputs && !(meta.private_params || []).length ? { example_inputs: meta.example_inputs } : {})
     }
   });
 }

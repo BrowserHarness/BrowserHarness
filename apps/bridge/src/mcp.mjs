@@ -125,9 +125,9 @@ const TOOL_SPECS = [
     id: optional(z.string(), "Episode id for get/delete"),
     limit: optional(z.number().int().positive(), "Maximum results")
   }],
-  ["site_skill", "Saved website Skills: list, run, create from the current page, learn a website's own API from two examples (learn_api), verify, history, compare, promote, rollback or delete.", {
+  ["site_skill", "Saved website Skills: list, run, create from the current page, learn a website's own API from two examples (learn_api), verify, repair a learned operation the site changed, history, compare, promote, rollback or delete.", {
     action: action(
-      ["list", "get", "create", "learn_api", "verify", "run", "refine", "history", "compare", "promote", "rollback", "delete"],
+      ["list", "get", "create", "learn_api", "verify", "run", "refine", "repair", "history", "compare", "promote", "rollback", "delete"],
       "What to do"
     ),
     id: optional(z.string(), "Skill id (for learn_api: add the operation to this Skill)"),
@@ -136,8 +136,8 @@ const TOOL_SPECS = [
     parameters: optional(z.record(z.string(), z.unknown()), "Values for run"),
     name: optional(z.string(), "Name for create; operation name for learn_api, like search"),
     page_url: optional(z.string(), "learn_api: the page address with {input} where each input goes"),
-    examples: optional(z.array(z.record(z.string(), z.unknown())), "learn_api: two example inputs with different values"),
-    verify_args: optional(z.record(z.string(), z.unknown()), "learn_api: a third input neither example used, to check the operation live"),
+    examples: optional(z.array(z.record(z.string(), z.unknown())), "learn_api/repair: two example inputs with different values"),
+    verify_args: optional(z.record(z.string(), z.unknown()), "learn_api/repair: a third input neither example used, to check the operation live"),
     skill_name: optional(z.string(), "learn_api: name for a new Skill")
   }],
   ["cdp", "Raw Chrome DevTools Protocol call; last resort when no other tool fits.", {
