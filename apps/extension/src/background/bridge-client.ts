@@ -43,6 +43,7 @@ let handler: BridgeCommandHandler | null = null;
 const pendingMcp = new Map<string, PendingMcpRequest>();
 const pendingLlm = new Map<string, PendingMcpRequest>();
 const pendingChat = new Map<string, PendingMcpRequest>();
+const pendingApi = new Map<string, PendingMcpRequest>();
 
 function clearTimers() {
   if (heartbeatTimer !== undefined) {
@@ -89,6 +90,14 @@ function disconnect() {
     });
   }
   pendingChat.clear();
+  for (const pending of pendingApi.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({
+      ok: false,
+      error: { code: "BRIDGE_DISCONNECTED", message: "The helper app disconnected before the website API request finished" }
+    });
+  }
+  pendingApi.clear();
 
   if (socket) {
     const existing = socket;
@@ -157,6 +166,27 @@ async function handleMessage(raw: MessageEvent) {
             }
           })
     });
+    return;
+  }
+
+  if (value.type === "api_result" && typeof value.id === "string") {
+    const pending = pendingApi.get(value.id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingApi.delete(value.id);
+    const errorValue = value.error as { code?: unknown; message?: unknown; candidates?: unknown } | undefined;
+    pending.resolve(
+      value.ok === true
+        ? { ok: true, data: value.data }
+        : {
+            ok: false,
+            error: {
+              code: typeof errorValue?.code === "string" ? errorValue.code : "API_ENGINE_FAILED",
+              message: typeof errorValue?.message === "string" ? errorValue.message : "The website API engine couldn't finish that",
+              ...(Array.isArray(errorValue?.candidates) ? { details: JSON.stringify(errorValue.candidates).slice(0, 4000) } : {})
+            }
+          }
+    );
     return;
   }
 
@@ -410,6 +440,50 @@ export async function requestBridgeMcp(
             error instanceof Error
               ? error.message
               : "Could not send outbound MCP request"
+        }
+      });
+    }
+  });
+}
+
+export type BridgeApiAction = "status" | "propose" | "learn" | "verify" | "call";
+
+/**
+ * The Bridge's API engine (learning, unseen-input verification, tier-1 calls).
+ * `approved` is set only after the person approved the write it carries.
+ * Captures and session values ride in this one message and are not kept.
+ */
+export async function requestBridgeApi(
+  action: BridgeApiAction,
+  payload: Record<string, unknown>,
+  { approved = false, timeoutMs = 90_000 }: { approved?: boolean; timeoutMs?: number } = {}
+): Promise<BridgeRpcResult> {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !currentSettings?.enabled) {
+    return {
+      ok: false,
+      error: {
+        code: "API_ENGINE_UNAVAILABLE",
+        message: "Learning a website's API needs the helper app (Settings → Helper app)"
+      }
+    };
+  }
+  const id = crypto.randomUUID();
+  return new Promise<BridgeRpcResult>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingApi.delete(id);
+      resolve({ ok: false, error: { code: "API_REQUEST_TIMEOUT", message: "The website API request timed out" } });
+    }, timeoutMs) as unknown as number;
+    pendingApi.set(id, { resolve, timer });
+    try {
+      socket?.send(JSON.stringify({ type: "api_request", id, action, payload, approved }));
+    } catch (error) {
+      clearTimeout(timer);
+      pendingApi.delete(id);
+      resolve({
+        ok: false,
+        error: {
+          code: "BRIDGE_DISCONNECTED",
+          message: error instanceof Error ? error.message : "Could not send the website API request"
         }
       });
     }

@@ -1,0 +1,123 @@
+# API Recipe v2
+
+Status: implemented for reads (learning, unseen-input verification, tier-1 calls). Tiers 2 and 3, repair and Watch Me learning are later work packages (see `docs/architecture/API-ENGINE-ADR.md`).
+
+An API Recipe v2 is a Site Skill recipe whose one step is a learned website operation: the request a page makes when someone uses it (a search, a lookup, a GraphQL query), with where each input goes, where each credential comes from, what the answer looks like, and how it was checked. It lives in the same Site Skill library as form recipes, with the same revisions, evaluations, promotion gate and rollback. There is one registry.
+
+## Where it sits
+
+```
+SiteCandidateSkill (schema_version 1)
+└─ recipes[]
+   ├─ form recipe          steps: input… submit         kind: ui
+   ├─ api_fetch recipe     steps: api_fetch (GET, v1)   kind: api
+   └─ API Recipe v2        steps: api_operation         kind: api
+                           form_index: -1
+                           id: recipe-api-v2-<operation hash>
+```
+
+`recipe.kind` (`ui`, `api`, `hybrid`) is optional and derived from the steps when absent. Older recipes are unchanged and load as before.
+
+The step:
+
+```json
+{ "kind": "api_operation", "contract": { ... }, "approval": "none_read_only" }
+```
+
+`approval` is `none_read_only` only when the contract's `side_effect` is `read`. Anything else is `browserharness_runtime`: `site_skill run` returns `APPROVAL_REQUIRED` until the person approves it.
+
+## The contract
+
+Owned by the Bridge (`apps/bridge/src/api-engine/recipe.mjs`, zod schema `ApiOperationContractSchema`); the extension mirrors it as `ApiOperationContract` (`apps/extension/src/runtime/api-recipe.ts`). `request`, `slots`, `volatile`, `params`, `response`, `match` and `trigger` are API Anything's operation parts at the vendored commit, unchanged, so the vendored codec, HTTP sender and classifier work on them directly.
+
+| Field | Meaning |
+|---|---|
+| `contract_version` | `2` |
+| `operation_id` | `op-` + 16 hex of sha256(origin, name, match). Stable across rotating ids and hashes. |
+| `name`, `description` | Operation name (`search`) and an optional sentence. |
+| `origin` | `https://host[:port]` the request goes to. |
+| `side_effect` | `read`, `write` or `unknown`. `unknown` is treated as a write everywhere. |
+| `side_effect_basis` | Why: "GET without an action-looking path", "GraphQL query", "POST to a search-like path /api/search", "declared a write by the person"… The HTTP method alone never makes something a read. |
+| `request` | The captured request as a template: method, URL, kept headers, body. Example values are still in it; slots overwrite them. No `cookie` header. |
+| `slots[]` | Where each input goes: `{param, at, template?}`; `at` is a path of steps (`query:q`, `path:2`, `form:f.req`, `header:x`, `body`, `json:/variables/filter/term`, `b64`). A slot with `ref` is a credential reference instead. |
+| `volatile[]` | Values that change per page load (nonces, signatures) and how they are re-derived. |
+| `params[]` | `{name, type, required, example?, default?, pattern?}`. An example the person typed is kept for health checks unless named in `private_params` at learning time. |
+| `session_refs[]` | Names of `cookie:<name>` and `session:<op>/<key>` references. Names only. |
+| `session_sources[]` | Where each reference's value comes from at call time: `cookie` (by name), `storage` (a page localStorage/sessionStorage key, optionally a JSON path inside it) or `page` (a value only the page's own script produces, so only tiers 2 and 3 can send it). |
+| `public[]` | Header or field names a person marked as public constants. |
+| `response` | How to read the answer: `format`, `extract` (a path such as `data.search.products`), `pick`, `shape` (key paths and types, for drift detection). |
+| `match` | Stable identity of the request (method, host, path with `*` segments, GraphQL operationName). Never a query hash. |
+| `trigger` | The page that makes the request, with `{param}` holes: `https://shop.example/search?q={q}`. |
+| `min_tier` | `1` when plain HTTP can send it; `3` when the two runs showed values that change per load with no input change. |
+| `learned_logged_in` | Whether the learning runs looked signed in. |
+| `transport` | `{preference: [1,2,3], learned_tier?}`; `learned_tier` is the tier that last answered. |
+| `verification` | `{status: unverified|verified|failed, checks[]}`; see below. |
+| `provenance` | `{source, engine, learned_at, evidence_ids, warnings, parent_operation_id?}`. `engine` names this engine and the vendored upstream commit. |
+
+A contract never holds a cookie value, a token, a password, a session storage value or a response body. The learner runs upstream's secret scan over the finished contract with every cookie and storage value from both runs, and refuses to return it (`API_LEARN_SECRET`) if any of them appears anywhere in it.
+
+A complete example learned from the local fixture shop is `apps/extension/src/runtime/api-recipe.fixture.ts`.
+
+## Learning (`site_skill learn_api`)
+
+Input:
+
+```json
+{
+  "action": "learn_api",
+  "name": "search",
+  "page_url": "https://shop.example/search?q={q}",
+  "examples": [{ "q": "laptops" }, { "q": "keyboards" }],
+  "verify_args": { "q": "monitors" },
+  "id": "optional: add to this Site Skill",
+  "skill_name": "optional: name for a new Site Skill"
+}
+```
+
+1. The extension opens `page_url` filled with each example in a background tab the task owns, records the network from before the page loads until it has been quiet for 1.2 s, reads the run's cookies (CDP `Network.getCookies`, no `cookies` permission) and page storage, and closes the tab.
+2. It sends both runs to the Bridge in one `api_request` (`learn`). The Bridge converts them to upstream's capture shape and runs upstream's deterministic learner: rank the requests carrying the example values, place each param, turn live cookie and storage values into references, diff the two runs for nonces, build the match and learn the response recipe. No model is used.
+3. The Bridge judges each run's own answer with the learned recipe (`learned_examples` checks), then calls the operation live with `verify_args` (`unseen_input`). The check passes only when the call succeeds, finds items, and its data differs from both learning runs' data, so a recipe whose input never reaches the request cannot pass. An input that repeats an example is refused.
+4. The captures, cookies and storage values are dropped. The extension saves a new candidate revision (`create`, or `refinement` when adding to an existing Skill), records a structural-verification evaluation (the contract checks) and an execution evaluation plus execution evidence (the live unseen-input call). Nothing is promoted: `site_skill promote` still needs both latest evaluations to have passed and the person to ask.
+
+Writes are not learned this way. `side_effect: "write"` is refused with `API_LEARN_WRITE_REFUSED` before any page opens, because running a page twice would send the write twice. Writes are learned from a demonstration the person makes and approves (Watch Me, a later work package).
+
+Errors: `API_LEARN_INPUT` (bad name, page_url without a `{param}` for each input, fewer than two examples, equal examples, no `verify_args`), `API_LEARN_RUN_FAILED` (a page did not load), `API_LEARN_FAILED` (no request carried the inputs; the error carries the ranked candidate requests, origin and path only), `API_LEARN_SECRET`, `API_ENGINE_UNAVAILABLE` (no helper app).
+
+## Running
+
+`site_skill run` with an API Recipe v2 recipe needs no tab. Reads run at once; anything else asks first. The extension passes the contract and the args to the Bridge (`api_request` `call`); the Bridge fills the slots, resolves session references from the cookies and storage handed over for that call only, sends the request, classifies the answer and extracts the data. Every answer is a live request; nothing returns a stored or example response.
+
+Site commands built from these recipes carry `needs_page: false`, so `site_commands` and `browserharness-bridge site <name>` run them without opening the site. A learned write is listed as a form-like command, which asks for approval.
+
+## Results
+
+Every tier returns the same shape:
+
+```json
+{
+  "ok": true, "class": "ok", "tier": 1, "status": 200, "ms": 41,
+  "data": [ ... ], "item_count": 2, "truncated": "only when capped",
+  "reason": "on failure", "next": "on failure, what to do",
+  "operation_id": "op-…", "fetched_at": "ISO time", "fresh": true
+}
+```
+
+Classes: `ok`, `input` (bad or missing input; nothing sent), `auth` (signed out, or a credential reference with no value), `rate_limited`, `blocked` (bot wall or bare 403), `network` (no answer to a read), `schema_drift` (answered without the data), `endpoint_drift` (404/405/410/501, or a redirect off the operation), `ambiguous_write` (a write that may have run: never resent; `next` says to check the site), `approval_required`, `unavailable` (this tier cannot send it: per-load values, or a page-only header).
+
+## Bridge messages
+
+The paired extension only (`API_EXTENSION_REQUIRED` for anyone else). One message per call; nothing is stored in the Bridge.
+
+```
+→ {"type":"api_request","id":"…","action":"status|propose|learn|verify|call","payload":{…},"approved":false}
+← {"type":"api_result","id":"…","ok":true,"data":{…}}
+← {"type":"api_result","id":"…","ok":false,"error":{"code":"API_…","message":"…","candidates":[…]}}
+```
+
+`approved: true` is sent only after the person approved the write it carries. `/status` reports `api_engine_enabled`.
+
+## Compatibility
+
+- Existing recipes (`input`, `submit`, `api_fetch`) and Skills load and run unchanged.
+- Downgrading is not supported for a library that holds API Recipe v2 recipes: an older extension's runner does not know `api_operation` and would treat it like the end of a form. Delete those recipes (or their Skills) before installing an older build.
+- Without the helper app, an API Recipe v2 recipe returns `API_ENGINE_UNAVAILABLE`; form recipes still run.

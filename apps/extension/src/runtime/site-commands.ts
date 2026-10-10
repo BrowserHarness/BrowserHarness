@@ -2,6 +2,7 @@
 // command with typed parameters, like `amazon-search --q kettle`. The side
 // panel runs it with /name, coding agents get it as a tool, and the Bridge
 // CLI runs it with `browserharness-bridge site <name>`.
+import { apiRecipeNeedsApproval } from "./api-recipe";
 import type { SiteSkillParameterType, SiteSkillRecipe } from "./site-skill";
 import { listSiteSkillFamilies, type SiteSkillFamilyRecord } from "./site-skill-store";
 import { loadAllSkills } from "./skills";
@@ -30,6 +31,8 @@ export interface SiteCommand {
   entry_url: string;
   /** read: fetches the site's own data, never changes anything. form: fills and sends a form. */
   kind: "read" | "form";
+  /** false for a learned API operation (API Recipe v2): it runs without opening the site */
+  needs_page?: boolean;
   status: "proven" | "testing" | "check failed";
   skill_id: string;
   revision_id: string;
@@ -75,6 +78,11 @@ export function siteLabel(origin: string): string {
 
 /** "GET /api/v2/products/search" → "products-search"; a form → its name. */
 export function recipeLabel(recipe: SiteSkillRecipe): string {
+  const operation = recipe.steps.find((step) => step.kind === "api_operation");
+  // a learned operation has its own name ("searchProducts" → "search-products")
+  if (operation?.kind === "api_operation") {
+    return slug(operation.contract.name.replace(/([a-z0-9])([A-Z])/g, "$1-$2")) || "data";
+  }
   if (recipe.form_index < 0) {
     const segments = recipe.action
       .split("/")
@@ -168,7 +176,9 @@ export function buildSiteCommands(
         site,
         origin: candidate.site.origin,
         entry_url: recipe.entry_url || candidate.site.entry_url,
-        kind: recipe.form_index < 0 ? "read" : "form",
+        // a learned API write runs like a form: it asks the person first
+        kind: recipe.form_index < 0 && !apiRecipeNeedsApproval(recipe) ? "read" : "form",
+        ...(recipe.steps.some((step) => step.kind === "api_operation") ? { needs_page: false } : {}),
         status,
         skill_id: family.id,
         revision_id: revisionId,

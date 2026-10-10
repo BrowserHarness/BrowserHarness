@@ -195,3 +195,7 @@ browserharness-bridge api-anything status     # tools, availability and diagnost
 Diagnostics: `GET /status` has `mcp_server_health` per server (`state`: idle, starting, connected, exited, failed, unavailable; `starts`, `startup_failures`, `exits`, `calls`, `call_errors`, `last_error`, `last_call_error`). A server whose process exits is restarted on its next use. Settings → Helper app → tools shows the same state in plain words.
 
 This adapter is a stepping stone. BrowserHarness's own learning and execution of website operations is the Native API Engine (`docs/protocols/API-RECIPE-V2.md`).
+
+## Native API engine (`api_request`)
+
+The paired extension reaches the Bridge's API engine with `api_request` / `api_result` WebSocket messages (`status`, `propose`, `learn`, `verify`, `call`). The engine learns website operations from two page runs, checks them with an unseen input and sends tier-1 calls; it keeps no captures, cookies or contracts between messages. Contracts live in the extension's Site Skill library as API Recipe v2 recipes. See `docs/protocols/API-RECIPE-V2.md`.
