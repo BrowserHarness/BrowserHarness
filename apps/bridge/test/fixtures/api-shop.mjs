@@ -179,7 +179,24 @@ if (q) fetch(${JSON.stringify(api)} + "?q=" + encodeURIComponent(q), { headers, 
 
     if (url.pathname === "/api/cart" && req.method === "POST") {
       state.writes += 1;
-      json(200, { ok: true, cart_size: state.writes });
+      let note = "";
+      try {
+        note = String(JSON.parse(body).note || "");
+      } catch {}
+      json(200, { ok: true, cart_size: state.writes, items: [{ sku: "lt-1", note }] });
+      return;
+    }
+
+    // a write a person demonstrates: a note typed, then Add
+    if (url.pathname === "/cart") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Cart</title><label>Gift note <input id="note" name="note"></label><button id="add" type="button">Add to cart</button><p id="done"></p>
+<script>
+document.getElementById("add").addEventListener("click", () => {
+  fetch("/api/cart", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sku: "lt-1", note: document.getElementById("note").value }) })
+    .then((r) => r.json()).then((data) => { document.getElementById("done").textContent = "Added (" + data.cart_size + ")"; });
+});
+</script>`);
       return;
     }
 

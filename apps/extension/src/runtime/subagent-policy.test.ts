@@ -55,10 +55,18 @@ describe("read-only worker tool policy", () => {
     expect(
       readOnlyWorkerToolPolicy(
         "site_skill",
-        { action: "run", id: "SK-1" },
+        { action: "promote", id: "SK-1" },
         state
       ).allowed
     ).toBe(false);
+    // a run is allowed here and narrowed to learned API reads when it is forwarded
+    expect(
+      readOnlyWorkerToolPolicy(
+        "site_skill",
+        { action: "run", id: "SK-1" },
+        state
+      ).allowed
+    ).toBe(true);
   });
 
   it("requires a worker-owned tab before navigation", async () => {
@@ -207,7 +215,9 @@ describe("acting helper tool policy", () => {
     for (const tool of ["evaluate", "cdp", "upload", "agent", "await_user_action"] as ToolName[]) {
       expect(await run(tool, {})).toMatchObject({ ok: false, error: { code: "SUBAGENT_SCOPE_DENIED" } });
     }
-    expect(await run("site_skill", { action: "run" })).toMatchObject({ ok: false });
+    // a Skill run goes through only as a learned API read; the run itself refuses anything else
+    await run("site_skill", { action: "run", id: "SK" });
+    expect(mock).toHaveBeenLastCalledWith("site_skill", { action: "run", id: "SK", api_read_only: true }, undefined);
     expect(await run("memory", { action: "save" })).toMatchObject({ ok: false });
   });
 

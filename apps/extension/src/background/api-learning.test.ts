@@ -148,3 +148,54 @@ describe("site_skill learn_api", () => {
     expect(saved).toHaveLength(0);
   });
 });
+
+describe("site_skill learn_api from Watch Me", () => {
+  function recording(id: string, search: string) {
+    return {
+      recording_id: id,
+      start_url: "https://shop.example/",
+      capture: capture(`https://shop.example/search?q=${search}`),
+      examples: { search, note: "same" },
+      kept_at: 0
+    };
+  }
+  const kept: Record<string, ReturnType<typeof recording>> = { a: recording("a", "laptops"), b: recording("b", "keyboards") };
+  const watchDeps = (extra: Partial<ApiLearnDeps> = {}) =>
+    deps({ watchCapture: vi.fn((id: string) => kept[id] || null), forgetWatch: vi.fn(), ...extra });
+
+  it("learns from two recordings' captures with the fields typed differently, without running the page", async () => {
+    const { deps: d } = watchDeps();
+    const outcome = await learnApiOperation(d, { name: "search", from_watch: ["a", "b"], verify_args: { search: "monitors" } } as never);
+    expect(outcome.ok).toBe(true);
+    expect(d.runPage).not.toHaveBeenCalled();
+    const payload = vi.mocked(d.bridge).mock.calls[0][1];
+    expect(payload).toMatchObject({ source: "watch_me", examples: [{ search: "laptops" }, { search: "keyboards" }], evidence_ids: ["watch-a"] });
+    expect(payload.trigger).toBeUndefined();
+    expect(payload.captures).toHaveLength(2);
+    expect(d.dispatch).toHaveBeenCalledWith(expect.anything(), { search: "monitors" });
+    expect(d.forgetWatch).toHaveBeenCalledWith("a");
+    expect(d.forgetWatch).toHaveBeenCalledWith("b");
+  });
+
+  it("learns a demonstrated write without sending it, keeping no typed values", async () => {
+    const write = { ...searchContract(), side_effect: "write" as const, verification: { status: "unverified" as const, checks: [] } };
+    const { deps: d, executions } = watchDeps({
+      bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: ["f1"] } }))
+    });
+    const outcome = await learnApiOperation(d, { name: "post", from_watch: ["a"], side_effect: "write", verify_args: { search: "x" } } as never);
+    expect(outcome.ok).toBe(true);
+    expect(d.dispatch).not.toHaveBeenCalled();
+    expect(vi.mocked(d.bridge)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ side_effect: "write", private_params: ["search", "note"] });
+    expect(executions).toHaveLength(0);
+    if (outcome.ok) expect(outcome.data.promotion).toMatch(/never sent to check it/);
+  });
+
+  it("says when a recording's capture is gone or typed nothing different", async () => {
+    const { deps: d } = watchDeps();
+    expect(await learnApiOperation(d, { name: "search", from_watch: ["gone"] } as never)).toMatchObject({ ok: false, error: { code: "API_LEARN_WATCH_MISSING" } });
+    kept.c = { ...recording("c", "laptops") };
+    expect(await learnApiOperation(d, { name: "search", from_watch: ["a", "c"] } as never)).toMatchObject({ ok: false, error: { code: "API_LEARN_INPUT" } });
+    expect(d.bridge).not.toHaveBeenCalled();
+  });
+});
