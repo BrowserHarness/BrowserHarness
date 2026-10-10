@@ -33,7 +33,9 @@ export interface ApiLearnInput {
 
 export interface ApiLearnDeps {
   runPage(url: string): Promise<ApiCapture>;
-  bridge(action: "learn", payload: Record<string, unknown>): Promise<BridgeRpcResult>;
+  bridge(action: "learn" | "verify", payload: Record<string, unknown>): Promise<BridgeRpcResult>;
+  /** runs the learned operation by tier (hybrid dispatcher), for the live unseen-input check */
+  dispatch(contract: ApiOperationContract, args: Record<string, unknown>): Promise<ApiCallResult>;
   loadBase(id: string): Promise<{ candidate: SiteCandidateSkill; revision_id: string } | null>;
   save(candidate: SiteCandidateSkill, reason: "create" | "refinement"): Promise<{ revision_id: string }>;
   evaluate(id: string, revisionId: string, entry: { kind: "structural-verification" | "execution"; outcome: "passed" | "failed"; detail: string }): Promise<void>;
@@ -56,6 +58,7 @@ export type ApiLearnOutcome =
         operation: Pick<ApiOperationContract, "operation_id" | "name" | "side_effect" | "side_effect_basis" | "params" | "session_refs" | "min_tier">;
         verification: ApiOperationContract["verification"];
         result_preview?: unknown;
+        answered_by_tier?: number;
         warnings: string[];
         promotion: string;
       };
@@ -122,7 +125,6 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
     captures,
     examples,
     trigger: { url: input.page_url },
-    verify_args: input.verify_args,
     ...(input.side_effect ? { side_effect: input.side_effect } : {}),
     ...(input.description ? { description: input.description } : {}),
     ...(input.private_params ? { private_params: input.private_params } : {}),
@@ -134,9 +136,23 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
   if (!learned.ok) {
     return { ok: false, error: learned.error || { code: "API_ENGINE_FAILED", message: "Learning failed" } };
   }
-  const data = learned.data as { contract?: unknown; warnings?: string[]; verification?: ApiVerificationCheck; verification_response?: ApiCallResult };
+  const data = learned.data as { contract?: unknown; warnings?: string[]; example_fingerprints?: string[] };
   if (!isApiContract(data?.contract)) return fail("API_ENGINE_FAILED", "The helper app returned no operation contract");
-  const contract = data.contract;
+
+  // the unseen input, live, through the same tiers a run uses (a signed-in read answers in the page)
+  const response = await deps.dispatch(data.contract, input.verify_args);
+  const checked = await deps.bridge("verify", {
+    contract: data.contract,
+    args: input.verify_args,
+    examples,
+    example_fingerprints: data.example_fingerprints || [],
+    response
+  });
+  if (!checked.ok) return { ok: false, error: checked.error || { code: "API_ENGINE_FAILED", message: "Verification failed" } };
+  const verifiedData = checked.data as { contract?: unknown; check?: ApiVerificationCheck };
+  if (!isApiContract(verifiedData?.contract)) return fail("API_ENGINE_FAILED", "The helper app returned no operation contract");
+  const contract = verifiedData.contract;
+  const check = verifiedData.check;
 
   let candidate: SiteCandidateSkill;
   try {
@@ -154,7 +170,6 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
   const recipeId = apiRecipeFromContract(contract, candidate.site.entry_url).id;
   const saved = await deps.save(candidate, base ? "refinement" : "create");
   const verified = contract.verification.status === "verified";
-  const check = data.verification;
   await deps.evaluate(candidate.id, saved.revision_id, {
     kind: "structural-verification",
     outcome: verified ? "passed" : "failed",
@@ -197,7 +212,7 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
         min_tier: contract.min_tier
       },
       verification: contract.verification,
-      ...(data.verification_response?.ok ? { result_preview: data.verification_response.data } : {}),
+      ...(response.ok ? { result_preview: response.data, answered_by_tier: response.tier } : {}),
       warnings: Array.isArray(data.warnings) ? data.warnings : [],
       promotion: verified
         ? "Saved as a candidate. Promote it with site_skill promote once you are happy with it."

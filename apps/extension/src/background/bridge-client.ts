@@ -446,7 +446,16 @@ export async function requestBridgeMcp(
   });
 }
 
-export type BridgeApiAction = "status" | "propose" | "learn" | "verify" | "call";
+export type BridgeApiAction =
+  | "status"
+  | "propose"
+  | "learn"
+  | "verify"
+  | "call"
+  | "page_request"
+  | "page_answer"
+  | "page_trigger"
+  | "page_run";
 
 /**
  * The Bridge's API engine (learning, unseen-input verification, tier-1 calls).

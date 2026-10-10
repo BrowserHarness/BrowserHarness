@@ -1,6 +1,6 @@
 # API Recipe v2
 
-Status: implemented for reads (learning, unseen-input verification, tier-1 calls). Tiers 2 and 3, repair and Watch Me learning are later work packages (see `docs/architecture/API-ENGINE-ADR.md`).
+Status: implemented for reads (learning, unseen-input verification) and for running at all three tiers. Repair and Watch Me learning of writes are later work packages (see `docs/architecture/API-ENGINE-ADR.md`).
 
 An API Recipe v2 is a Site Skill recipe whose one step is a learned website operation: the request a page makes when someone uses it (a search, a lookup, a GraphQL query), with where each input goes, where each credential comes from, what the answer looks like, and how it was checked. It lives in the same Site Skill library as form recipes, with the same revisions, evaluations, promotion gate and rollback. There is one registry.
 
@@ -83,9 +83,26 @@ Writes are not learned this way. `side_effect: "write"` is refused with `API_LEA
 
 Errors: `API_LEARN_INPUT` (bad name, page_url without a `{param}` for each input, fewer than two examples, equal examples, no `verify_args`), `API_LEARN_RUN_FAILED` (a page did not load), `API_LEARN_FAILED` (no request carried the inputs; the error carries the ranked candidate requests, origin and path only), `API_LEARN_SECRET`, `API_ENGINE_UNAVAILABLE` (no helper app).
 
-## Running
+## Running: three tiers
 
-`site_skill run` with an API Recipe v2 recipe needs no tab. Reads run at once; anything else asks first. The extension passes the contract and the args to the Bridge (`api_request` `call`); the Bridge fills the slots, resolves session references from the cookies and storage handed over for that call only, sends the request, classifies the answer and extracts the data. Every answer is a live request; nothing returns a stored or example response.
+`site_skill run` with an API Recipe v2 recipe needs no tab of the person's. Reads run at once; anything else asks first. Every answer comes from a request made for that call; nothing returns a stored or example response.
+
+| Tier | Who sends it | Session | When it cannot |
+|---|---|---|---|
+| 1 | The Bridge, plain HTTP | none from the browser (no cookie export) | `min_tier` above 1, a page-only value, or a reference with no value (`unavailable`/`auth`, nothing sent) |
+| 2 | A page of the site: a background tab on the trigger page's origin (`/robots.txt`, a light same-origin document) runs `fetch()` with `credentials: "include"` and `redirect: "manual"` | the browser's own cookies; storage references read from that page for this call | `min_tier` 3, or a page-only header |
+| 3 | The site's own page: a background tab loads the trigger URL with the inputs, BrowserHarness records the network and the Bridge finds the request matching the operation and judges its answer | everything the page has | writes, and triggers with UI steps (not replayed yet) |
+
+The Bridge builds every request (`page_request`), judges every answer (`call`, `page_answer`, `page_run`) and applies tier 1's redirect policy; the extension only does what needs the browser. Tabs opened for tiers 2 and 3 are closed after the call.
+
+The dispatcher (`apps/extension/src/runtime/api-dispatch.ts`):
+
+- Order: `transport.preference` (default 1, 2, 3), never below `min_tier`, with the tier that last answered for this operation first (remembered in `browserharness.apiTransport.v1`, a number per operation id, no values; separate from the immutable revision).
+- A read moves to the next tier on `unavailable`, `auth`, `blocked` or `network`. It stops on `input`, `rate_limited`, `schema_drift`, `endpoint_drift` and `approval_required`.
+- A write gets one attempt that reaches the site. It moves on only when nothing was sent (`sent: false` with `unavailable` or `auth`). Anything else, including a transport that threw, ends the call; a failure after sending is `ambiguous_write` with `next` saying to check the site.
+- The result carries `attempts[]`: tier, class, whether it was sent, reason, time.
+
+The live unseen-input check at learning time goes through the same dispatcher, so a signed-in read verifies in the page (tier 2) and a request with a per-load signature verifies through the page itself (tier 3). The Bridge's `verify` action judges the answer the extension got.
 
 Site commands built from these recipes carry `needs_page: false`, so `site_commands` and `browserharness-bridge site <name>` run them without opening the site. A learned write is listed as a form-like command, which asks for approval.
 
@@ -95,10 +112,11 @@ Every tier returns the same shape:
 
 ```json
 {
-  "ok": true, "class": "ok", "tier": 1, "status": 200, "ms": 41,
+  "ok": true, "class": "ok", "tier": 1, "sent": true, "status": 200, "ms": 41,
   "data": [ ... ], "item_count": 2, "truncated": "only when capped",
   "reason": "on failure", "next": "on failure, what to do",
-  "operation_id": "op-…", "fetched_at": "ISO time", "fresh": true
+  "operation_id": "op-…", "fetched_at": "ISO time", "fresh": true,
+  "attempts": [{ "tier": 1, "class": "auth", "sent": true }, { "tier": 2, "class": "ok", "sent": true }]
 }
 ```
 
@@ -109,7 +127,7 @@ Classes: `ok`, `input` (bad or missing input; nothing sent), `auth` (signed out,
 The paired extension only (`API_EXTENSION_REQUIRED` for anyone else). One message per call; nothing is stored in the Bridge.
 
 ```
-→ {"type":"api_request","id":"…","action":"status|propose|learn|verify|call","payload":{…},"approved":false}
+→ {"type":"api_request","id":"…","action":"status|propose|learn|verify|call|page_request|page_answer|page_trigger|page_run","payload":{…},"approved":false}
 ← {"type":"api_result","id":"…","ok":true,"data":{…}}
 ← {"type":"api_result","id":"…","ok":false,"error":{"code":"API_…","message":"…","candidates":[…]}}
 ```
@@ -120,4 +138,4 @@ The paired extension only (`API_EXTENSION_REQUIRED` for anyone else). One messag
 
 - Existing recipes (`input`, `submit`, `api_fetch`) and Skills load and run unchanged.
 - Downgrading is not supported for a library that holds API Recipe v2 recipes: an older extension's runner does not know `api_operation` and would treat it like the end of a form. Delete those recipes (or their Skills) before installing an older build.
-- Without the helper app, an API Recipe v2 recipe returns `API_ENGINE_UNAVAILABLE`; form recipes still run.
+- Without the helper app, an API Recipe v2 recipe returns `unavailable` at every tier (the Bridge builds and judges tier 2 and 3 requests too); form recipes still run.
