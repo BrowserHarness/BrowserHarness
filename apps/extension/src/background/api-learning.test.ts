@@ -21,16 +21,12 @@ function deps(overrides: Partial<ApiLearnDeps> = {}) {
   const executions: unknown[] = [];
   const base: ApiLearnDeps = {
     runPage: vi.fn(async (url: string) => capture(url)),
-    bridge: vi.fn(async (_action, payload) => ({
-      ok: true,
-      data: {
-        contract: searchContract(),
-        warnings: [],
-        verification: searchContract().verification.checks.at(-1),
-        verification_response: { ok: true, class: "ok", tier: 1, data: [{ id: "m1" }], item_count: 1, fetched_at: "", fresh: true },
-        echo: payload
-      }
-    })),
+    bridge: vi.fn(async (action, payload) =>
+      action === "learn"
+        ? { ok: true, data: { contract: { ...searchContract(), verification: { status: "unverified", checks: [] } }, warnings: [], example_fingerprints: ["f1", "f2"], echo: payload } }
+        : { ok: true, data: { contract: searchContract(), check: searchContract().verification.checks.at(-1) } }
+    ),
+    dispatch: vi.fn(async () => ({ ok: true, class: "ok" as const, tier: 2 as const, data: [{ id: "m1" }], item_count: 1, fetched_at: "", fresh: true as const })),
     loadBase: vi.fn(async () => null),
     save: vi.fn(async (candidate, reason) => {
       saved.push({ candidate, reason });
@@ -69,7 +65,12 @@ describe("site_skill learn_api", () => {
     expect(d.runPage).toHaveBeenNthCalledWith(1, "https://shop.example/search?q=laptops");
     expect(d.runPage).toHaveBeenNthCalledWith(2, "https://shop.example/search?q=lap%20tops%20%26%20more");
     const payload = vi.mocked(d.bridge).mock.calls[0][1];
-    expect(payload).toMatchObject({ name: "search", examples: input.examples, verify_args: { q: "monitors" }, trigger: { url: input.page_url }, evidence_ids: ["api-abc123"] });
+    expect(payload).toMatchObject({ name: "search", examples: input.examples, trigger: { url: input.page_url }, evidence_ids: ["api-abc123"] });
+    expect(d.dispatch).toHaveBeenCalledWith(expect.objectContaining({ name: "search" }), { q: "monitors" });
+    expect(vi.mocked(d.bridge).mock.calls[1]).toEqual([
+      "verify",
+      expect.objectContaining({ args: { q: "monitors" }, examples: input.examples, example_fingerprints: ["f1", "f2"], response: expect.objectContaining({ tier: 2 }) })
+    ]);
 
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({ reason: "create", candidate: { status: "candidate", lifecycle: { auto_promote: false } } });
@@ -82,6 +83,7 @@ describe("site_skill learn_api", () => {
     if (outcome.ok) {
       expect(outcome.data.operation).toMatchObject({ name: "search", side_effect: "read" });
       expect(outcome.data.result_preview).toEqual([{ id: "m1" }]);
+      expect(outcome.data.answered_by_tier).toBe(2);
       expect(outcome.data.promotion).toMatch(/Promote it with site_skill promote/);
     }
   });
@@ -104,10 +106,11 @@ describe("site_skill learn_api", () => {
   it("records a failed verification as failed evidence and says it will not be promoted", async () => {
     const failedCheck = { kind: "unseen_input", passed: false, tier: 1, class: "ok", arg_names: ["q"], detail: "found nothing", checked_at: "" };
     const { deps: d, evaluations } = deps({
-      bridge: vi.fn(async () => ({
-        ok: true,
-        data: { contract: { ...searchContract(), verification: { status: "failed", checks: [failedCheck] } }, verification: failedCheck }
-      }))
+      bridge: vi.fn(async (action) =>
+        action === "learn"
+          ? { ok: true, data: { contract: searchContract(), example_fingerprints: [] } }
+          : { ok: true, data: { contract: { ...searchContract(), verification: { status: "failed", checks: [failedCheck] } }, check: failedCheck } }
+      )
     });
     const outcome = await learnApiOperation(d, input);
     expect(outcome.ok).toBe(true);

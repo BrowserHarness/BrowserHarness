@@ -167,6 +167,53 @@ try {
     JSON.stringify(viaCommand.error || viaCommand.data || "").slice(0, 300)
   );
 
+  // Hybrid execution: a signed-in API (plain HTTP has no session, the page does)
+  const orders = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: learned.data?.candidate_id,
+    name: "orders",
+    page_url: `${shop.origin}/orders?q={q}`,
+    examples: [{ q: "laptops" }, { q: "keyboards" }],
+    verify_args: { q: "monitors" }
+  });
+  check(
+    "a signed-in read verifies through the page (tier 2) after plain HTTP answers auth",
+    orders.ok && orders.data.verification.status === "verified" && orders.data.answered_by_tier === 2,
+    JSON.stringify(orders.error || orders.data?.verification).slice(0, 400)
+  );
+  const orderRunStarted = performance.now();
+  const orderRun = await command("agent", "site_skill", { action: "run", id: learned.data?.candidate_id, recipe_id: orders.data?.recipe_id, parameters: { q: "tablets" } });
+  timings.push(["site_skill run of the signed-in read (remembered tier 2)", Math.round(performance.now() - orderRunStarted)]);
+  check(
+    "the next run goes straight to the remembered page tier",
+    orderRun.ok && orderRun.data.run.output.api.tier === 2 && JSON.stringify(orderRun.data.run.output.data).includes("Slate tablet"),
+    JSON.stringify(orderRun.error || orderRun.data?.run?.output).slice(0, 300)
+  );
+  check("the session cookie is still not stored anywhere in the library", !JSON.stringify(await side.evaluate(async () => chrome.storage.local.get(null))).includes(SESSION_COOKIE));
+
+  // A per-load signature: only the page itself can make the request (tier 3)
+  const guarded = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: learned.data?.candidate_id,
+    name: "guarded",
+    page_url: `${shop.origin}/guarded?q={q}`,
+    examples: [{ q: "laptops" }, { q: "keyboards" }],
+    verify_args: { q: "monitors" }
+  });
+  check(
+    "a request with a per-load signature is learned as page-only and verifies through the page (tier 3)",
+    guarded.ok && guarded.data.operation.min_tier === 3 && guarded.data.verification.status === "verified" && guarded.data.answered_by_tier === 3,
+    JSON.stringify(guarded.error || guarded.data?.verification).slice(0, 400)
+  );
+  const guardedStarted = performance.now();
+  const guardedRun = await command("agent", "site_skill", { action: "run", id: learned.data?.candidate_id, recipe_id: guarded.data?.recipe_id, parameters: { q: "tablets" } });
+  timings.push(["site_skill run of the page-only read (tier 3)", Math.round(performance.now() - guardedStarted)]);
+  check(
+    "it runs through the page and returns fresh data",
+    guardedRun.ok && guardedRun.data.run.output.api.tier === 3 && JSON.stringify(guardedRun.data.run.output.data).includes("Slate tablet"),
+    JSON.stringify(guardedRun.error || guardedRun.data?.run?.output).slice(0, 300)
+  );
+
   const write = await command("learn-api", "site_skill", {
     action: "learn_api",
     name: "addToCart",

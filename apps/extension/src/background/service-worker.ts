@@ -97,6 +97,8 @@ import { evaluatePageExpression } from "./page-evaluate";
 import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
 import { collectApiCapture, waitForNetworkQuiet } from "./api-capture";
 import { learnApiOperation, type ApiLearnInput } from "./api-learning";
+import { runTier } from "./api-transports";
+import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
 import { apiRecipeNeedsApproval, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
@@ -490,6 +492,8 @@ async function learnApiTool(
     {
       runPage: (url) => runPageForApiLearning(url, session),
       bridge: (action, payload) => requestBridgeApi(action, payload, { timeoutMs: 120_000 }),
+      // reads only: learn_api refuses writes before this point
+      dispatch: (contract, args) => callApiOperation(contract, args, false),
       loadBase: async (id) => {
         const revision = await getSiteSkillExecutableRevision(id);
         return revision ? { candidate: revision.candidate, revision_id: revision.revision_id } : null;
@@ -506,23 +510,18 @@ async function learnApiTool(
   );
 }
 
-/** Tier 1 through the Bridge. Hybrid tiers (in-page fetch, UI) arrive with the dispatcher. */
-async function callApiOperation(
+/** Hybrid execution: the remembered tier first, then cheapest first; a write gets one attempt that reaches the site. */
+function callApiOperation(
   contract: ApiOperationContract,
   args: Record<string, unknown>,
   approved: boolean
 ): Promise<ApiCallResult> {
-  const reply = await requestBridgeApi("call", { contract, args }, { approved });
-  if (reply.ok) return reply.data as ApiCallResult;
-  return {
-    ok: false,
-    class: reply.error?.code === "API_ENGINE_UNAVAILABLE" || reply.error?.code === "BRIDGE_DISCONNECTED" ? "unavailable" : "network",
-    tier: 1,
-    reason: reply.error?.message || "The helper app could not send it",
-    operation_id: contract.operation_id,
-    fetched_at: new Date().toISOString(),
-    fresh: true
-  };
+  return dispatchApiOperation(
+    { run: runTier, remembered: rememberedTier, remember: rememberTier },
+    contract,
+    args,
+    { approved }
+  );
 }
 
 /**

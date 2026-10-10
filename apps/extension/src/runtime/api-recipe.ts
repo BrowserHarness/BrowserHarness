@@ -87,6 +87,8 @@ export interface ApiCallResult {
   ok: boolean;
   class: ApiResultClass;
   tier: ApiTier;
+  /** whether a request left for the site (absent: assume it did) */
+  sent?: boolean;
   status?: number;
   ms?: number;
   data?: unknown;
