@@ -13,7 +13,7 @@ Date: 2026-10-10. Scope: the six-PR plan from the master implementation brief ("
 | [#49](https://github.com/BrowserHarness/BrowserHarness/pull/49) | Hybrid execution: tier 1 (Bridge HTTP), tier 2 (in-page request with the site's cookies), tier 3 (the site's own page); a dispatcher with a remembered tier |
 | [#50](https://github.com/BrowserHarness/BrowserHarness/pull/50) | Session references, failure classes, health checks, and bounded repair into candidate revisions |
 | [#51](https://github.com/BrowserHarness/BrowserHarness/pull/51) | Learning from Watch Me (the only path for writes), read-only helpers, planning preference, sanitized procedural memory, Skills screen details |
-| PR 6 (this one) | Hardening (failure fixtures, two speed fixes), regression gate, benchmark, capability manifest, this report, release zips |
+| [#52](https://github.com/BrowserHarness/BrowserHarness/pull/52) | Hardening (failure fixtures, two speed fixes), regression gate, benchmark, capability manifest, this report, release zips |
 
 How it fits together:
 
