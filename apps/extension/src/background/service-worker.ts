@@ -546,7 +546,7 @@ async function runApiOperationRecipe(
       data: { revision_id: revision.revision_id },
       error: {
         code: "APPROVAL_REQUIRED",
-        message: `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}? It may change data there (${step && step.kind === "api_operation" ? step.contract.side_effect_basis : "not known to be read-only"}).`
+        message: `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}${step && step.kind === "api_operation" && step.contract.origin !== existing.site.origin ? ` (it sends to ${new URL(step.contract.origin).hostname})` : ""}? It may change data there (${step && step.kind === "api_operation" ? step.contract.side_effect_basis : "not known to be read-only"}).`
       }
     };
   }

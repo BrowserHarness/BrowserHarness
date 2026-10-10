@@ -35,7 +35,7 @@ Owned by the Bridge (`apps/bridge/src/api-engine/recipe.mjs`, zod schema `ApiOpe
 | `contract_version` | `2` |
 | `operation_id` | `op-` + 16 hex of sha256(origin, name, match). Stable across rotating ids and hashes. |
 | `name`, `description` | Operation name (`search`) and an optional sentence. |
-| `origin` | `https://host[:port]` the request goes to. |
+| `origin` | `https://host[:port]` the request goes to. This can differ from the website: a page on `www.example.com` may call `api.example.com`. The Site Skill's `site.origin` is the website (the page that makes the request), and an approval prompt names both when they differ. |
 | `side_effect` | `read`, `write` or `unknown`. `unknown` is treated as a write everywhere. |
 | `side_effect_basis` | Why: "GET without an action-looking path", "GraphQL query", "POST to a search-like path /api/search", "declared a write by the person"… The HTTP method alone never makes something a read. |
 | `request` | The captured request as a template: method, URL, kept headers, body. Example values are still in it; slots overwrite them. No `cookie` header. |
@@ -74,7 +74,7 @@ Input:
 }
 ```
 
-1. The extension opens `page_url` filled with each example in a background tab the task owns, records the network from before the page loads until it has been quiet for 1.2 s, reads the run's cookies (CDP `Network.getCookies`, no `cookies` permission) and page storage, and closes the tab.
+1. The extension opens `page_url` filled with each example in a background tab the task owns, records the network from before the page loads until it has been quiet for 1.2 s, reads the run's cookies (CDP `Network.getCookies`, no `cookies` permission) for the page's own site only (its origin and other origins on the same registrable domain that it called; analytics, ads and other sites contribute none) and page storage, and closes the tab.
 2. It sends both runs to the Bridge in one `api_request` (`learn`). The Bridge converts them to upstream's capture shape and runs upstream's deterministic learner: rank the requests carrying the example values, place each param, turn live cookie and storage values into references, diff the two runs for nonces, build the match and learn the response recipe. No model is used.
 3. The Bridge judges each run's own answer with the learned recipe (`learned_examples` checks), then calls the operation live with `verify_args` (`unseen_input`). The check passes only when the call succeeds, finds items, and its data differs from both learning runs' data, so a recipe whose input never reaches the request cannot pass. An input that repeats an example is refused.
 4. The captures, cookies and storage values are dropped. The extension saves a new candidate revision (`create`, or `refinement` when adding to an existing Skill), records a structural-verification evaluation (the contract checks) and an execution evaluation plus execution evidence (the live unseen-input call). Nothing is promoted: `site_skill promote` still needs both latest evaluations to have passed and the person to ask.

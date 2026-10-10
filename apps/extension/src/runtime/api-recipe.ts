@@ -213,15 +213,19 @@ export function withApiRecipe(
 ): SiteCandidateSkill {
   const recipe = apiRecipeFromContract(input.contract, input.entry_url);
   const parameters = apiParameters(input.contract);
+  // the Skill belongs to the website the person uses (the page that makes the
+  // request); the contract's own origin is where the request goes, which may
+  // be another host (api.example.com for www.example.com)
+  const siteOrigin = new URL(input.entry_url).origin;
   if (base) {
-    if (base.site.origin !== input.contract.origin) {
-      throw new Error(`SITE_SKILL_ORIGIN_MISMATCH: the operation is on ${input.contract.origin}, the skill on ${base.site.origin}`);
+    if (base.site.origin !== siteOrigin) {
+      throw new Error(`SITE_SKILL_ORIGIN_MISMATCH: the operation was learned on ${siteOrigin}, the skill is for ${base.site.origin}`);
     }
     const recipes = [...base.recipes.filter((item) => item.id !== recipe.id), recipe];
     const kept = base.parameters.filter((item) => !parameters.some((parameter) => parameter.name === item.name));
     return { ...base, recipes, parameters: [...kept, ...parameters], verification: undefined };
   }
-  const name = input.name?.trim() || input.title.trim() || new URL(input.contract.origin).hostname;
+  const name = input.name?.trim() || input.title.trim() || new URL(siteOrigin).hostname;
   return {
     schema_version: 1,
     id: `SK-SITE-${input.evidence_id.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48)}`,
@@ -230,7 +234,7 @@ export function withApiRecipe(
     version: "0.1.0",
     status: "candidate",
     lifecycle: { auto_promote: false, promotion_requires_evaluation: true },
-    site: { origin: input.contract.origin, entry_url: input.entry_url, title: input.title },
+    site: { origin: siteOrigin, entry_url: input.entry_url, title: input.title },
     parameters,
     recipes: [recipe],
     network_candidates: [],
