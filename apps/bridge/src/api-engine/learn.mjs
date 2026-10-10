@@ -9,7 +9,7 @@ import { capturePages, checkExamples, learnOperation, rankCandidates } from "../
 import { scanSecrets } from "../../vendor/api-anything/dist/secrets.js";
 import { toCaptureResult } from "./capture.mjs";
 import { dataFingerprint, itemCount } from "./outcome.mjs";
-import { contractFromOperation, toUpstreamOperation } from "./recipe.mjs";
+import { classifySideEffect, contractFromOperation, toUpstreamOperation } from "./recipe.mjs";
 
 const NAME = /^[A-Za-z][\w-]{0,63}$/;
 
@@ -100,6 +100,24 @@ function exampleCheck(op, exchange, argNames, checkedAt) {
   };
 }
 
+/** The private inputs whose learning value (as typed, URL-encoded or JSON-escaped) still appears in the contract. */
+function privateValuesIn(contract, privateParams, examples) {
+  const text = JSON.stringify(contract);
+  const found = new Set();
+  for (const name of privateParams) {
+    for (const example of examples) {
+      const value = example[name];
+      if (value === undefined || value === null) continue;
+      const raw = String(value);
+      // very short values (a "1", a "no") also occur by chance; longer ones are the person's
+      if (raw.length < 4) continue;
+      const forms = [raw, encodeURIComponent(raw), encodeURIComponent(raw).replace(/%20/g, "+"), JSON.stringify(raw).slice(1, -1)];
+      if (forms.some((form) => text.includes(form))) found.add(name);
+    }
+  }
+  return [...found];
+}
+
 /**
  * input: {name, captures: [run1, run2?], examples: [args1, args2?], trigger?,
  * exchange_id?, side_effect?, description?, login_cookies?, public?,
@@ -172,10 +190,16 @@ export function learnApiOperation(input) {
   }
   warnings.push(...learned.warnings);
 
+  const declared = input.side_effect === "read" || input.side_effect === "write" ? input.side_effect : undefined;
+  // what a person typed into anything not proven to be a read is theirs (a
+  // message, a name, an address): keep none of it, whatever the caller listed
+  const sideEffect = classifySideEffect(learned.operation.request, { operationName: learned.operation.match?.operationName, declared }).side_effect;
+  const givenPrivate = Array.isArray(input.private_params) ? input.private_params.map(String) : [];
+  const privateParams = sideEffect === "read" ? givenPrivate : [...new Set([...givenPrivate, ...Object.keys(args1), ...learned.operation.params.map((param) => param.name)])];
   const contract = contractFromOperation(learned.operation, {
-    side_effect: input.side_effect === "read" || input.side_effect === "write" ? input.side_effect : undefined,
+    side_effect: declared,
     description: typeof input.description === "string" ? input.description.slice(0, 500) : undefined,
-    private_params: Array.isArray(input.private_params) ? input.private_params.map(String) : [],
+    private_params: privateParams,
     source: input.source === "repair" || input.source === "watch_me" || input.source === "network_capture" ? input.source : "two_example_learning",
     evidence_ids: Array.isArray(input.evidence_ids) ? input.evidence_ids.map(String).slice(0, 20) : [],
     storage: run1.storage,
@@ -195,6 +219,11 @@ export function learnApiOperation(input) {
     throw fail("API_LEARN_SECRET", `the learned operation would keep a session value (${scan.secrets.slice(0, 3).join("; ")}); not saved`);
   }
   contract.provenance.warnings = [...contract.provenance.warnings, ...scan.warnings].slice(0, 20);
+  // Fail closed again: no private input's learning value may survive anywhere in the contract.
+  const kept = privateValuesIn(contract, privateParams, args2 ? [args1, args2] : [args1]);
+  if (kept.length) {
+    throw fail("API_LEARN_PRIVATE_VALUE", `the learned operation would keep what was typed into ${kept.join(", ")}; not saved`);
+  }
 
   const op = toUpstreamOperation(contract);
   const checkedAt = new Date().toISOString();

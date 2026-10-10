@@ -198,8 +198,10 @@ async function learnFromWatch(deps: ApiLearnDeps, input: ApiLearnInput): Promise
     started_at: deps.now(),
     source: "watch_me",
     ...(plain(input.verify_args) && !write ? { verify_args: input.verify_args } : {}),
-    // what a person typed into a write is theirs: keep no example values for it
-    ...(write && !input.private_params ? { private_params: Object.keys(examples[0]) } : {})
+    // what a person typed into a write is theirs: keep no example values for it,
+    // whatever private_params says (the helper app also enforces this for
+    // anything it does not prove to be a read)
+    ...(write ? { private_params: Object.keys(examples[0]) } : {})
   });
   if (outcome.ok) for (const id of ids) deps.forgetWatch?.(id);
   return outcome;
@@ -226,7 +228,8 @@ async function learnAndSave(deps: ApiLearnDeps, input: ApiLearnInput, run: Learn
   const base = input.id ? await deps.loadBase(input.id) : null;
   if (input.id && !base) return fail("SITE_SKILL_NOT_FOUND", "Site Skill candidate was not found");
 
-  const privateParams = input.private_params || run.private_params;
+  const merged = [...new Set([...(Array.isArray(input.private_params) ? input.private_params.map(String) : []), ...(run.private_params || [])])];
+  const privateParams = merged.length ? merged : undefined;
   const learned = await deps.bridge("learn", {
     name,
     captures: run.captures,
