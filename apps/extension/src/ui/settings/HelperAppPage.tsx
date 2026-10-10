@@ -215,6 +215,21 @@ interface ToolServer {
   transport: string;
   connected: boolean;
   env_keys: string[];
+  /** From the helper app: whether the tool started, stopped or failed. */
+  diagnostics?: { state?: string; last_error?: string; last_call_error?: string };
+}
+
+/** The tool's state in plain words, from the helper app's diagnostics. */
+export function toolServerState(server: ToolServer): { pill: "good" | "waiting" | "off" | "problem"; text: string; detail?: string } {
+  const state = server.diagnostics?.state;
+  if (!server.enabled) return { pill: "off", text: "Turned off" };
+  if (server.connected) return { pill: "good", text: "Working" };
+  if (state === "unavailable") {
+    return { pill: "problem", text: "Can't run on this computer", detail: server.diagnostics?.last_error };
+  }
+  if (state === "failed") return { pill: "problem", text: "Couldn't start", detail: server.diagnostics?.last_error };
+  if (state === "exited") return { pill: "waiting", text: "Stopped. It starts again the next time it is used" };
+  return { pill: "waiting", text: "Starts when it is first used" };
 }
 
 interface ServerTool {
@@ -303,10 +318,13 @@ function OtherAppTools() {
                 <Typography variant="subtitle1" noWrap>
                   {server.label}
                 </Typography>
-                <StatusPill state={server.connected ? "good" : server.enabled ? "waiting" : "off"}>
-                  {server.connected ? "Working" : server.enabled ? "Not reachable" : "Turned off"}
-                </StatusPill>
+                <StatusPill state={toolServerState(server).pill}>{toolServerState(server).text}</StatusPill>
               </Stack>
+              {toolServerState(server).detail && (
+                <Typography variant="body2" color="text.secondary">
+                  {toolServerState(server).detail}
+                </Typography>
+              )}
               <ChoiceCards
                 label={`May BrowserHarness use ${server.label}?`}
                 choices={TOOL_POLICY}

@@ -174,3 +174,24 @@ Extension side:
 - Chrome host access for the Bridge origin is requested at save time as for the local Bridge.
 
 Approvals, task-session ownership and autonomy ceilings apply identically over a remote Bridge. Anyone holding the pairing token can drive the paired browser, so treat it like a credential: rotate it by replacing `token` in `~/.browserharness-bridge/config.json` with a new random value of 32+ characters, restarting the daemon, and pairing the extension again.
+
+## API Anything compatibility adapter (read-only)
+
+The Bridge ships [API Anything](https://github.com/goodnight000/api-anything) at commit `fe5cca7` (MIT, vendored in `apps/bridge/vendor/api-anything`, see `docs/architecture/API-ENGINE-ADR.md`) as a built-in MCP server. It is off until a person turns it on:
+
+```bash
+browserharness-bridge api-anything enable     # adds {"api-anything": {"builtin": "api-anything"}} to mcp-servers.json
+browserharness-bridge restart
+browserharness-bridge api-anything status     # tools, availability and diagnostics
+```
+
+- It runs as `browserharness-bridge api-anything-mcp` under the Bridge's own Node, with its data in `~/.browserharness-bridge/api-anything` (never the person's own `~/.api-anything`).
+- Four tools: `list_sites`, `list_operations`, `call_operation` (all `readOnlyHint`) and `login` (not read-only, so BrowserHarness asks first under every trust mode).
+- Reads only. Write operations are hidden and refused; a write goes through a BrowserHarness Site Skill, which asks the person to approve it.
+- Plain HTTP (tier 1) only. Upstream's own Chrome tiers, capture and login window are disabled in the vendored copy, because BrowserHarness has one browser runtime.
+- `login` only re-imports from the browser profile a person chose at a terminal: `browserharness-bridge api-anything login <site> [--profile "Chrome/Profile 1"]` (Node 22.13 or newer, for `node:sqlite`). It never picks a profile and never opens a browser. Agents see cookie names, never values.
+- The extension reaches it through the existing outbound MCP path (`mcp_request`), its trust modes, approval retry and task-ranked catalog. Nothing in the planner treats it specially.
+
+Diagnostics: `GET /status` has `mcp_server_health` per server (`state`: idle, starting, connected, exited, failed, unavailable; `starts`, `startup_failures`, `exits`, `calls`, `call_errors`, `last_error`, `last_call_error`). A server whose process exits is restarted on its next use. Settings → Helper app → tools shows the same state in plain words.
+
+This adapter is a stepping stone. BrowserHarness's own learning and execution of website operations is the Native API Engine (`docs/protocols/API-RECIPE-V2.md`).

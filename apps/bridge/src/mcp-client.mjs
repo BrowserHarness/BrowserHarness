@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { builtinMcpServer } from "./api-engine/upstream-adapter.mjs";
 
 export const DEFAULT_MCP_SERVERS_FILE = path.join(
   os.homedir(),
@@ -38,6 +39,17 @@ function normalizeServer(id, raw, env = process.env) {
     throw new Error(
       `MCP server ${id} config must be an object`
     );
+  }
+  // A server the Bridge itself ships ({"builtin": "api-anything"}): the Bridge
+  // owns its command line, so a config file cannot point it elsewhere.
+  if (raw.builtin !== undefined) {
+    const builtin = builtinMcpServer(raw.builtin, env);
+    raw = {
+      ...builtin,
+      label: typeof raw.label === "string" && raw.label.trim() ? raw.label : builtin.label,
+      enabled: raw.enabled,
+      env: { ...builtin.env }
+    };
   }
   if (
     typeof raw.command !== "string" ||
@@ -87,6 +99,8 @@ function normalizeServer(id, raw, env = process.env) {
 
   return {
     id,
+    ...(raw.builtin ? { builtin: raw.builtin } : {}),
+    ...(raw.unavailable ? { unavailable: raw.unavailable } : {}),
     label:
       typeof raw.label === "string" && raw.label.trim()
         ? raw.label.trim().slice(0, 160)
@@ -217,15 +231,23 @@ function boundedToolResult(result, maxChars = 100_000) {
   };
 }
 
-function publicServer(server, connected = false) {
+function publicServer(server, connected = false, health) {
   return {
     id: server.id,
     label: server.label,
     enabled: server.enabled,
     transport: server.transport,
     connected,
-    env_keys: Object.keys(server.env).sort()
+    ...(server.builtin ? { builtin: server.builtin } : {}),
+    env_keys: Object.keys(server.env).sort(),
+    ...(health ? { diagnostics: { ...health } } : {})
   };
+}
+
+/** Error messages that may echo a server's output are bounded before they reach status pages. */
+function shortError(error) {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.split("\n")[0].slice(0, 300);
 }
 
 export function createMcpClientManager({
@@ -235,6 +257,25 @@ export function createMcpClientManager({
     loadMcpServersConfig(configPath, env)
 } = {}) {
   const connections = new Map();
+  // Per-server health: availability, startup failures, process exits and
+  // operation errors, shown by `mcp-servers`, GET /status and Settings.
+  const health = new Map();
+  function healthFor(id) {
+    if (!health.has(id)) {
+      health.set(id, {
+        state: "idle",
+        starts: 0,
+        startup_failures: 0,
+        exits: 0,
+        calls: 0,
+        call_errors: 0
+      });
+    }
+    return health.get(id);
+  }
+  function note(id, patch) {
+    Object.assign(healthFor(id), patch, { updated_at: new Date().toISOString() });
+  }
 
   async function configs() {
     const servers = await loadConfig();
@@ -264,6 +305,10 @@ export function createMcpClientManager({
       throw new Error(
         `MCP_SERVER_DISABLED: ${id}`
       );
+    }
+    if (server.unavailable) {
+      note(id, { state: "unavailable", last_error: server.unavailable });
+      throw new Error(server.unavailable);
     }
 
     const fingerprint = configFingerprint(server);
@@ -298,7 +343,20 @@ export function createMcpClientManager({
         : {})
     });
 
-    await client.connect(transport);
+    const record = healthFor(id);
+    record.starts += 1;
+    note(id, { state: "starting" });
+    try {
+      await client.connect(transport);
+    } catch (error) {
+      record.startup_failures += 1;
+      note(id, {
+        state: "failed",
+        last_error: `MCP_SERVER_START_FAILED: ${shortError(error)}`
+      });
+      await client.close().catch(() => undefined);
+      throw new Error(`MCP_SERVER_START_FAILED: ${id}: ${shortError(error)}`);
+    }
     const entry = {
       client,
       transport,
@@ -306,6 +364,16 @@ export function createMcpClientManager({
       server
     };
     connections.set(id, entry);
+    note(id, { state: "connected", connected_at: new Date().toISOString(), pid: transport.pid ?? undefined });
+    // The process went away (crash, exit, closed pipe): forget the
+    // connection so the next call starts it again, and say so.
+    client.onclose = () => {
+      if (connections.get(id) === entry) {
+        connections.delete(id);
+        healthFor(id).exits += 1;
+        note(id, { state: "exited", exited_at: new Date().toISOString(), pid: undefined });
+      }
+    };
     return entry;
   }
 
@@ -317,7 +385,11 @@ export function createMcpClientManager({
       return [...available.values()].map((server) =>
         publicServer(
           server,
-          connections.has(server.id)
+          connections.has(server.id),
+          health.get(server.id) ||
+            (server.unavailable
+              ? { state: "unavailable", last_error: server.unavailable }
+              : undefined)
         )
       );
     },
@@ -384,10 +456,23 @@ export function createMcpClientManager({
         );
       }
 
-      const result = await entry.client.callTool({
-        name,
-        arguments: args
-      });
+      const record = healthFor(id);
+      record.calls += 1;
+      let result;
+      try {
+        result = await entry.client.callTool({
+          name,
+          arguments: args
+        });
+      } catch (error) {
+        record.call_errors += 1;
+        note(id, { last_call_error: `${name}: ${shortError(error)}` });
+        throw new Error(`MCP_TOOL_CALL_FAILED: ${id}/${name}: ${shortError(error)}`);
+      }
+      if (result?.isError === true) {
+        record.call_errors += 1;
+        note(id, { last_call_error: `${name}: tool returned an error result` });
+      }
 
       return {
         server_id: id,
@@ -395,6 +480,12 @@ export function createMcpClientManager({
         annotations: tool.annotations || {},
         result: boundedToolResult(result)
       };
+    },
+
+    diagnostics(id) {
+      return id
+        ? { ...(health.get(id) || { state: "idle" }) }
+        : Object.fromEntries([...health].map(([key, value]) => [key, { ...value }]));
     },
 
     async close(id) {
