@@ -3,7 +3,8 @@
 // (with the page's own cookies), for tier 3 it loads the operation's page and
 // records what the page sends. The Bridge builds, matches and judges; the same
 // classifier and extractor as tier 1, so every tier answers in one shape.
-import { BadHeader, buildRequest, ownMatch } from "../../vendor/api-anything/dist/http.js";
+import { BadHeader, buildRequest, holdsRef, ownMatch } from "../../vendor/api-anything/dist/http.js";
+import { asText, getAt } from "../../vendor/api-anything/dist/codec.js";
 import { fillTrigger } from "../../vendor/api-anything/dist/heal.js";
 import { matches } from "../../vendor/api-anything/dist/learn.js";
 import { loginPath } from "../../vendor/api-anything/dist/classify.js";
@@ -110,14 +111,58 @@ export function triggerFor(contract, args = {}) {
   return { url: filled.url };
 }
 
-/** Tier 3: find this operation's request among what the page sent, and judge its answer. */
-export function judgePageRun(contract, capture) {
+/**
+ * Whether an observed request carries these inputs: every place a param goes
+ * (its slots) holds the value these args put there. Slots that also carry a
+ * session reference are not compared (their values are the page's own).
+ */
+export function carriesArgs(op, observed, args) {
+  let expected;
+  try {
+    expected = buildRequest(op, args, { cookies: [], storage: {} });
+  } catch {
+    return false;
+  }
+  let compared = 0;
+  for (const slot of op.slots) {
+    if (slot.param === undefined || holdsRef(slot)) continue;
+    let want;
+    let got;
+    try {
+      want = getAt(expected, slot.at);
+      got = getAt(observed, slot.at);
+    } catch {
+      return false;
+    }
+    if (want === undefined) continue;
+    if (got === undefined || asText(got) !== asText(want)) return false;
+    compared += 1;
+  }
+  // an operation with inputs must show at least one of them in the request
+  return compared > 0 || !op.params.length;
+}
+
+/** Tier 3: find this operation's request for these args among what the page sent, and judge its answer. */
+export function judgePageRun(contract, capture, args) {
   const base = { tier: 3, operation_id: contract.operation_id, sent: true };
   const run = toCaptureResult(capture);
   const op = toUpstreamOperation(contract);
   const match = ownMatch(op);
   const hits = run.exchanges.filter((exchange) => matches(match, exchange.request) && exchange.response);
-  const hit = hits.at(-1);
+  if (!args || typeof args !== "object") {
+    return result({ ...base, ok: false, cls: "input", reason: "the page tier needs the inputs to check the page's request against" });
+  }
+  const hit = hits.filter((exchange) => carriesArgs(op, exchange.request, args)).at(-1);
+  if (!hit && hits.length) {
+    // the page made the request, but not with these inputs: never answer with another request's data
+    return result({
+      ...base,
+      ok: false,
+      cls: "endpoint_drift",
+      reason: "the page's request did not carry the inputs given (it ignored them or sent its own default)",
+      next: "teach the operation again"
+    });
+  }
   if (!hit) {
     if (run.finalUrl && loginPath(run.finalUrl)) {
       return result({ ...base, ok: false, cls: "auth", reason: "the page went to a sign-in page" });

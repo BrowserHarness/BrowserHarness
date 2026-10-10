@@ -93,9 +93,22 @@ describe("API Recipe v2", () => {
     expect(again.recipes).toHaveLength(1);
     expect(again.recipes[0].name).toBe("Search again");
 
-    expect(() => withApiRecipe(created, { ...learning, contract: { ...searchContract(), origin: "https://other.example" } })).toThrow(
+    // the skill belongs to the page's site, wherever the page sends its request
+    expect(() => withApiRecipe(created, { ...learning, entry_url: "https://other.example/search", contract: searchContract() })).toThrow(
       /SITE_SKILL_ORIGIN_MISMATCH/
     );
+  });
+
+  it("keeps the visible website and the API host apart (www page, api host)", () => {
+    const api = { ...searchContract(), origin: "https://api.shop.example", request: { ...searchContract().request, url: "https://api.shop.example/v1/search?q=laptops" } };
+    const page = { ...learning, entry_url: "https://shop.example/search" };
+    const created = withApiRecipe(null, { ...page, contract: api });
+    expect(created.site.origin).toBe("https://shop.example");
+    // the API stays the request's destination
+    expect((created.recipes[0].steps[0] as { contract: { origin: string } }).contract.origin).toBe("https://api.shop.example");
+    // a second operation learned on the same page joins the same Skill
+    const more = withApiRecipe(created, { ...page, contract: { ...api, name: "suggest", operation_id: "op-suggest" } });
+    expect(more.recipes).toHaveLength(2);
   });
 
   it("keeps no example values or session values in the stored recipe beyond the contract's own params", () => {

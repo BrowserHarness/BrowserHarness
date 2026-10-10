@@ -96,7 +96,7 @@ export function createApiEngine({ fetchImpl, minIntervalMs } = {}) {
       case "page_trigger":
         return triggerFor(parseContract(object(payload.contract, "contract")), payload.args && typeof payload.args === "object" ? payload.args : {});
       case "page_run":
-        return judgePageRun(parseContract(object(payload.contract, "contract")), object(payload.capture, "capture"));
+        return judgePageRun(parseContract(object(payload.contract, "contract")), object(payload.capture, "capture"), payload.args && typeof payload.args === "object" ? payload.args : undefined);
       default:
         throw Object.assign(new Error(`API_REQUEST_INVALID: unsupported action ${String(action || "")}`), { code: "API_REQUEST_INVALID" });
     }
