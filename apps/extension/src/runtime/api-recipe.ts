@@ -77,6 +77,8 @@ export interface ApiOperationContract {
     evidence_ids: string[];
     warnings: string[];
     parent_operation_id?: string;
+    /** what a person typed to teach it; absent when a param is private */
+    example_inputs?: { learning: Array<Record<string, unknown>>; unseen?: Record<string, unknown> };
   };
 }
 
@@ -211,7 +213,16 @@ function slug(value: string): string {
  */
 export function withApiRecipe(
   base: SiteCandidateSkill | null,
-  input: { contract: ApiOperationContract; entry_url: string; title: string; name?: string; evidence_id: string; captured_at: string }
+  input: {
+    contract: ApiOperationContract;
+    entry_url: string;
+    title: string;
+    name?: string;
+    evidence_id: string;
+    captured_at: string;
+    /** a repair: the recipe the new operation takes the place of */
+    replace_recipe_id?: string;
+  }
 ): SiteCandidateSkill {
   const recipe = apiRecipeFromContract(input.contract, input.entry_url);
   const parameters = apiParameters(input.contract);
@@ -219,7 +230,7 @@ export function withApiRecipe(
     if (base.site.origin !== input.contract.origin) {
       throw new Error(`SITE_SKILL_ORIGIN_MISMATCH: the operation is on ${input.contract.origin}, the skill on ${base.site.origin}`);
     }
-    const recipes = [...base.recipes.filter((item) => item.id !== recipe.id), recipe];
+    const recipes = [...base.recipes.filter((item) => item.id !== recipe.id && item.id !== input.replace_recipe_id), recipe];
     const kept = base.parameters.filter((item) => !parameters.some((parameter) => parameter.name === item.name));
     return { ...base, recipes, parameters: [...kept, ...parameters], verification: undefined };
   }
@@ -250,4 +261,35 @@ export function withApiRecipe(
       network_request_count: 0
     }
   };
+}
+
+/** What changed between two versions of an operation, for a person reading a repair. */
+export function contractDiff(before: ApiOperationContract, after: ApiOperationContract): string[] {
+  const changes: string[] = [];
+  const path = (contract: ApiOperationContract) => {
+    try {
+      return new URL(contract.request.url).pathname;
+    } catch {
+      return "";
+    }
+  };
+  if (before.request.method !== after.request.method) changes.push(`method ${before.request.method} → ${after.request.method}`);
+  if (before.origin !== after.origin) changes.push(`origin ${before.origin} → ${after.origin}`);
+  if (path(before) !== path(after)) changes.push(`path ${path(before)} → ${path(after)}`);
+  if ((before.match.operationName || "") !== (after.match.operationName || "")) {
+    changes.push(`GraphQL operation ${before.match.operationName || "none"} → ${after.match.operationName || "none"}`);
+  }
+  const places = (contract: ApiOperationContract) =>
+    (contract.slots as Array<{ param?: string; at?: string[] }>)
+      .filter((slot) => slot.param)
+      .map((slot) => `${slot.param}@${(slot.at || []).join(" ")}`)
+      .sort()
+      .join(", ");
+  if (places(before) !== places(after)) changes.push(`inputs go to ${places(after) || "nowhere"} (was ${places(before) || "nowhere"})`);
+  const extract = (contract: ApiOperationContract) => String((contract.response as { extract?: unknown }).extract ?? "");
+  if (extract(before) !== extract(after)) changes.push(`results read from ${extract(after) || "the whole answer"} (was ${extract(before) || "the whole answer"})`);
+  if (before.min_tier !== after.min_tier) changes.push(`minimum tier ${before.min_tier} → ${after.min_tier}`);
+  if (before.side_effect !== after.side_effect) changes.push(`side effect ${before.side_effect} → ${after.side_effect}`);
+  if (before.session_refs.join() !== after.session_refs.join()) changes.push(`session references ${after.session_refs.length} (was ${before.session_refs.length})`);
+  return changes;
 }

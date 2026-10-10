@@ -98,6 +98,7 @@ import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
 import { collectApiCapture, waitForNetworkQuiet } from "./api-capture";
 import { learnApiOperation, type ApiLearnInput } from "./api-learning";
 import { runTier } from "./api-transports";
+import { checkApiHealth, nextForClass, repairApiOperation, type RepairLedger } from "./api-repair";
 import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
 import { apiRecipeNeedsApproval, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
@@ -488,25 +489,110 @@ async function learnApiTool(
   input: Record<string, unknown>,
   session: TaskSession | null
 ): Promise<ToolResult> {
-  return learnApiOperation(
-    {
-      runPage: (url) => runPageForApiLearning(url, session),
-      bridge: (action, payload) => requestBridgeApi(action, payload, { timeoutMs: 120_000 }),
-      // reads only: learn_api refuses writes before this point
-      dispatch: (contract, args) => callApiOperation(contract, args, false),
-      loadBase: async (id) => {
-        const revision = await getSiteSkillExecutableRevision(id);
-        return revision ? { candidate: revision.candidate, revision_id: revision.revision_id } : null;
-      },
-      save: (candidate, reason) => saveSiteSkillCandidate(candidate, { reason }),
-      evaluate: async (id, revisionId, entry) => {
-        await recordSiteSkillEvaluation(id, revisionId, entry);
-      },
-      execution: (id, revisionId, entry) => recordSiteSkillExecutionEvidence(id, revisionId, entry),
-      now: () => new Date().toISOString(),
-      newId: () => crypto.randomUUID().slice(0, 12)
+  return learnApiOperation(apiLearnDeps(session), input as unknown as ApiLearnInput);
+}
+
+const API_REPAIR_KEY = "browserharness.apiRepair.v1";
+
+function apiLearnDeps(session: TaskSession | null) {
+  return {
+    runPage: (url: string) => runPageForApiLearning(url, session),
+    bridge: (action: "learn" | "verify", payload: Record<string, unknown>) => requestBridgeApi(action, payload, { timeoutMs: 120_000 }),
+    // reads only: learn_api refuses writes before this point
+    dispatch: (contract: ApiOperationContract, args: Record<string, unknown>) => callApiOperation(contract, args, false),
+    loadBase: async (id: string) => {
+      const revision = await getSiteSkillExecutableRevision(id);
+      return revision ? { candidate: revision.candidate, revision_id: revision.revision_id } : null;
     },
-    input as unknown as ApiLearnInput
+    save: (candidate: import("../runtime/site-skill").SiteCandidateSkill, reason: "create" | "refinement") => saveSiteSkillCandidate(candidate, { reason }),
+    evaluate: async (id: string, revisionId: string, entry: { kind: "structural-verification" | "execution"; outcome: "passed" | "failed"; detail: string }) => {
+      await recordSiteSkillEvaluation(id, revisionId, entry);
+    },
+    execution: (id: string, revisionId: string, entry: Parameters<typeof recordSiteSkillExecutionEvidence>[2]) => recordSiteSkillExecutionEvidence(id, revisionId, entry),
+    now: () => new Date().toISOString(),
+    newId: () => crypto.randomUUID().slice(0, 12)
+  };
+}
+
+function apiRecipesOf(candidate: import("../runtime/site-skill").SiteCandidateSkill, recipeId?: string) {
+  return candidate.recipes
+    .filter((recipe) => !recipeId || recipe.id === recipeId)
+    .flatMap((recipe) => {
+      const step = recipe.steps.find((item) => item.kind === "api_operation");
+      return step && step.kind === "api_operation" ? [{ recipe, contract: step.contract }] : [];
+    });
+}
+
+/** site_skill verify for a Skill made of learned operations: each read is called live with a taught input. */
+async function apiHealthTool(
+  id: string,
+  revision: { revision_id: string; candidate: import("../runtime/site-skill").SiteCandidateSkill },
+  recipeId?: string
+): Promise<ToolResult> {
+  const checks = [];
+  for (const { recipe, contract } of apiRecipesOf(revision.candidate, recipeId)) {
+    checks.push(await checkApiHealth((c, args) => callApiOperation(c, args, false), recipe.id, contract));
+  }
+  const ran = checks.filter((check) => check.class !== "skipped");
+  const passed = ran.length > 0 && ran.every((check) => check.passed);
+  await recordSiteSkillEvaluation(id, revision.revision_id, {
+    kind: "structural-verification",
+    outcome: passed ? "passed" : "failed",
+    detail: `API health: ${checks.map((check) => `${check.recipe_id} ${check.passed ? "ok" : check.class}`).join("; ")}`.slice(0, 500)
+  });
+  const failing = ran.find((check) => !check.passed);
+  return {
+    ok: passed,
+    data: {
+      id,
+      revision_id: revision.revision_id,
+      health: checks,
+      ...(failing ? { next_action: nextForClass(failing.class as ApiCallResult["class"], revision.candidate.site.origin) } : {})
+    },
+    ...(passed
+      ? {}
+      : {
+          error: {
+            code: "SITE_SKILL_VERIFICATION_FAILED",
+            message: ran.length ? "A learned operation did not answer as it did when it was taught" : "No learned read could be checked"
+          }
+        })
+  };
+}
+
+/** site_skill repair: learn a drifted read again as a new candidate revision; bounded per operation. */
+async function repairApiTool(input: Record<string, unknown>, session: TaskSession | null): Promise<ToolResult> {
+  if (typeof input.id !== "string" || !input.id.trim()) {
+    return { ok: false, error: { code: "SITE_SKILL_ID_REQUIRED", message: "site_skill repair requires id" } };
+  }
+  const revision = await getSiteSkillExecutableRevision(input.id, typeof input.revision_id === "string" ? input.revision_id : undefined);
+  if (!revision) return { ok: false, error: { code: "SITE_SKILL_NOT_FOUND", message: "Site Skill candidate was not found" } };
+  const targets = apiRecipesOf(revision.candidate, typeof input.recipe_id === "string" ? input.recipe_id : undefined);
+  if (targets.length !== 1) {
+    return {
+      ok: false,
+      error: {
+        code: targets.length ? "SITE_SKILL_RECIPE_REQUIRED" : "SITE_SKILL_RECIPE_NOT_FOUND",
+        message: targets.length ? "Name the learned operation to repair with recipe_id" : "No learned API operation to repair; refine form recipes with site_skill refine"
+      }
+    };
+  }
+  const plain = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined);
+  return repairApiOperation(
+    {
+      learn: (learnInput) => learnApiOperation(apiLearnDeps(session), learnInput),
+      ledger: async () => ((await chrome.storage.local.get(API_REPAIR_KEY))[API_REPAIR_KEY] || {}) as RepairLedger,
+      saveLedger: (ledger) => chrome.storage.local.set({ [API_REPAIR_KEY]: ledger }),
+      now: () => Date.now()
+    },
+    {
+      skill_id: input.id,
+      recipe_id: targets[0].recipe.id,
+      contract: targets[0].contract,
+      ...(Array.isArray(input.examples) ? { examples: input.examples.map(plain).filter((item): item is Record<string, unknown> => Boolean(item)) } : {}),
+      ...(plain(input.verify_args) ? { verify_args: plain(input.verify_args) } : {}),
+      ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {})
+    }
   );
 }
 
@@ -593,18 +679,15 @@ async function runApiOperationRecipe(
       error_code: code,
       error_message: message
     }).catch(() => null);
-    const ambiguous = code === "API_AMBIGUOUS_WRITE";
+    const cls = code.startsWith("API_") ? (code.slice(4).toLowerCase() as ApiCallResult["class"]) : "network";
     return {
       ok: false,
       data: {
         candidate_id: existing.id,
         revision_id: revision.revision_id,
-        refinement_recommended: !ambiguous && /DRIFT/.test(code),
-        next_action: ambiguous
-          ? "check the site to see whether it happened; do not run it again"
-          : /DRIFT/.test(code)
-            ? "site_skill learn_api again for this operation"
-            : "report the failure"
+        failure_class: cls,
+        repair_recommended: cls === "schema_drift" || cls === "endpoint_drift",
+        next_action: nextForClass(cls, existing.site.origin) || "report the failure"
       },
       error: { code, message }
     };
@@ -1341,6 +1424,19 @@ async function runTool(
       return learnApiTool(input, session);
     }
 
+    if (action === "repair") {
+      return repairApiTool(input, session);
+    }
+
+    if (action === "verify" && typeof input.id === "string" && input.id.trim()) {
+      // a Skill of learned operations is checked by calling them; one with forms by reading the page
+      const revision = await getSiteSkillRevision(input.id, typeof input.revision_id === "string" ? input.revision_id : undefined);
+      const recipeId = typeof input.recipe_id === "string" ? input.recipe_id : undefined;
+      if (revision && apiRecipesOf(revision.candidate, recipeId).length && (recipeId || revision.candidate.recipes.every((recipe) => recipe.form_index < 0))) {
+        return apiHealthTool(input.id, revision, recipeId);
+      }
+    }
+
     if (action === "run" && typeof input.id === "string" && input.id.trim()) {
       // an API Recipe v2 recipe needs no tab; others fall through to the page path
       const revision = await getSiteSkillExecutableRevision(
@@ -1652,7 +1748,7 @@ async function runTool(
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, learn_api, verify, run, refine, list, get, history, compare, promote, rollback, or delete"
+            "site_skill action must be create, learn_api, verify, run, refine, repair, list, get, history, compare, promote, rollback, or delete"
         }
       };
     }

@@ -251,3 +251,19 @@ test("the paired extension learns and verifies through api_request; other client
       await bridge.close();
     }
   }));
+
+test("taught inputs are kept for health checks and repair, unless an input is private", () =>
+  withShop(async (shop) => {
+    const { learned } = await learnFrom(shop, "rest");
+    assert.deepEqual(learned.contract.provenance.example_inputs, { learning: EXAMPLES });
+    const verified = await verifyUnseenInput(learned.contract, { q: "monitors" }, { examples: EXAMPLES, example_fingerprints: learned.example_fingerprints, minIntervalMs: 0 });
+    assert.deepEqual(verified.contract.provenance.example_inputs, { learning: EXAMPLES, unseen: { q: "monitors" } });
+
+    const { learned: hidden } = await learnFrom(shop, "rest", { learn: { private_params: ["q"] } });
+    assert.equal(hidden.contract.provenance.example_inputs, undefined);
+    assert.equal(hidden.contract.params[0].example, undefined);
+
+    const { learned: repaired } = await learnFrom(shop, "rest", { learn: { source: "repair", parent_operation_id: "op-old" } });
+    assert.equal(repaired.contract.provenance.source, "repair");
+    assert.equal(repaired.contract.provenance.parent_operation_id, "op-old");
+  }));
