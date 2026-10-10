@@ -191,21 +191,24 @@ export async function collectApiCapture(tabId: number, finalUrl: string, locatio
   };
 }
 
-/** Whether a recorded request looks like the operation's own (method and path; the Bridge does the real match). */
-export function looksLikeOperation(record: Pick<NetworkRecord, "method" | "url">, match: { method?: string; path?: string }): boolean {
+/**
+ * Whether a recorded request looks like the operation's own: method, host and
+ * path segment by segment, where `*` (the Bridge matcher's wildcard) or a
+ * `{hole}` stands for any one segment. The Bridge does the real match.
+ */
+export function looksLikeOperation(record: Pick<NetworkRecord, "method" | "url">, match: { method?: string; host?: string; path?: string }): boolean {
   if (!match.path) return false;
   if (match.method && record.method.toUpperCase() !== match.method.toUpperCase()) return false;
-  let pathname: string;
+  let url: URL;
   try {
-    pathname = new URL(record.url).pathname;
+    url = new URL(record.url);
   } catch {
     return false;
   }
-  const pattern = match.path
-    .split(/(\{[^{}]*\})/)
-    .map((part) => (/^\{[^{}]*\}$/.test(part) ? "[^/]+" : part.replace(/[.*+?^$()|[\]\\]/g, "\\$&")))
-    .join("");
-  return new RegExp(`^${pattern}$`).test(pathname);
+  if (match.host && match.host.toLowerCase() !== url.hostname.toLowerCase()) return false;
+  const want = match.path.split("/");
+  const got = url.pathname.split("/");
+  return want.length === got.length && want.every((segment, index) => segment === "*" || /^\{[^{}]*\}$/.test(segment) || segment === got[index]);
 }
 
 /**
