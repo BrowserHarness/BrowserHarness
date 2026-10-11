@@ -26,16 +26,38 @@ async function exchange(id, resourceType, url, init = {}) {
 
 /** kind: "rest" (/search), "graphql" (/gql-search), "form" (/form-page), "cart" (a demonstrated write: a note typed on /cart, then Add). */
 export async function recordRun(origin, kind, term, { queryId = "Qa1B2c3D4e5F6g7H8i9J", cookies = [], storage = {}, searchPath = "/api/search", apiHeaders = {} } = {}) {
-  const page = { rest: "/search", graphql: "/gql-search", form: "/form-page", orders: "/orders", guarded: "/guarded", cart: "/cart" }[kind];
-  const pageUrl = kind === "cart" ? `${origin}/cart` : `${origin}${page}?q=${encodeURIComponent(term)}`;
-  const exchanges = [await exchange(1, "document", pageUrl)];
+  const page = { rest: "/search", graphql: "/gql-search", form: "/form-page", orders: "/orders", guarded: "/guarded", cart: "/cart", history: "/history" }[kind];
+  const cookie = cookies.map((item) => `${item.name}=${item.value}`).join("; ");
+  const pageUrl =
+    kind === "cart" ? `${origin}/cart` : kind === "my-orders" ? `${origin}/account/orders` : kind === "save" ? `${origin}/watch?v=${encodeURIComponent(term)}` : `${origin}${page}?q=${encodeURIComponent(term)}`;
+  const exchanges = [await exchange(1, "document", pageUrl, cookie ? { headers: { cookie } } : {})];
   exchanges.push(await exchange(2, "xhr", `${origin}/api/config`, { headers: { accept: "application/json", referer: pageUrl } }));
   if (kind === "rest") {
     exchanges.push(
       await exchange(3, "fetch", `${origin}${searchPath}?q=${encodeURIComponent(term)}&page=1&lang=en`, { headers: { accept: "application/json", referer: pageUrl, ...apiHeaders } })
     );
+  } else if (kind === "history") {
+    // nothing but the document carries the data
+  } else if (kind === "my-orders") {
+    exchanges.push(await exchange(3, "fetch", `${origin}/api/my-orders`, { headers: { accept: "application/json", referer: pageUrl, ...(cookie ? { cookie } : {}) } }));
+  } else if (kind === "save") {
+    // ticking "Watch later": first the panel (sent with the visitor's id), then the edit itself
+    const visitor = cookies.find((item) => item.name === "VISITOR_INFO1_LIVE")?.value || "";
+    exchanges.push(
+      await exchange(3, "fetch", `${origin}/api/panel`, {
+        method: "POST",
+        headers: { "content-type": "application/json", referer: pageUrl, ...(visitor ? { "x-visitor-id": `Cgt${visitor}KJ%3D%3D` } : {}) },
+        body: JSON.stringify({ context: { client: "web" }, videoIds: [term] })
+      })
+    );
+    exchanges.push(
+      await exchange(4, "fetch", `${origin}/api/playlist/edit`, {
+        method: "POST",
+        headers: { "content-type": "application/json", referer: pageUrl },
+        body: JSON.stringify({ playlistId: "WL", actions: [{ addedVideoId: term, action: "ACTION_ADD_VIDEO" }] })
+      })
+    );
   } else if (kind === "orders" || kind === "guarded") {
-    const cookie = cookies.map((item) => `${item.name}=${item.value}`).join("; ");
     exchanges.push(
       await exchange(3, "fetch", `${origin}/api/${kind}?q=${encodeURIComponent(term)}`, {
         headers: {

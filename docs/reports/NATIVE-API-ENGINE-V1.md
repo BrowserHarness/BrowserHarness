@@ -2,7 +2,29 @@
 
 Date: 2026-10-10. Scope: the six-PR plan from the master implementation brief ("Native API Learning, Hybrid Execution & Self-Healing Engine").
 
-**Status:** v1 is built and verified against local fixtures in real Chromium. It has **not** been accepted on any real website. That test is the release-candidate acceptance milestone at the end of this report and has not been performed.
+**Status:** v1 is built and verified against local fixtures in real Chromium. Release candidate 1 (`4e79b41`) went through real-site acceptance on 2026-10-10 and was **rejected** (2 of 8 scenarios passed). Release candidate 2 fixes every defect found there, each reproduced first with a failing test. RC2 has **not** been through real-site acceptance; nothing below about RC2 is a real-website result.
+
+## RC2: fixes from the real-site acceptance of RC1
+
+RC1 acceptance (Windows 11, Chrome for Testing, the person's own accounts) found nine defects (F1 to F9). Each was reproduced against the local fixture shop with a failing test before it was fixed. The fixes are one new stacked PR on top of #52.
+
+| # | What acceptance saw | Cause | Fix | Regression test |
+|---|---|---|---|---|
+| F1 | Coursera and Meetup refused: "header:referer holds the live cookie IR_gbd / _li_dcdm_c". | Tracking cookies whose whole value is the site's own domain; every address on the site "contains" them. | Before learning, a cookie whose value is a host of the capture (or a parent domain of one) is not treated as a credential. Real session cookies are still refused or referenced. | `api-engine-acceptance.test.mjs` F1 |
+| F2 | GBIF: `endpoint_drift` at learn, run and repair. YouTube Watch Me learned the autocomplete request. | Tier 3 required a header that echoes the page address to match character for character. When requests tied, the first was learned. | Tier 3 compares the input slots outside headers when there are any. When requests carry the inputs equally, the page's last one (the one the action produced) is learned, with a warning. | F2 header echo; F2 tie |
+| F3 | AniList and YouTube history learned the HTML document, counted it as 1 item and marked it verified. Signed out it still answered `ok`. | A raw page was judged like data. | A whole page answer (HTML with no extraction recipe) never passes `learned_examples` or the live check. When a page and a data request carry the inputs equally, the data request is learned. | F3 (two tests) |
+| F4 | Learns taking 33 to 39 s returned "Bridge command timed out" and the answer was lost. | One 30 s limit for every command. | Learning, repair, verify, Site Skill runs and Site Command runs wait up to 5 minutes, in the Bridge, the MCP client and the CLI. Ordinary commands keep 30 s. | `core.test.mjs` "a long learn gets its answer" |
+| F5 | AniList `learned_logged_in: true` while signed out. | Laravel's `laravel_session` (set for every visitor) matched the sign-in cookie pattern. | Framework sessions set for anonymous visitors (`laravel_session`, `ci_session`, `PHPSESSID`, `JSESSIONID`, `ASP.NET_SessionId`, `connect.sid`) are not a sign-in. This is a heuristic list. | F5 |
+| F6 | A signed-in list with no input (Shopify orders) and a checkbox write (Watch later) could not be learned. | Learning required typed inputs. | A page with no `{input}`, or a Watch Me recording that typed nothing, is learned from the request picked with `pick_request` (F9). A no-input read verifies only when a live call answers with real data (structured, at least one item). A write stays unverified, is never sent to check it, and asks before every run. | F6 (three tests); e2e "a page with no input lists its requests", "the picked no-input read verifies live" |
+| F7 | The run sheet said `entry_url`; Site Command answers had no tier; object `parameters` sent through raw `/command` were ignored. | Doc error; the answer dropped `run.output.api`; fields beside `args` in a `/command` body were dropped silently. | The run sheet says `page_url`. Site Command answers include `tier`, `class` and `item_count`. A `/command` body with no `args` takes the tool's fields from beside `session` and `action`; fields both beside and inside `args` are an error, never silently dropped. | `site-commands.test.ts`; `core.test.mjs` "fields beside args" |
+| F8 | An install into a redirected home still changed the real `%LOCALAPPDATA%\hermes\config.yaml` and its skill file. | `%LOCALAPPDATA%` (and `%APPDATA%`) were used even when outside the chosen home. An existing registration was repointed at the new Bridge. | Profile folders are used only when they are inside the chosen home. An agent already registered to another BrowserHarness Bridge is kept, with its skill file, unless `--replace-agents` is given. Every change also keeps `<file>.browserharness-previous`. | `install.test.mjs` "a second install in another home never touches the real Hermes" |
+| F9 | The refusal said "add --from <id> --pick-request <n>", which `site_skill learn_api` does not have. | Upstream's command-line hint passed through. | `site_skill learn_api` takes `pick_request`: `"METHOD https://host/path"` (the same on every run) or a request id in the capture. Every learning refusal lists the captured requests as `data.candidates`, with method, origin, path, status, content type, the input names each carries and a score. Values are never included. Upstream's command-line hints are rewritten. | F9 |
+
+**The visitor-id protection is unchanged.** Acceptance saw YouTube's `get_panel` refused because `x-goog-visitor-id` carries the visitor cookie. That refusal still fails closed, including when that request is picked by hand (F9 test, "choosing the panel request is still refused"). Picking only lets a person choose a different request. It never makes a refused one learnable.
+
+Hermes on the acceptance PC was restored by hand from its backup after acceptance, not by rerunning an installer. RC2's installer no longer touches it in that setup.
+
+Known limit: repair of a no-input operation needs the request picked again (`learn_api` with `pick_request`), because repair has no input to find the moved request by.
 
 ## Fixes after the independent review
 
@@ -160,18 +182,18 @@ After the review fixes the benchmark was run again with the same settings ([api-
 
 ## Test results at release
 
-All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. These counts are from the corrected integration head, after both reviews' fixes. `npm run gate:api-engine` passed every step:
+All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. These counts are from the RC2 head, after both reviews' fixes and the RC1 acceptance fixes. `npm run gate:api-engine` passed every step:
 
 | Step | Result |
 |---|---|
 | vendor check | Passed |
-| Bridge tests | 102/102 |
-| Extension tests | 786/786 |
+| Bridge tests | 115/115 |
+| Extension tests | 789/789 |
 | Typecheck | Passed |
 | Build | Passed |
 | Bridge bundle | Passed |
 | MV3 contract | Passed |
-| `smoke:api-engine` (real Chromium, local fixture) | 39/39 |
+| `smoke:api-engine` (real Chromium, local fixture) | 42/42 |
 
 Regression suites for the areas the review named, also in real Chromium against local fixtures:
 
@@ -190,16 +212,16 @@ None of these is a real-website test.
 
 ## Limitations
 
-- No real-website acceptance yet (see below). Fixture success is not real-world success.
+- RC2 has had no real-website acceptance yet (see below). Fixture success is not real-world success.
 - **Downgrade:** an older extension cannot run a library that holds API Recipe v2 recipes. Delete those recipes before installing an older build.
 - **Helper app:** API recipes need the helper app (Bridge). Without it they answer `unavailable`, while form recipes keep working.
 - **Watch Me capture lifetime:** captures live in memory for 15 minutes and are lost if the service worker restarts.
 - **Repair scope:** repair re-learns from the operation's trigger page. A site that moved the feature to another page needs a person to teach it again.
 - **Response shape:** the engine extracts JSON (and upstream's supported formats). Responses whose data is only rendered as HTML are left to the existing page tools.
 
-## Real-browser acceptance still needed (release-candidate milestone)
+## Real-browser acceptance (release-candidate milestone)
 
-This should be done once, by a person, on the release-candidate build, in their own Chrome with their own accounts. None of it has been done.
+RC1 (`4e79b41`) was run through these eight scenarios on 2026-10-10: 1 and 4 passed, 6 and 8 partly passed, 2, 3, 5 and 7 failed (findings F1 to F9 above). RC2 needs the same run. It has not been done.
 
 1. **A public search:** learn a public site's search with `learn_api` from two examples. Confirm it verifies, then run it with a new term and compare the result with the page.
 2. **A signed-in read:** while signed in, learn a list such as orders or messages. Confirm:

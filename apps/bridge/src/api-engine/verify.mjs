@@ -2,7 +2,7 @@
 // third input neither run used. It passes only when the call succeeds, finds
 // items, and returns data that differs from both learning runs, so a recipe
 // that ignores its input (or replays a cached answer) cannot pass.
-import { dataFingerprint } from "./outcome.mjs";
+import { dataFingerprint, structuredResponse } from "./outcome.mjs";
 import { parseContract } from "./recipe.mjs";
 import { callTier1 } from "./tier1.mjs";
 
@@ -28,12 +28,17 @@ export async function verifyUnseenInput(contractInput, args, { examples = [], ex
     checked_at: checkedAt,
     ...extra
   });
+  // a read with no inputs (a signed-in list) has no unseen input: a live call
+  // that answers with real data is its check
+  const noInputs = !contract.params.length;
   let outcome;
   if (contract.side_effect !== "read") {
     outcome = { check: check(false, "a write is never sent to check it; it stays a candidate until a person runs it with approval") };
-  } else if (!argNames.length) {
+  } else if (!structuredResponse(contract.response)) {
+    outcome = { check: check(false, "the request answers with a whole page (HTML), not data: learn the request that returns the data") };
+  } else if (!argNames.length && !noInputs) {
     outcome = { check: check(false, "no unseen input was given") };
-  } else if (examples.some((example) => sameValues(args, example))) {
+  } else if (!noInputs && examples.some((example) => sameValues(args, example))) {
     outcome = { check: check(false, "the third input repeats a learning example; give a value neither run used") };
   } else {
     // `given`: the extension already ran it (tier 2 or 3, through the dispatcher)
@@ -43,7 +48,7 @@ export async function verifyUnseenInput(contractInput, args, { examples = [], ex
       outcome = { check: check(false, response.reason || response.class, extra), response };
     } else if (!response.item_count) {
       outcome = { check: check(false, "the call succeeded but found nothing for this input", extra), response };
-    } else if (fingerprints.includes(dataFingerprint(response.data))) {
+    } else if (!noInputs && fingerprints.includes(dataFingerprint(response.data))) {
       outcome = { check: check(false, "the answer equals a learning run's answer: the input is not reaching the request", extra), response };
     } else {
       outcome = { check: check(true, undefined, extra), response };

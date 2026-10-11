@@ -79,6 +79,15 @@ Input:
 3. The Bridge judges each run's own answer with the learned recipe (`learned_examples` checks), then calls the operation live with `verify_args` (`unseen_input`). The check passes only when the call succeeds, finds items, and its data differs from both learning runs' data, so a recipe whose input never reaches the request cannot pass. An input that repeats an example is refused.
 4. The captures, cookies and storage values are dropped. The extension saves a new candidate revision (`create`, or `refinement` when adding to an existing Skill), records a structural-verification evaluation (the contract checks) and an execution evaluation plus execution evidence (the live unseen-input call). Nothing is promoted: `site_skill promote` still needs both latest evaluations to have passed and the person to ask.
 
+### Choosing the request (`pick_request`) and pages with no input
+
+When learning would take the wrong request, refuses the one it took, or nothing was typed, the refusal lists the captured requests as `data.candidates`: `request` (`"METHOD https://host/path"`), `id`, method, status, content type, the input names it carries (`carries`) and a score. No values are listed. Learn again with `pick_request` set to a candidate's `request` (the same on every run) or, for a Watch Me capture, its `id`.
+
+- A request refused because it holds a session value (`API_LEARN_FAILED` naming a live cookie, or `API_LEARN_SECRET`) stays refused when picked.
+- When requests carry the inputs equally, the page's last one is learned with a warning. A whole page loses to a data request that carries as many inputs.
+- **No input:** a `page_url` with no `{name}` and no examples (a signed-in orders list) runs the page twice. Without `pick_request` it answers `API_LEARN_PICK_REQUEST` with the candidates. With it, the picked request is learned with no params and checked live: it verifies only when the call answers with structured data holding at least one item. A Watch Me recording that typed nothing (a checkbox) is learned the same way.
+- A whole page answer (HTML with no extraction recipe) never verifies: its text is "something" signed in or out.
+
 Writes are not learned this way. `side_effect: "write"` is refused with `API_LEARN_WRITE_REFUSED` before any page opens, because running a page twice would send the write twice. Writes are learned from a demonstration the person makes (below).
 
 ### From Watch Me (`from_watch`)
@@ -95,7 +104,7 @@ While Watch Me records, the recorded tab's network is captured (the capture star
 - `side_effect: "write"` is allowed here: the person already sent it. It is never sent again to check it (saved `unverified`), every run asks first, and none of its typed values is kept anywhere in the contract (params, request, trigger, provenance or export), whatever `private_params` says: an empty or partial list cannot weaken this. The Bridge decides read or write from the request itself before saving (an unlabelled POST is a write), and anything not proven a read gets every input made private. As a last check it refuses to save (`API_LEARN_PRIVATE_VALUE`) if a typed value of four or more characters still appears in the contract in any encoding. The Bridge still refuses a write when `automated_trigger` is set.
 - `provenance.source` is `watch_me`; the evidence id is `watch-<recording id>`. A capture is forgotten once learned from, or after 15 minutes. `API_LEARN_WATCH_MISSING` when it is gone (or the service worker restarted).
 
-Errors: `API_LEARN_INPUT` (bad name, page_url without a `{param}` for each input, fewer than two examples, equal examples, no `verify_args`), `API_LEARN_RUN_FAILED` (a page did not load), `API_LEARN_FAILED` (no request carried the inputs; the error carries the ranked candidate requests, origin and path only), `API_LEARN_SECRET`, `API_LEARN_PRIVATE_VALUE` (a typed value of a write would have been saved; nothing is saved), `API_ENGINE_UNAVAILABLE` (no helper app).
+Errors: `API_LEARN_INPUT` (bad name, page_url without a `{param}` for each input, fewer than two examples, equal examples, no `verify_args`), `API_LEARN_RUN_FAILED` (a page did not load), `API_LEARN_PICK_REQUEST` (nothing was typed and no request was picked), `API_LEARN_FAILED` (no request carried the inputs, or the one taken was refused; `data.candidates` lists the requests to pick from, origin and path only), `API_LEARN_SECRET`, `API_LEARN_PRIVATE_VALUE` (a typed value of a write would have been saved; nothing is saved), `API_ENGINE_UNAVAILABLE` (no helper app).
 
 ## Running: three tiers
 

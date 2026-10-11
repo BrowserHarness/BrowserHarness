@@ -177,6 +177,56 @@ if (q) fetch(${JSON.stringify(api)} + "?q=" + encodeURIComponent(q), { headers, 
       return;
     }
 
+    // the page that shows that list: it takes no input
+    if (url.pathname === "/account/orders") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Your orders</title><ul id="orders"></ul>
+<script>
+fetch("/api/config", { headers: { accept: "application/json" } });
+fetch("/api/my-orders", { headers: { accept: "application/json" }, credentials: "same-origin" })
+  .then((r) => r.json()).then((data) => {
+    for (const item of data.orders || []) { const li = document.createElement("li"); li.textContent = item.id; document.getElementById("orders").append(li); }
+  });
+</script>`);
+      return;
+    }
+
+    // a signed-in list with no input (a customer account's orders)
+    if (url.pathname === "/api/my-orders") {
+      if (!/(?:^|;\s*)sid=valid-session-123456/.test(req.headers.cookie || "")) {
+        json(401, { error: "Please sign in", require_login: true });
+        return;
+      }
+      json(200, { orders: [{ id: "o1", total: 42 }, { id: "o2", total: 17 }] });
+      return;
+    }
+
+    // a page's side request that sends the visitor's id beside other text, as YouTube's get_panel does
+    if (url.pathname === "/api/panel" && req.method === "POST") {
+      let videoIds = [];
+      try {
+        videoIds = JSON.parse(body).videoIds || [];
+      } catch {}
+      json(200, { panel: { title: "Save to...", videoIds, playlists: [{ id: "WL", title: "Watch later" }, { id: "LL", title: "Liked" }] } });
+      return;
+    }
+
+    // a checkbox write: no typed input, the video is in the page
+    if (url.pathname === "/api/playlist/edit" && req.method === "POST") {
+      state.writes += 1;
+      json(200, { status: "STATUS_SUCCEEDED" });
+      return;
+    }
+
+    // a page that renders its data into the document (YouTube history, AniList's first load)
+    if (url.pathname === "/history") {
+      const q = url.searchParams.get("q") || "";
+      const signedIn = /(?:^|;\s*)sid=valid-session-123456/.test(req.headers.cookie || "");
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>History</title><input name="q" value="${q.replace(/"/g, "&quot;")}">${signedIn ? `<script>var initialData = ${JSON.stringify({ items: catalog(q) })};</script>` : "<a href=/login>Sign in</a>"}`);
+      return;
+    }
+
     if (url.pathname === "/api/cart" && req.method === "POST") {
       // acceptWithoutChange: a 2xx that changes nothing (a write that silently did not happen)
       if (state.acceptWithoutChange) {

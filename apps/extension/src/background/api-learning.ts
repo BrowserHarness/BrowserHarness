@@ -36,6 +36,12 @@ export interface ApiLearnInput {
   replace_recipe_id?: string;
   /** learn from one or two Watch Me recordings instead of running the page */
   from_watch?: string[];
+  /**
+   * the captured request to learn, when the engine would choose another or
+   * nothing was typed: "METHOD https://host/path" as a refusal lists it, or
+   * its id in the (first) capture
+   */
+  pick_request?: string | number;
 }
 
 export interface ApiLearnDeps {
@@ -93,6 +99,24 @@ function plain(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function pickOf(input: ApiLearnInput): string | number | undefined {
+  const pick = input.pick_request;
+  if (typeof pick === "number" && Number.isInteger(pick)) return pick;
+  if (typeof pick === "string" && pick.trim()) return pick.trim();
+  return undefined;
+}
+
+/** The requests a refusal lists to choose from (where each went, never a value), from the helper app's error. */
+function candidatesOf(error: { details?: string } | undefined): unknown[] | undefined {
+  if (!error?.details) return undefined;
+  try {
+    const parsed = JSON.parse(error.details) as unknown;
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput): Promise<ApiLearnOutcome> {
   const name = typeof input.name === "string" ? input.name.trim() : "";
   if (!/^[A-Za-z][\w-]{0,63}$/.test(name)) {
@@ -110,12 +134,16 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
     return fail("API_LEARN_INPUT", "page_url must be an http(s) address with {name} where each input goes");
   }
   if (!/^https?:$/.test(page.protocol)) return fail("API_LEARN_INPUT", "page_url must be an http(s) address");
-  const examples = Array.isArray(input.examples) ? input.examples.filter(plain) : [];
-  if (examples.length !== 2) return fail("API_LEARN_INPUT", "give two examples with different values, like [{\"q\":\"laptops\"},{\"q\":\"keyboards\"}]");
   const holes = [...String(input.page_url).matchAll(/\{([A-Za-z_][\w-]*)\}/g)].map((match) => match[1]);
+  const given = Array.isArray(input.examples) ? input.examples.filter(plain) : [];
+  // a page with no input (a signed-in list): run it twice as it is and learn
+  // the request picked; without a pick the helper app lists the requests to choose from
+  const noInputs = !holes.length && given.every((example) => !Object.keys(example).length);
+  const examples = noInputs ? [{}, {}] : given;
+  if (examples.length !== 2) return fail("API_LEARN_INPUT", "give two examples with different values, like [{\"q\":\"laptops\"},{\"q\":\"keyboards\"}]");
   const missing = Object.keys(examples[0]).filter((key) => !holes.includes(key));
   if (missing.length) return fail("API_LEARN_INPUT", `page_url has no {${missing[0]}}: put it where that input goes in the address`);
-  if (!plain(input.verify_args) || !Object.keys(input.verify_args).length) {
+  if (!noInputs && (!plain(input.verify_args) || !Object.keys(input.verify_args).length)) {
     return fail("API_LEARN_INPUT", "give verify_args: a third input neither example used, so the operation can be checked live");
   }
 
@@ -139,7 +167,8 @@ export async function learnApiOperation(deps: ApiLearnDeps, input: ApiLearnInput
     evidence_id: evidenceId,
     started_at: startedAt,
     source: input.source === "repair" ? "repair" : "two_example_learning",
-    verify_args: input.verify_args
+    // with no inputs, the live check is the same call answering with real data
+    verify_args: noInputs ? {} : input.verify_args
   });
 }
 
@@ -167,15 +196,15 @@ async function learnFromWatch(deps: ApiLearnDeps, input: ApiLearnInput): Promise
     const shared = Object.keys(recordings[0].examples).filter((key) => recordings.every((item) => item.examples[key] !== undefined));
     // with two recordings, the inputs are the fields typed differently
     const names = recordings.length === 2 ? shared.filter((key) => recordings[0].examples[key].toLowerCase() !== recordings[1].examples[key].toLowerCase()) : shared;
-    if (!names.length) {
-      return fail(
-        "API_LEARN_INPUT",
-        recordings.length === 2
-          ? "the two recordings typed nothing different; record again with a different value, or give examples"
-          : "the recording typed nothing to learn an input from; give examples with the values it used"
-      );
+    if (!shared.length || (!names.length && pickOf(input) !== undefined)) {
+      // nothing typed (a checkbox, a button): the picked request is learned as
+      // it is; without a pick the helper app lists the requests to choose from
+      examples = recordings.map(() => ({}));
+    } else if (!names.length) {
+      return fail("API_LEARN_INPUT", "the two recordings typed nothing different; record again with a different value, give examples, or name the request to learn with pick_request");
+    } else {
+      examples = recordings.map((item) => Object.fromEntries(names.map((key) => [key, item.examples[key]])));
     }
-    examples = recordings.map((item) => Object.fromEntries(names.map((key) => [key, item.examples[key]])));
   }
   let entry: URL;
   try {
@@ -240,10 +269,14 @@ async function learnAndSave(deps: ApiLearnDeps, input: ApiLearnInput, run: Learn
     ...(privateParams ? { private_params: privateParams } : {}),
     evidence_ids: [evidenceId],
     source: run.source,
-    ...(input.parent_operation_id ? { parent_operation_id: input.parent_operation_id } : {})
+    ...(input.parent_operation_id ? { parent_operation_id: input.parent_operation_id } : {}),
+    ...(pickOf(input) !== undefined ? { pick_request: pickOf(input) } : {})
   });
   if (!learned.ok) {
-    return { ok: false, error: learned.error || { code: "API_ENGINE_FAILED", message: "Learning failed" } };
+    const candidates = candidatesOf(learned.error);
+    const error = learned.error ? { code: learned.error.code, message: learned.error.message } : { code: "API_ENGINE_FAILED", message: "Learning failed" };
+    // the requests to choose from: learn again with pick_request set to one's "request"
+    return { ok: false, error, ...(candidates?.length ? { data: { candidates } } : {}) };
   }
   const data = learned.data as { contract?: unknown; warnings?: string[]; example_fingerprints?: string[] };
   if (!isApiContract(data?.contract)) return fail("API_ENGINE_FAILED", "The helper app returned no operation contract");

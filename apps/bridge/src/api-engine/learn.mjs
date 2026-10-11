@@ -7,8 +7,9 @@ import { judge } from "../../vendor/api-anything/dist/classify.js";
 import { templatizeUrl } from "../../vendor/api-anything/dist/heal.js";
 import { capturePages, checkExamples, learnOperation, rankCandidates } from "../../vendor/api-anything/dist/learn.js";
 import { scanSecrets } from "../../vendor/api-anything/dist/secrets.js";
+import { loggedIn } from "../../vendor/api-anything/dist/session.js";
 import { toCaptureResult } from "./capture.mjs";
-import { dataFingerprint, itemCount } from "./outcome.mjs";
+import { dataFingerprint, itemCount, structuredResponse } from "./outcome.mjs";
 import { classifySideEffect, contractFromOperation, toUpstreamOperation } from "./recipe.mjs";
 
 const NAME = /^[A-Za-z][\w-]{0,63}$/;
@@ -19,8 +20,8 @@ function fail(code, message) {
   return error;
 }
 
-function plainArgs(args, label) {
-  if (!args || typeof args !== "object" || Array.isArray(args) || !Object.keys(args).length) {
+function plainArgs(args, label, { allowEmpty = false } = {}) {
+  if (!args || typeof args !== "object" || Array.isArray(args) || (!allowEmpty && !Object.keys(args).length)) {
     throw fail("API_LEARN_INPUT", `${label} must name at least one input, like {"query": "laptops"}`);
   }
   return args;
@@ -36,30 +37,104 @@ function where(exchange) {
   }
 }
 
-/** Ranked requests of one run that carry the example inputs, for a person or agent to choose from. */
-export function proposeCandidates({ capture, example }) {
+/** "POST https://host/path": how a person or agent names a captured request, the same on every run. */
+function requestName(method, url) {
+  try {
+    const parsed = new URL(url);
+    return `${String(method).toUpperCase()} ${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return "";
+  }
+}
+
+const QUIET = new Set(["document", "stylesheet", "script", "image", "font", "media", "manifest", "ping", "preflight"]);
+
+/**
+ * Requests of one run, best first, for a person or agent to choose from:
+ * where each went and what it answered, never a value. With example inputs,
+ * those that carry them, ranked; without (a checkbox, a list with no filter),
+ * the page's own data requests, its writes first when a write is wanted.
+ */
+export function proposeCandidates({ capture, example, side_effect: sideEffect }) {
   const run = toCaptureResult(capture);
-  const args = plainArgs(example, "example");
-  return rankCandidates(run.exchanges, args, { pages: capturePages(run) })
-    .slice(0, 8)
-    .map((candidate) => ({
-      id: candidate.id,
-      method: candidate.method,
-      url: (() => {
-        try {
-          const url = new URL(candidate.url);
-          return `${url.origin}${url.pathname}`;
-        } catch {
-          return "";
-        }
-      })(),
-      resource_type: candidate.resourceType,
-      status: candidate.status,
-      content_type: candidate.contentType,
-      ...(candidate.operationName ? { operation_name: candidate.operationName } : {}),
-      carries: candidate.hits,
-      score: candidate.score
-    }));
+  const args = plainArgs(example ?? {}, "example", { allowEmpty: true });
+  const describe = (candidate) => ({
+    id: candidate.id,
+    request: requestName(candidate.method, candidate.url),
+    method: candidate.method,
+    url: requestName(candidate.method, candidate.url).replace(/^\S+ /, ""),
+    resource_type: candidate.resourceType,
+    status: candidate.status,
+    content_type: candidate.contentType,
+    ...(candidate.operationName ? { operation_name: candidate.operationName } : {}),
+    carries: candidate.hits,
+    score: candidate.score
+  });
+  if (Object.keys(args).length) {
+    return rankCandidates(run.exchanges, args, { pages: capturePages(run) }).slice(0, 8).map(describe);
+  }
+  const write = sideEffect === "write";
+  return rankCandidates(run.exchanges, {}, { pages: capturePages(run) })
+    .filter((candidate) => !QUIET.has(candidate.resourceType))
+    .map((candidate) => ({ candidate, writes: candidate.method !== "GET" && candidate.method !== "HEAD" }))
+    .sort((a, b) => (write ? Number(b.writes) - Number(a.writes) : Number(a.writes) - Number(b.writes)) || b.candidate.score - a.candidate.score)
+    .slice(0, 12)
+    .map(({ candidate }) => describe(candidate));
+}
+
+/** The captured request a pick names: its id in run 1, or "METHOD https://host/path" (the best of those, when several). */
+function pickedExchange(pick, run, args) {
+  if (Number.isInteger(pick)) {
+    if (!run.exchanges.some((exchange) => exchange.id === pick)) throw fail("API_LEARN_FAILED", `no captured request with id ${pick}`);
+    return pick;
+  }
+  const wanted = String(pick).trim().replace(/\s+/, " ");
+  const [method, url] = wanted.split(" ");
+  const name = url ? requestName(method, url) : "";
+  if (!name) throw fail("API_LEARN_INPUT", 'pick_request names a request as "METHOD https://host/path", or by its id in the capture');
+  const pool = run.exchanges.filter((exchange) => requestName(exchange.request.method, exchange.request.url) === name);
+  if (!pool.length) throw fail("API_LEARN_FAILED", `no captured request is ${name}`);
+  const ranked = rankCandidates(pool, args, { all: true, pages: capturePages(run) });
+  return ranked[0]?.id ?? pool[pool.length - 1].id;
+}
+
+/** Upstream's hints name its own command line; here the choice is pick_request. */
+function localHints(text) {
+  return String(text)
+    .replace(/\s*\(capture, then add --from <id> --pick-request <n>\)/g, " (choose it with pick_request from the requests listed)")
+    .replace(/,? or (learn )?the page itself with --html or --embedded/g, "")
+    .replace(/,? or pass --match/g, "")
+    .replace(/pass id or match to choose/g, "pass pick_request to choose")
+    .replace(/response is HTML: add --html .*$/, "response is HTML: a whole page, not data; pick the request that returns the data")
+    .replace(/--example2 (\w+)=\.\.\., and --from2 when learning from captures/g, "a second example for $1");
+}
+
+// A framework's anonymous session (AniList's laravel_session) is set for every
+// visitor, signed in or not: it says nothing about a sign-in.
+const ANONYMOUS_SESSION = /^(laravel_session|ci_session|phpsessid|jsessionid|asp\.net_sessionid|connect\.sid)$/i;
+
+/**
+ * Cookies that can be credentials. A cookie whose whole value is the site's
+ * own host or a parent domain of it (a tracker's IR_gbd = "coursera.org",
+ * _li_dcdm_c = ".meetup.com") is public: every address on the site contains
+ * it, so treating it as a live credential would refuse every request whose
+ * referer or origin names the page.
+ */
+export function credentialCookies(cookies, urls) {
+  const hosts = new Set();
+  for (const url of urls) {
+    try {
+      hosts.add(new URL(url).hostname.toLowerCase());
+    } catch {
+      // not an address
+    }
+  }
+  const isDomainOfSite = (value) => {
+    const domain = String(value).trim().toLowerCase().replace(/^\./, "");
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) && !/^[\d.]+$/.test(domain)) return false;
+    return [...hosts].some((host) => host === domain || host.endsWith(`.${domain}`));
+  };
+  return cookies.filter((cookie) => !isDomainOfSite(cookie.value));
 }
 
 /** Upstream's trigger: the page URL with each example value as `{name}`, plus any UI steps. */
@@ -82,6 +157,17 @@ function exampleCheck(op, exchange, argNames, checkedAt) {
   if (!response) {
     return {
       check: { kind: "learned_examples", passed: false, arg_names: argNames, detail: "the run's request has no response", checked_at: checkedAt }
+    };
+  }
+  if (!structuredResponse(op.response)) {
+    return {
+      check: {
+        kind: "learned_examples",
+        passed: false,
+        arg_names: argNames,
+        detail: "the request answers with a whole page (HTML), not data: pick the request that returns the data",
+        checked_at: checkedAt
+      }
     };
   }
   const judged = judge(op, { status: response.status, headers: response.headers, body: response.body ?? "", url: exchange.request.url });
@@ -136,9 +222,11 @@ export function learnApiOperation(input) {
   if (!captures.length || captures.length !== examples.length || captures.length > 2) {
     throw fail("API_LEARN_INPUT", "give one run per example: two runs with two different example inputs");
   }
-  const args1 = plainArgs(examples[0], "example 1");
-  const args2 = examples[1] ? plainArgs(examples[1], "example 2") : undefined;
-  if (args2) {
+  // no inputs at all (a checkbox, a list with no filter) is allowed once a request is picked
+  const noInputs = examples.every((example) => example && typeof example === "object" && !Array.isArray(example) && !Object.keys(example).length);
+  const args1 = plainArgs(examples[0], "example 1", { allowEmpty: noInputs });
+  const args2 = examples[1] ? plainArgs(examples[1], "example 2", { allowEmpty: noInputs }) : undefined;
+  if (args2 && !noInputs) {
     const names1 = Object.keys(args1).sort().join(",");
     if (names1 !== Object.keys(args2).sort().join(",")) throw fail("API_LEARN_INPUT", "both examples must name the same inputs");
     if (Object.keys(args1).every((key) => String(args1[key]).toLowerCase() === String(args2[key]).toLowerCase())) {
@@ -153,10 +241,59 @@ export function learnApiOperation(input) {
   }
   const run1 = toCaptureResult(captures[0]);
   const run2 = captures[1] ? toCaptureResult(captures[1]) : undefined;
+  for (const run of [run1, run2].filter(Boolean)) {
+    run.cookies = credentialCookies(run.cookies, [run.finalUrl, ...run.locations, ...run.exchanges.map((exchange) => exchange.request.url)]);
+  }
   const warnings = [];
   if (!run2) warnings.push("learned from one run: nonces and per-load values could not be told apart from constants");
   if (input.side_effect === "write" && input.automated_trigger === true) {
     throw fail("API_LEARN_WRITE_REFUSED", "a write is learned from a person's demonstration only, never by running its trigger");
+  }
+
+  const candidatesFor = () => {
+    try {
+      return proposeCandidates({ capture: captures[0], example: args1, side_effect: input.side_effect });
+    } catch {
+      return [];
+    }
+  };
+  const withCandidates = (error) => Object.assign(error, { candidates: candidatesFor() });
+
+  // A person or agent names the request (pick_request, or exchange_id: its id
+  // in run 1). Without one, several requests can carry the inputs equally
+  // well: a per-keystroke autocomplete beside the submitted search, a page's
+  // default query before the one with the inputs. The page's last one is the
+  // request the person's action produced; upstream would take the first. A
+  // whole page that carries them loses to a data request that carries as many.
+  const pick = input.pick_request ?? input.exchange_id;
+  let pickedId;
+  if (pick !== undefined && pick !== null && pick !== "") {
+    try {
+      pickedId = pickedExchange(pick, run1, args1);
+    } catch (error) {
+      throw withCandidates(error);
+    }
+  } else if (!Object.keys(args1).length) {
+    // nothing typed (a checkbox, a list with no filter): nothing tells the requests apart
+    throw withCandidates(
+      fail("API_LEARN_PICK_REQUEST", "nothing was typed, so no input tells the requests apart: choose the one to learn with pick_request from the requests listed")
+    );
+  } else if (!input.match) {
+    try {
+      const ranked = rankCandidates(run1.exchanges, args1, { pages: capturePages(run1) }).filter((candidate) => candidate.hits.length);
+      const isPage = (candidate) => /html/i.test(candidate.contentType || "") || candidate.resourceType === "document";
+      const data = ranked.find((candidate) => !isPage(candidate) && candidate.hits.length >= (ranked[0]?.hits.length ?? 0));
+      const tied = ranked.filter((candidate) => candidate.score === ranked[0]?.score);
+      if (ranked[0] && isPage(ranked[0]) && data) {
+        pickedId = data.id;
+        warnings.push(`request #${ranked[0].id} is a whole page; learned #${data.id}, which returns data and carries the inputs as well (pass pick_request to choose another)`);
+      } else if (tied.length > 1) {
+        pickedId = Math.max(...tied.map((candidate) => candidate.id));
+        warnings.push(`requests ${tied.map((candidate) => `#${candidate.id}`).join(", ")} carry the inputs equally; learned the page's last one, #${pickedId} (pass pick_request to choose another)`);
+      }
+    } catch {
+      // upstream's own ranking reports the problem below
+    }
   }
 
   let learned;
@@ -171,24 +308,15 @@ export function learnApiOperation(input) {
       name,
       trigger: triggerFor(input, run1, args1),
       readOnly: input.side_effect !== "write",
-      ...(Number.isInteger(input.exchange_id) ? { id: input.exchange_id } : {}),
+      ...(pickedId !== undefined ? { id: pickedId } : {}),
       ...(Array.isArray(input.login_cookies) ? { loginCookies: input.login_cookies.map(String) } : {}),
       ...(Array.isArray(input.public) ? { public: input.public.map(String) } : {})
     });
   } catch (error) {
     const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
-    const candidates = (() => {
-      try {
-        return proposeCandidates({ capture: captures[0], example: args1 });
-      } catch {
-        return [];
-      }
-    })();
-    const wrapped = fail("API_LEARN_FAILED", message);
-    wrapped.candidates = candidates;
-    throw wrapped;
+    throw withCandidates(fail("API_LEARN_FAILED", localHints(message)));
   }
-  warnings.push(...learned.warnings);
+  warnings.push(...learned.warnings.map(localHints));
 
   const declared = input.side_effect === "read" || input.side_effect === "write" ? input.side_effect : undefined;
   // what a person typed into anything not proven to be a read is theirs (a
@@ -208,6 +336,12 @@ export function learnApiOperation(input) {
     example_inputs: { learning: args2 ? [args1, args2] : [args1] }
   });
 
+  // signed in: a credential cookie that is not every visitor's anonymous session
+  contract.learned_logged_in = loggedIn(
+    run1.cookies.filter((cookie) => !ANONYMOUS_SESSION.test(cookie.name)),
+    Array.isArray(input.login_cookies) ? input.login_cookies.map(String) : undefined
+  );
+
   // Fail closed: a live cookie or storage value anywhere in the contract means
   // the learner kept a credential literal.
   const live = {
@@ -216,7 +350,7 @@ export function learnApiOperation(input) {
   };
   const scan = scanSecrets(contract, live, new Set());
   if (scan.secrets.length) {
-    throw fail("API_LEARN_SECRET", `the learned operation would keep a session value (${scan.secrets.slice(0, 3).join("; ")}); not saved`);
+    throw withCandidates(fail("API_LEARN_SECRET", `the learned operation would keep a session value (${scan.secrets.slice(0, 3).join("; ")}); not saved. Choose another request with pick_request from the requests listed`));
   }
   contract.provenance.warnings = [...contract.provenance.warnings, ...scan.warnings].slice(0, 20);
   // Fail closed again: no private input's learning value may survive anywhere in the contract.

@@ -357,7 +357,7 @@ export function siteCommandAnswer(
   data: unknown
 ): Record<string, unknown> {
   const result = (data || {}) as {
-    run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> };
+    run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> & { api?: { tier?: number; class?: string; item_count?: number } } };
     sent?: boolean;
     verification?: string;
     next_action?: string;
@@ -371,7 +371,11 @@ export function siteCommandAnswer(
       ? {
           http_status: run.output.http_status,
           truncated: run.output.truncated,
-          output: run.output.data
+          output: run.output.data,
+          // a learned operation: which tier answered (plain HTTP, the page's request, or the page)
+          ...(run.output.api
+            ? { tier: run.output.api.tier, class: run.output.api.class, ...(run.output.api.item_count !== undefined ? { item_count: run.output.api.item_count } : {}) }
+            : {})
         }
       : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 }),
     ...(result.verification === "unverified"

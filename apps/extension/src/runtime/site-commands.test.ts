@@ -216,6 +216,11 @@ describe("site commands", () => {
     // a read answers its data, with no verification note
     const read = siteCommandAnswer({ ...command, kind: "read" }, { run: { output: { http_status: 200, truncated: false, data: [1] } } });
     expect(read).toEqual({ command: "shop-add-to-cart", site: "Shop", kind: "read", http_status: 200, truncated: false, output: [1] });
+    // a learned operation's run says which tier answered (RC1 acceptance F7)
+    const api = siteCommandAnswer({ ...command, kind: "read" }, {
+      run: { output: { http_status: 200, truncated: false, data: [1], api: { tier: 2, class: "ok", item_count: 1 } } }
+    });
+    expect(api).toMatchObject({ output: [1], tier: 2, class: "ok", item_count: 1 });
     // a UI form run is unchanged
     expect(siteCommandAnswer(command, { run: { submitted: true, executed_steps: 3 } })).toEqual({ command: "shop-add-to-cart", site: "Shop", kind: "form", submitted: true, steps: 3 });
   });

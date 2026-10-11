@@ -82,7 +82,7 @@ export function watchCaptureSummary(entry: WatchApiCapture) {
       requests && inputs.length
         ? `To learn the request this made: site_skill learn_api with name and from_watch: ["${entry.recording_id}"] (record it again with a different ${inputs[0]} and pass both ids to tell inputs from constants).`
         : requests
-          ? "The demonstration typed nothing, so there is no input to find in its requests."
+          ? `The demonstration typed nothing (a checkbox or a button): site_skill learn_api with name and from_watch: ["${entry.recording_id}"] lists its requests, then learn the one that did it with pick_request.`
           : "The demonstration made no data requests to learn from."
   };
 }

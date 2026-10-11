@@ -123,9 +123,14 @@ export function carriesArgs(op, observed, args) {
   } catch {
     return false;
   }
+  // A header slot that templates the page's address (referer, origin, a
+  // site's own x-...-url) echoes where the page is, which an app may write
+  // differently from the trigger URL. Where the request carries the inputs
+  // anywhere else (path, query, body), those places decide.
+  const inputSlots = op.slots.filter((slot) => slot.param !== undefined && !holdsRef(slot));
+  const beyondHeaders = inputSlots.filter((slot) => !slot.at[0].startsWith("header:"));
   let compared = 0;
-  for (const slot of op.slots) {
-    if (slot.param === undefined || holdsRef(slot)) continue;
+  for (const slot of beyondHeaders.length ? beyondHeaders : inputSlots) {
     let want;
     let got;
     try {

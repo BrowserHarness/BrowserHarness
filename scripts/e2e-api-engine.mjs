@@ -107,6 +107,30 @@ try {
   );
   check("the session cookie is still not stored anywhere in the library", !JSON.stringify(await side.evaluate(async () => chrome.storage.local.get(null))).includes(SESSION_COOKIE));
 
+  // A signed-in list with no input (RC1 acceptance F6, F9): the first learn
+  // lists the page's requests, the second learns the one picked
+  const unpicked = await command("learn-api", "site_skill", { action: "learn_api", name: "my_orders", page_url: `${shop.origin}/account/orders` });
+  const listedRequests = unpicked.data?.candidates || [];
+  const ordersRequest = listedRequests.find((item) => /\/api\/my-orders$/.test(item.request || ""));
+  check(
+    "a page with no input lists its requests to choose from, with no values",
+    !unpicked.ok && unpicked.error?.code === "API_LEARN_PICK_REQUEST" && ordersRequest && !JSON.stringify(listedRequests).includes(SESSION_COOKIE),
+    JSON.stringify(unpicked.error || unpicked.data).slice(0, 400)
+  );
+  const myOrders = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: learned.data?.candidate_id,
+    name: "my_orders",
+    page_url: `${shop.origin}/account/orders`,
+    pick_request: ordersRequest?.request
+  });
+  check(
+    "the picked no-input read verifies live with real data through the page",
+    myOrders.ok && myOrders.data.verification.status === "verified" && myOrders.data.answered_by_tier === 2 && myOrders.data.operation.params.length === 0,
+    JSON.stringify(myOrders.error || myOrders.data?.verification).slice(0, 400)
+  );
+  check("the session cookie is not stored after learning the list", !JSON.stringify(await side.evaluate(async () => chrome.storage.local.get(null))).includes(SESSION_COOKIE));
+
   // A per-load signature: only the page itself can make the request (tier 3)
   const guarded = await command("learn-api", "site_skill", {
     action: "learn_api",
@@ -138,7 +162,7 @@ try {
   const health = await command("agent", "site_skill", { action: "verify", id: skillId });
   check(
     "site_skill verify calls each learned read live with a taught input",
-    health.ok && health.data.health.length === 4 && health.data.health.every((item) => item.passed),
+    health.ok && health.data.health.length === 5 && health.data.health.every((item) => item.passed),
     JSON.stringify(health.data?.health || health.error).slice(0, 400)
   );
 

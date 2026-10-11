@@ -427,7 +427,7 @@ async function sitesCommand(config, name, args = []) {
       action: "site_commands",
       args: name ? { name, args: args.map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg)).join(" ") } : {}
     },
-    60_000
+    310_000
   ).catch(() => ({
     ok: false,
     error: { message: "The bridge is not running. Start it with: browserharness-bridge start" }
@@ -879,9 +879,10 @@ async function install(config, created, { quiet = false } = {}) {
   let agents = [];
   if (!flag("no-agents")) {
     const only = option("agents")?.split(",").map((value) => value.trim()).filter(Boolean);
-    agents = await registerAgents(ctx, { only });
+    agents = await registerAgents({ ...ctx, replaceAgents: flag("replace-agents") }, { only });
     for (const agent of agents) {
       if (agent.status === "connected") say(`✓ ${agent.name}: connected (ask it to use BrowserHarness, or type /browserharness)`);
+      else if (agent.status === "kept") say(`• ${agent.name}: ${agent.note}`);
       else if (agent.status === "failed") say(`✗ ${agent.name}: ${agent.error}`);
     }
     if (!agents.some((agent) => agent.status === "connected")) {
