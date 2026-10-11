@@ -29,7 +29,11 @@ const READ_FALLTHROUGH = new Set<ApiResultClass>(["unavailable", "auth", "blocke
 /** The tiers to try, in order: the remembered one first, never below the operation's minimum. */
 export function tierOrder(contract: ApiOperationContract, remembered?: ApiTier, maxTier: ApiTier = 3): ApiTier[] {
   const preference = (contract.transport?.preference?.length ? contract.transport.preference : [1, 2, 3]) as ApiTier[];
-  const allowed = [...new Set(preference)].filter((tier) => tier >= (contract.min_tier || 1) && tier <= maxTier);
+  // a write acts on the person's own session (a cart, a list): it is sent
+  // from their browser, never as plain HTTP without it (RC3: an approved add
+  // to cart landed in a new cart nobody sees)
+  const lowest = Math.max(contract.min_tier || 1, contract.side_effect === "read" ? 1 : 2);
+  const allowed = [...new Set(preference)].filter((tier) => tier >= lowest && tier <= maxTier);
   const first = remembered ?? contract.transport?.learned_tier;
   return first && allowed.includes(first) ? [first, ...allowed.filter((tier) => tier !== first)] : allowed;
 }

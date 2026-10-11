@@ -1,6 +1,7 @@
 import type { ApprovalMode } from "../settings/preferences";
 import type { PageObservation, ToolName } from "./protocol";
 import { changesPage } from "./post-action";
+import { isGrantableHost, isHostGranted, normalizeGrantHost, type SiteGrant } from "../settings/site-grants";
 
 /** Even automatic mode always asks before these. */
 export const ALWAYS_ASK =
@@ -69,7 +70,69 @@ export function approvalFor(
   return riskyDescription;
 }
 
+/**
+ * A write: a learned API operation that may change data, or a Site Skill
+ * recipe that submits. It is asked before every run: neither automatic mode
+ * nor "Always allow on this site" answers it (RC3 acceptance).
+ */
+const EVERY_TIME = /It may change data there|” and submit on /;
+
+export function asksEveryTime(description: string): boolean {
+  return EVERY_TIME.test(description);
+}
+
 /** Whether a question can be answered yes without the person, in automatic mode. */
 export function autoApproves(mode: ApprovalMode, description: string): boolean {
-  return mode === "auto" && !ALWAYS_ASK.test(description);
+  return mode === "auto" && !ALWAYS_ASK.test(description) && !asksEveryTime(description);
+}
+
+/**
+ * Whether a question is answered yes without showing it: "auto" in automatic
+ * mode, "site" when the person chose "Always allow on this site", else null.
+ */
+export function approvalShortcut(
+  mode: ApprovalMode,
+  description: string,
+  host: string,
+  grants: SiteGrant[]
+): "auto" | "site" | null {
+  if (asksEveryTime(description)) return null;
+  if (autoApproves(mode, description)) return "auto";
+  if (host && isHostGranted(grants, host)) return "site";
+  return null;
+}
+
+/** Whether the question may offer "Always allow on this site". */
+export function offersSiteGrant(description: string, host: string): boolean {
+  return !asksEveryTime(description) && isGrantableHost(normalizeGrantHost(host));
+}
+
+export interface ApprovalQuestion {
+  description: string;
+  host: string;
+  resolve: (yes: boolean) => void;
+}
+
+/**
+ * Shows a question until the person answers it. The first answer counts and
+ * takes the question away: Cancel, like Approve, closes it.
+ */
+export function askPerson(
+  show: (question: ApprovalQuestion | null) => void,
+  description: string,
+  host: string
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let answered = false;
+    show({
+      description,
+      host,
+      resolve: (yes) => {
+        if (answered) return;
+        answered = true;
+        show(null);
+        resolve(yes);
+      }
+    });
+  });
 }

@@ -278,6 +278,103 @@ document.getElementById("add").addEventListener("click", () => {
       return;
     }
 
+    // A Shopify-like product page (RC3: sabpuja.com). Its theme sends Add to
+    // cart as multipart/form-data, and the cart lives behind the "cart" cookie:
+    // an add without it lands in a new, empty-handed cart nobody sees.
+    const cookieCart = /(?:^|;\s*)cart=([^;]+)/.exec(req.headers.cookie || "")?.[1];
+    if (url.pathname === "/products/akshat") {
+      const headers = { "content-type": "text/html; charset=utf-8" };
+      if (!cookieCart) headers["set-cookie"] = `cart=c${Math.random().toString(36).slice(2, 12)}; Path=/; SameSite=Lax`;
+      res.writeHead(200, headers);
+      res.end(`<!doctype html><title>Akshat – Sabpuja</title><h1>Akshat</h1>
+<form id="product-form" action="/cart/add" method="post" enctype="multipart/form-data">
+<input type="hidden" name="form_type" value="product"><input type="hidden" name="utf8" value="✓">
+<label>Variant <select name="id"><option value="44012345678901">Rice</option></select></label>
+<input type="hidden" name="quantity" value="1"><input type="hidden" name="product-id" value="8123456789012">
+<input type="hidden" name="section-id" value="template--19283746__main">
+<button id="add" type="submit">Add to cart</button></form><p id="done"></p>
+<script>
+document.getElementById("product-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const body = new FormData(event.target);
+  body.append("sections", "cart-notification-product,cart-icon-bubble");
+  body.append("sections_url", location.pathname);
+  fetch("/cart/add", { method: "POST", headers: { accept: "application/javascript", "x-requested-with": "XMLHttpRequest" }, body })
+    .then((r) => r.json()).then((data) => { document.getElementById("done").textContent = "Added " + data.title; });
+});
+</script>`);
+      return;
+    }
+    if (url.pathname === "/cart/add" && req.method === "POST") {
+      const boundary = /boundary=([^;]+)/.exec(req.headers["content-type"] || "")?.[1];
+      const fields = {};
+      if (boundary) {
+        for (const part of body.split(`--${boundary}`)) {
+          const name = /name="([^"]+)"/.exec(part)?.[1];
+          const at = part.indexOf("\r\n\r\n");
+          if (name && at >= 0) fields[name] = part.slice(at + 4).replace(/\r\n$/, "");
+        }
+      } else {
+        for (const [key, value] of new URLSearchParams(body)) fields[key] = value;
+      }
+      if (fields.id !== "44012345678901") {
+        json(422, { status: 422, message: "Cart Error", description: "Cannot find variant" });
+        return;
+      }
+      state.carts ??= new Map();
+      state.cartAdds = (state.cartAdds || 0) + 1;
+      const token = cookieCart || `orphan${state.cartAdds}`;
+      if (!cookieCart) state.orphanAdds = (state.orphanAdds || 0) + 1;
+      const items = state.carts.get(token) || [];
+      items.push({ id: Number(fields.id), quantity: Number(fields.quantity || 1), product_title: "Akshat", variant_title: "Rice" });
+      state.carts.set(token, items);
+      json(200, { id: Number(fields.id), quantity: Number(fields.quantity || 1), product_title: "Akshat", variant_title: "Rice", title: "Akshat - Rice", handle: "akshat", sections: { "cart-icon-bubble": `<span>${items.length}</span>` } });
+      return;
+    }
+    if (url.pathname === "/cart.js") {
+      const items = (state.carts?.get(cookieCart) || []);
+      json(200, { token: cookieCart ? "present" : "none", item_count: items.reduce((sum, item) => sum + item.quantity, 0), items });
+      return;
+    }
+    if (url.pathname === "/cart/clear.js" && req.method === "POST") {
+      state.carts?.delete(cookieCart);
+      json(200, { item_count: 0, items: [] });
+      return;
+    }
+
+    // A signed-in search whose page sends a token from its own storage and a
+    // fresh one-time value, a moment after it loads (RC3: GBIF, Algolia and
+    // signed-in Shopify reads). Only the page itself can send it: tier 3.
+    if (url.pathname === "/token-search") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Records</title><ul id="results"></ul>
+<script>
+const q = new URLSearchParams(location.search).get("q");
+setTimeout(() => {
+  if (q) fetch("/api/token-search?q=" + encodeURIComponent(q) + "&limit=20", { headers: { accept: "application/json", authorization: "Bearer " + localStorage.getItem("authToken"), "x-page-nonce": crypto.randomUUID() } })
+    .then((r) => r.json()).then((data) => {
+      for (const item of data.results || []) { const li = document.createElement("li"); li.textContent = item.title; document.getElementById("results").append(li); }
+    });
+}, 1200);
+</script>`);
+      return;
+    }
+    if (url.pathname === "/api/token-search") {
+      const nonce = String(req.headers["x-page-nonce"] || "");
+      state.nonces ??= new Set();
+      if (req.headers.authorization !== "Bearer tok_9fK2mQ7vX1pL8sD4hJ6w") {
+        json(401, { error: "Please sign in" });
+        return;
+      }
+      if (!/^[0-9a-f-]{36}$/.test(nonce) || state.nonces.has(nonce)) {
+        json(403, { error: "request signature rejected" });
+        return;
+      }
+      state.nonces.add(nonce);
+      json(200, { results: catalog(url.searchParams.get("q")), count: catalog(url.searchParams.get("q")).length });
+      return;
+    }
+
     if (url.pathname === "/challenge") {
       res.writeHead(403, { "content-type": "text/html" });
       res.end("<html><title>Just a moment...</title><body>Checking your browser before accessing. cf-chl</body></html>");

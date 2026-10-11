@@ -2,7 +2,8 @@
 // The native API engine's regression gate, run locally before a release
 // candidate (never on GitHub Actions): the vendored upstream is unchanged,
 // the Bridge and extension tests pass, the extension typechecks and builds,
-// and the real-Chromium fixture test passes. Prints one line per step and
+// and the real-Chromium fixture tests pass, including the automated
+// acceptance run through the person's real side panel. Prints one line per step and
 // exits non-zero on the first failure.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -18,16 +19,17 @@ const steps = [
   ["extension build", npm, ["run", "build"]],
   ["Bridge bundle", npm, ["run", "build:bridge"]],
   ["MV3 contract", npm, ["run", "validate:mvp"]],
-  ["real-Chromium API engine test (local fixture)", npm, ["run", "smoke:api-engine"]]
+  ["real-Chromium API engine test (local fixture)", npm, ["run", "smoke:api-engine"]],
+  ["real-Chromium acceptance: learn, run, approve in the side panel, verify", npm, ["run", "smoke:api-acceptance"]]
 ];
-if (process.argv.includes("--quick")) steps.splice(steps.length - 1, 1);
+if (process.argv.includes("--quick")) steps.splice(steps.length - 2, 2);
 
 for (const [name, cmd, args] of steps) {
   const started = Date.now();
   const run = spawnSync(cmd, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const output = `${run.stdout || ""}${run.stderr || ""}`;
-  const counts = output.match(/# pass \d+|Tests\s+\d+ passed[^\n]*|\d+\/\d+ API engine checks passed/g);
+  const counts = output.match(/# pass \d+|Tests\s+\d+ passed[^\n]*|\d+\/\d+ API (?:engine|acceptance) checks passed/g);
   if (run.status !== 0) {
     console.log(`FAIL ${name} (${seconds} s)`);
     console.log(output.split("\n").slice(-40).join("\n"));

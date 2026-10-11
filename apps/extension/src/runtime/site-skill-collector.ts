@@ -79,10 +79,12 @@ export const SITE_FORM_INSPECTION_EXPRESSION = `(() => {
 
     return {
       index,
-      ...(clean(form.id) ? { id: clean(form.id) } : {}),
-      ...(clean(form.name) ? { name: clean(form.name) } : {}),
-      action: form.action || location.href,
-      method: clean(form.method || "get").toUpperCase(),
+      // attributes, not properties: a control named "id", "name" or "action"
+      // (a Shopify product form's variant select) shadows the form's own
+      ...(clean(form.getAttribute("id")) ? { id: clean(form.getAttribute("id")) } : {}),
+      ...(clean(form.getAttribute("name")) ? { name: clean(form.getAttribute("name")) } : {}),
+      action: new URL(form.getAttribute("action") || location.href, location.href).href,
+      method: clean(form.getAttribute("method") || "get").toUpperCase(),
       fields,
       ...(submit
         ? {

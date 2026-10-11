@@ -56,6 +56,13 @@ export function siteCommandAnswer(command: SiteCommand, result: ToolResult<unkno
       : `/${command.name} didn't run: ${message}`;
   }
   const data = (isRecord(result.data) ? result.data : {}) as Record<string, unknown>;
+  if (command.kind === "form" && (command.recipe_kind === "api" || command.api || data.verification !== undefined || data.tier !== undefined)) {
+    // a learned write: the request it sent, never a form (RC3 acceptance)
+    if (!data.submitted && data.sent !== true) return `Nothing was sent to ${command.site}.`;
+    const tier = typeof data.tier === "number" ? ` (tier ${data.tier})` : "";
+    const next = typeof data.next_action === "string" && data.next_action ? data.next_action : `check ${command.site} to confirm the change, and do not resend it`;
+    return `Sent the learned request to ${command.site}${tier}; the change is not confirmed yet. Next: ${next}.`;
+  }
   if (command.kind === "form") {
     return data.submitted
       ? `Done: filled and sent the form on ${command.site}. The page is open in its own tab.`

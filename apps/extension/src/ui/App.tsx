@@ -13,7 +13,7 @@ import {
   type ChatMessage,
   type SavedChat
 } from "../runtime/chats";
-import { autoApproves } from "../runtime/approval-mode";
+import { approvalShortcut, askPerson, offersSiteGrant } from "../runtime/approval-mode";
 import {
   APPROVAL_WORDS,
   approvalQuestionFor,
@@ -129,10 +129,7 @@ import {
 } from "../runtime/schedules";
 import {
   addGrant,
-  isGrantableHost,
-  isHostGranted,
   loadSiteGrants,
-  normalizeGrantHost,
   saveSiteGrants,
   SITE_GRANTS_KEY,
   type SiteGrant
@@ -821,19 +818,18 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
     description: string,
     hostOverride?: string
   ) => {
-    if (autoApproves(approvalMode.current, description)) {
+    const host =
+      hostOverride ?? (approvalHost.current || safeHostname(tab?.url));
+    const shortcut = approvalShortcut(approvalMode.current, description, host, siteGrants.current);
+    if (shortcut === "auto") {
       addActivity(`Went ahead without asking (you chose not to be asked): ${description}`, "done");
       return true;
     }
-    const host =
-      hostOverride ?? (approvalHost.current || safeHostname(tab?.url));
-    if (host && isHostGranted(siteGrants.current, host)) {
+    if (shortcut === "site") {
       addActivity(`Went ahead without asking (you allowed ${host}): ${description}`, "done");
       return true;
     }
-    return new Promise<boolean>((resolve) =>
-      setApproval({ description, host, resolve })
-    );
+    return askPerson(setApproval, description, host);
   };
 
   const grantSite = async (host: string) => {
@@ -2006,7 +2002,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
                     <Button size="small" onClick={() => approval.resolve(false)}>
                       Cancel
                     </Button>
-                    {isGrantableHost(normalizeGrantHost(approval.host)) && (
+                    {offersSiteGrant(approval.description, approval.host) && (
                       <Button
                         size="small"
                         onClick={() => {

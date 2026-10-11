@@ -157,7 +157,10 @@ function addressNames(text, value) {
 export function carriesArgs(op, observed, args) {
   let expected;
   try {
-    expected = buildRequest(op, args, { cookies: [], storage: {} });
+    // the inputs only: session values are left out (an empty session drops
+    // them), so an operation that holds one is still recognised (RC3: every
+    // signed-in or token request was reported as endpoint_drift)
+    expected = buildRequest(op, args, { cookies: [], storage: {}, values: {} });
   } catch {
     return false;
   }
@@ -170,9 +173,22 @@ export function carriesArgs(op, observed, args) {
   };
   const inputSlots = op.slots.filter((slot) => slot.param !== undefined && !holdsRef(slot));
   const proven = new Set();
+  // a slot whose template also holds a session value ("Bearer {token}:{q}"):
+  // the expected text lacks it, so the input is looked for inside the value
+  const withSession = (slot) =>
+    typeof slot.template === "string" &&
+    [...slot.template.matchAll(/\{([^}]+)\}/g)].some(([, name]) => name !== slot.param && !op.params.some((param) => param.name === name));
   for (const slot of inputSlots.filter((item) => !mirrorsPage(item))) {
-    const want = read(expected, slot.at);
     const got = read(observed, slot.at);
+    if (withSession(slot)) {
+      const value = args[slot.param];
+      if (value === undefined) continue;
+      const text = got?.value === undefined ? "" : asText(got.value);
+      if (!text.includes(asText(value)) && !text.includes(encodeURIComponent(asText(value)))) return false;
+      proven.add(slot.param);
+      continue;
+    }
+    const want = read(expected, slot.at);
     if (!want || !got) return false;
     if (want.value === undefined) continue;
     if (got.value === undefined || asText(got.value) !== asText(want.value)) return false;

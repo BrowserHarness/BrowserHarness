@@ -177,6 +177,11 @@ export function buildSiteCommands(
       }
     })();
 
+    // a learned operation takes the plain name; the form it was watched on
+    // keeps "-form" (RC3: /site-add-to-cart filled the form instead)
+    const learned = new Set(
+      candidate.recipes.filter((item) => recipeKind(item) !== "ui").map((item) => recipeLabel(item))
+    );
     for (const recipe of candidate.recipes) {
       const key = `${family.id}:${recipe.id}`;
       const executions = (family.executions || []).filter((item) => item.recipe_id === recipe.id);
@@ -215,7 +220,9 @@ export function buildSiteCommands(
         worked: executions.filter((item) => item.outcome === "passed").length
       };
       const renamed = slug(names[key] || "");
-      pending.push({ base: renamed || `${siteLabel(candidate.site.origin)}-${recipeLabel(recipe)}`, command });
+      const label = recipeLabel(recipe);
+      const own = recipeKind(recipe) === "ui" && learned.has(label) ? `${label}-form` : label;
+      pending.push({ base: renamed || `${siteLabel(candidate.site.origin)}-${own}`, command });
     }
   }
 
@@ -373,6 +380,7 @@ export function siteCommandAnswer(
     kind: command.kind,
     ...(run?.output
       ? {
+          ...(command.kind === "form" ? { submitted: Boolean(run.submitted) } : {}),
           http_status: run.output.http_status,
           truncated: run.output.truncated,
           output: run.output.data,

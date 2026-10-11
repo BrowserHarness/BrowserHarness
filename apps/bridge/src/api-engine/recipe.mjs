@@ -67,7 +67,9 @@ export const ApiOperationContractSchema = z.object({
       z.object({
         kind: z.literal("fixed"),
         request: z.string().max(400),
-        fields: z.array(z.object({ at: z.string().max(200), name: z.string().max(80).optional(), value: z.string().max(120) })).max(8)
+        fields: z.array(z.object({ at: z.string().max(200), name: z.string().max(80).optional(), value: z.string().max(120) })).max(8),
+        /** the site's own name for the item, from the learned answer ("Akshat (Rice)") */
+        label: z.string().max(80).optional()
       }),
       z.object({ kind: z.literal("parameter"), request: z.string().max(400), params: z.array(z.string()).min(1).max(20) })
     ])

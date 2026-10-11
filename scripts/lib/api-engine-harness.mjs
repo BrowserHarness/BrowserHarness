@@ -148,7 +148,7 @@ export async function startHarness({ check = () => undefined, title = "API engin
       if (!panel) throw new Error("the side panel did not open");
       return evaluateIn(panel.webSocketDebuggerUrl, expression);
     };
-    return { ctx, side, shop, command, inSidePanel, close };
+    return { ctx, side, shop, command, inSidePanel, close, debugPort, extId, home };
   } catch (error) {
     await close();
     throw error;

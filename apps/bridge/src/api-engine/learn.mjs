@@ -155,9 +155,47 @@ const TARGET_KEY = /(^|[^a-z])(id|ids|sku|slug|key|handle|target|url|uri)$|video
  * request's own identifying values (path segments, query and body fields
  * named like ids), never a session value: those are references by now.
  */
-function writeTarget(contract) {
+// a form's own bookkeeping, never the item it acts on
+const FORM_BOOKKEEPING = /^(form_type|utf8|_method|authenticity_token|csrf.*|_token|return_to|section[-_]id|sections(_url)?)$/i;
+
+/** The text fields of a multipart/form-data body (a Shopify product form). */
+export function multipartFields(request) {
+  const type = Object.entries(request.headers || {}).find(([name]) => name.toLowerCase() === "content-type")?.[1] || "";
+  const boundary = /multipart\/form-data;.*boundary="?([^";]+)"?/i.exec(String(type))?.[1];
+  if (!boundary || typeof request.body !== "string") return [];
+  const fields = [];
+  for (const part of request.body.split(`--${boundary}`)) {
+    const split = part.indexOf("\r\n\r\n");
+    if (split < 0) continue;
+    const head = part.slice(0, split);
+    const name = /content-disposition:[^\r\n]*;\s*name="([^"]*)"/i.exec(head)?.[1];
+    if (!name || /filename=/i.test(head)) continue;
+    fields.push({ name, value: part.slice(split + 4).replace(/\r\n$/, "") });
+  }
+  return fields;
+}
+
+/** The site's own name for what a write acted on, from its learned answer: "Akshat (Rice)". */
+function targetLabel(exchange) {
+  let data;
+  try {
+    data = JSON.parse(exchange?.response?.body ?? "");
+  } catch {
+    return undefined;
+  }
+  const item = Array.isArray(data?.items) && data.items.length === 1 ? data.items[0] : data;
+  if (!item || typeof item !== "object") return undefined;
+  const text = (value) => (typeof value === "string" && value.trim() && value.length <= 80 ? value.trim() : "");
+  const product = text(item.product_title);
+  const variant = text(item.variant_title);
+  const label = product ? (variant && !/^default title$/i.test(variant) ? `${product} (${variant})` : product) : text(item.title) || text(item.name);
+  return label || undefined;
+}
+
+function writeTarget(contract, exchange) {
   const request = requestName(contract.request.method, contract.request.url);
   if (contract.params.length) return { kind: "parameter", request, params: contract.params.map((param) => param.name) };
+  const label = targetLabel(exchange);
   const slotted = new Set(contract.slots.map((slot) => JSON.stringify(slot.at)));
   const fields = [];
   for (const leaf of walk(contract.request)) {
@@ -171,10 +209,18 @@ function writeTarget(contract) {
     // the nearest named step: json:/items/0/id names "id", not "0"
     const tokens = leaf.at.flatMap((step) => (step.startsWith("json:") ? step.slice(5).split("/") : [step.slice(step.indexOf(":") + 1)]));
     const fieldName = tokens.reverse().find((token) => token && !/^\d+$/.test(token)) || "id";
+    if (FORM_BOOKKEEPING.test(fieldName)) continue;
     fields.push({ at: leaf.at.join(" "), name: fieldName, value });
     if (fields.length === 8) break;
   }
-  return { kind: "fixed", request, fields };
+  // a multipart body is one text to the codec: read its fields here
+  for (const field of multipartFields(contract.request)) {
+    if (fields.length === 8) break;
+    const value = field.value;
+    if (!value || value.length > 120 || FORM_BOOKKEEPING.test(field.name) || !TARGET_KEY.test(field.name)) continue;
+    fields.push({ at: `body multipart:${field.name}`, name: field.name, value });
+  }
+  return { kind: "fixed", request, fields, ...(label ? { label } : {}) };
 }
 
 /** Upstream's hints name its own command line; here the choice is pick_request. */
@@ -540,7 +586,7 @@ export function learnApiOperation(input) {
       ...(Array.isArray(input.public) ? { public: input.public.map(String) } : {})
     });
   } catch (error) {
-    const found = obstacle(run1, pickedId);
+    const found = obstacle(run1, pickedId) || (run2 ? obstacle(run2) : undefined);
     if (found) throw withCandidates(obstacleError(found));
     const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw withCandidates(fail("API_LEARN_FAILED", localHints(message)));
@@ -549,6 +595,9 @@ export function learnApiOperation(input) {
     // the learned request itself answered with a rate limit, a bot check or a sign-in page
     const found = obstacle(run1, learned.exchange?.id);
     if (found) throw withCandidates(obstacleError(found));
+    // and the second example's run (RC3: a 429 there was learned past)
+    const second = run2 ? obstacle(run2, learned.exchange2?.id) : undefined;
+    if (second) throw withCandidates(obstacleError(second));
   }
   warnings.push(...learned.warnings.map(localHints));
 
@@ -595,7 +644,7 @@ export function learnApiOperation(input) {
     throw fail("API_LEARN_PRIVATE_VALUE", `the learned operation would keep what was typed into ${kept.join(", ")}; not saved`);
   }
 
-  if (contract.side_effect !== "read") contract.target = writeTarget(contract);
+  if (contract.side_effect !== "read") contract.target = writeTarget(contract, learned.exchange);
 
   const op = toUpstreamOperation(contract);
   const checkedAt = new Date().toISOString();
