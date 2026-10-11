@@ -63,6 +63,10 @@ export interface ApiOperationContract {
   session_refs: string[];
   session_sources: Array<{ ref: string; kind: "cookie" | "storage" | "page"; key?: string; path?: string }>;
   public?: string[];
+  /** what a write acts on (Bridge recipe.mjs): fixed items, or the inputs given */
+  target?:
+    | { kind: "fixed"; request: string; fields: Array<{ at: string; value: string }> }
+    | { kind: "parameter"; request: string; params: string[] };
   response: Record<string, unknown>;
   match: { method?: string; host?: string; path?: string; operationName?: string };
   trigger: { url: string; steps?: unknown[]; softFrom?: string };
@@ -101,6 +105,35 @@ export interface ApiCallResult {
   operation_id?: string;
   fetched_at: string;
   fresh: true;
+}
+
+/**
+ * What a learned write acts on, in words for the approval prompt and the
+ * Skill's details. A write with no inputs always acts on the item it was
+ * learned on, whatever page is open now.
+ */
+export function describeWriteTarget(contract: Pick<ApiOperationContract, "side_effect" | "params" | "target">): string {
+  if (contract.side_effect === "read") return "";
+  const target = contract.target;
+  if (target?.kind === "fixed") {
+    const fields = target.fields.map((field) => `${field.at.split(/[/:\s]/).filter(Boolean).at(-1)} ${field.value}`);
+    return fields.length
+      ? `It always acts on ${fields.join(", ")} (what it was learned on), not on the page you are viewing.`
+      : `It always sends the same request (${target.request}), with no item of its own.`;
+  }
+  if (target?.kind === "parameter" || contract.params.length) {
+    const names = target?.kind === "parameter" ? target.params : contract.params.map((param) => param.name);
+    return `It acts on the ${names.join(", ")} given for this run.`;
+  }
+  return "What it acts on was not recorded when it was learned, so it will not be sent; teach it again.";
+}
+
+/** The approval prompt for a learned operation that may change data. */
+export function apiWriteApprovalMessage(skillName: string, siteOrigin: string, contract: ApiOperationContract, recipeName = contract.name): string {
+  const site = new URL(siteOrigin).hostname;
+  const sends = contract.origin !== siteOrigin ? ` (it sends to ${new URL(contract.origin).hostname})` : "";
+  const target = describeWriteTarget(contract);
+  return `Run Site Skill “${skillName}” operation “${recipeName}” on ${site}${sends}? It may change data there (${contract.side_effect_basis}).${target ? ` ${target}` : ""}`;
 }
 
 export function isApiContract(value: unknown): value is ApiOperationContract {
@@ -189,6 +222,12 @@ export function contractArgs(contract: ApiOperationContract, values: Record<stri
     if (value !== undefined) args[param.name] = value;
   }
   return args;
+}
+
+/** Values given for a run that name none of the contract's params (they would be dropped). */
+export function unmappedArgs(contract: ApiOperationContract, values: Record<string, unknown>): string[] {
+  const known = new Set(contract.params.flatMap((param) => [param.name, parameterKey(contract.name, param.name)]));
+  return Object.keys(values || {}).filter((key) => values[key] !== undefined && values[key] !== "" && !known.has(key));
 }
 
 export function apiRecipeFromContract(contract: ApiOperationContract, entryUrl: string): SiteSkillRecipe {

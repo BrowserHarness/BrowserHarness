@@ -211,9 +211,24 @@ fetch("/api/my-orders", { headers: { accept: "application/json" }, credentials: 
       return;
     }
 
+    // a video page with a "Watch later" checkbox: ticking it saves this page's video
+    if (url.pathname === "/watch") {
+      const v = url.searchParams.get("v") || "";
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Video ${v.replace(/[<&"]/g, "")}</title><label><input type="checkbox" id="later"> Watch later</label><p id="saved"></p>
+<script>
+const v = new URLSearchParams(location.search).get("v");
+document.getElementById("later").addEventListener("change", () => {
+  fetch("/api/panel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ context: { client: "web" }, videoIds: [v] }) })
+    .then(() => fetch("/api/playlist/edit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ playlistId: "WL", actions: [{ addedVideoId: v, action: "ACTION_ADD_VIDEO" }] }) }))
+    .then((r) => r.json()).then(() => { document.getElementById("saved").textContent = "Saved"; });
+});
+</script>`);
+      return;
+    }
+
     // a checkbox write: no typed input, the video is in the page
     if (url.pathname === "/api/playlist/edit" && req.method === "POST") {
-      state.writes += 1;
       json(200, { status: "STATUS_SUCCEEDED" });
       return;
     }

@@ -7,6 +7,7 @@ import { judge } from "../../vendor/api-anything/dist/classify.js";
 import { templatizeUrl } from "../../vendor/api-anything/dist/heal.js";
 import { capturePages, checkExamples, learnOperation, rankCandidates } from "../../vendor/api-anything/dist/learn.js";
 import { scanSecrets } from "../../vendor/api-anything/dist/secrets.js";
+import { walk } from "../../vendor/api-anything/dist/codec.js";
 import { loggedIn } from "../../vendor/api-anything/dist/session.js";
 import { toCaptureResult } from "./capture.mjs";
 import { dataFingerprint, itemCount, structuredResponse } from "./outcome.mjs";
@@ -96,6 +97,34 @@ function pickedExchange(pick, run, args) {
   if (!pool.length) throw fail("API_LEARN_FAILED", `no captured request is ${name}`);
   const ranked = rankCandidates(pool, args, { all: true, pages: capturePages(run) });
   return ranked[0]?.id ?? pool[pool.length - 1].id;
+}
+
+// fields that name what a request acts on: an id, a sku, a slug, a video
+const TARGET_KEY = /(^|[^a-z])(id|ids|sku|slug|key|handle|target|url|uri)$|video|item|product|playlist|listing|post|channel|user|account/i;
+
+/**
+ * What a learned write acts on, for the person to see before every run.
+ * With inputs, the target is those inputs. Without, it is the learned
+ * request's own identifying values (path segments, query and body fields
+ * named like ids), never a session value: those are references by now.
+ */
+function writeTarget(contract) {
+  const request = requestName(contract.request.method, contract.request.url);
+  if (contract.params.length) return { kind: "parameter", request, params: contract.params.map((param) => param.name) };
+  const slotted = new Set(contract.slots.map((slot) => JSON.stringify(slot.at)));
+  const fields = [];
+  for (const leaf of walk(contract.request)) {
+    if (leaf.container || slotted.has(JSON.stringify(leaf.at)) || leaf.at[0].startsWith("header:")) continue;
+    const value = String(leaf.value ?? "");
+    if (!value || value.length > 120 || /[{}]/.test(value)) continue;
+    const key = String(leaf.at.at(-1)).split(/[/:]/).at(-1);
+    const path = leaf.at[0].startsWith("path:");
+    if (!path && !TARGET_KEY.test(key)) continue;
+    if (path && !/\d|[A-Z].*[a-z]|[a-z].*[A-Z]/.test(value)) continue; // a word in the path is the endpoint, not an item
+    fields.push({ at: leaf.at.join(" "), value });
+    if (fields.length === 8) break;
+  }
+  return { kind: "fixed", request, fields };
 }
 
 /** Upstream's hints name its own command line; here the choice is pick_request. */
@@ -358,6 +387,8 @@ export function learnApiOperation(input) {
   if (kept.length) {
     throw fail("API_LEARN_PRIVATE_VALUE", `the learned operation would keep what was typed into ${kept.join(", ")}; not saved`);
   }
+
+  if (contract.side_effect !== "read") contract.target = writeTarget(contract);
 
   const op = toUpstreamOperation(contract);
   const checkedAt = new Date().toISOString();

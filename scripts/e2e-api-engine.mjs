@@ -328,6 +328,58 @@ try {
     String(JSON.stringify({ health: readHealth.ok || readHealth.error, promote: promoteMixed.error || promoteMixed.data?.promotion_gate || "promoted" })).slice(0, 500)
   );
 
+  // RC2 review: a checkbox write (no typed input) is fixed to the video it
+  // was learned on; on another video's page it never silently acts on that one
+  const VIDEO_A = "jNQXAC9IVRw";
+  const VIDEO_B = "dQw4w9WgXcQ";
+  const editsTo = (video) => shop.state.requests.filter((item) => item.path === "/api/playlist/edit" && item.body.includes(video)).length;
+  const boxDemo = await watch(`${shop.origin}/watch?v=${VIDEO_A}`, async (page) => {
+    await page.locator("#later").check();
+    await page.locator("#saved").filter({ hasText: "Saved" }).waitFor({ timeout: 10000 });
+  });
+  const boxId = boxDemo.stopped?.data?.api_capture?.recording_id;
+  check("the person ticked Watch later once for video A", editsTo(VIDEO_A) === 1 && Boolean(boxId), JSON.stringify(boxDemo.stopped?.data?.api_capture || boxDemo.stopped?.error).slice(0, 300));
+  const boxUnpicked = await command("learn-api", "site_skill", { action: "learn_api", id: fromWatch.data?.candidate_id, name: "watchLater", from_watch: [boxId], side_effect: "write" });
+  const editRequest = (boxUnpicked.data?.candidates || []).find((item) => /\/api\/playlist\/edit$/.test(item.request || ""));
+  check(
+    "a recording that typed nothing lists its requests to pick from",
+    !boxUnpicked.ok && boxUnpicked.error?.code === "API_LEARN_PICK_REQUEST" && Boolean(editRequest),
+    JSON.stringify(boxUnpicked.error || boxUnpicked.data).slice(0, 300)
+  );
+  const boxLearned = await command("learn-api", "site_skill", { action: "learn_api", id: fromWatch.data?.candidate_id, name: "watchLater", from_watch: [boxId], side_effect: "write", pick_request: editRequest?.request });
+  check(
+    "the picked checkbox write is learned as fixed to video A, sending nothing",
+    boxLearned.ok && boxLearned.data.operation.target?.kind === "fixed" && boxLearned.data.operation.target.fields.some((field) => field.value === VIDEO_A) && editsTo(VIDEO_A) === 1,
+    JSON.stringify(boxLearned.error || boxLearned.data?.operation).slice(0, 400)
+  );
+  // the person is now on video B's page
+  const pageB = await ctx.newPage();
+  await pageB.goto(`${shop.origin}/watch?v=${VIDEO_B}`);
+  const askB = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: boxLearned.data?.recipe_id });
+  check(
+    "its approval prompt names video A, not the page being viewed",
+    !askB.ok && askB.error?.code === "APPROVAL_REQUIRED" && askB.error.message.includes(VIDEO_A) && /not on the page you are viewing/.test(askB.error.message),
+    String(JSON.stringify(askB.error)).slice(0, 400)
+  );
+  const runB = await inSidePanel(
+    `chrome.runtime.sendMessage(${JSON.stringify({ type: "BROWSER_TOOL", tool: "site_skill", input: { action: "run", id: fromWatch.data?.candidate_id, recipe_id: boxLearned.data?.recipe_id, parameters: { video: VIDEO_B } }, approval_granted: true })})`
+  );
+  check(
+    "approved but asked to act on video B, it refuses and sends nothing",
+    runB?.ok === false && editsTo(VIDEO_B) === 0 && editsTo(VIDEO_A) === 1,
+    String(JSON.stringify({ runB, a: editsTo(VIDEO_A), b: editsTo(VIDEO_B) })).slice(0, 600)
+  );
+  const runA = await inSidePanel(
+    `chrome.runtime.sendMessage(${JSON.stringify({ type: "BROWSER_TOOL", tool: "site_skill", input: { action: "run", id: fromWatch.data?.candidate_id, recipe_id: boxLearned.data?.recipe_id }, approval_granted: true })})`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  check(
+    "approved as learned, it acts on video A once and says sent, unverified",
+    runA?.ok === true && editsTo(VIDEO_A) === 2 && editsTo(VIDEO_B) === 0 && runA.data?.sent === true && runA.data?.verification === "unverified",
+    String(JSON.stringify({ a: editsTo(VIDEO_A), b: editsTo(VIDEO_B), sent: runA?.data?.sent, verification: runA?.data?.verification, error: runA?.error })).slice(0, 600)
+  );
+  await pageB.close();
+
   // Helpers (read-only Task DAG workers) may run learned API reads only
   const helperRead = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id, parameters: { [capA?.inputs?.[0] || "search"]: "tablets" }, api_read_only: true });
   check("a helper can run a learned API read", helperRead.ok && JSON.stringify(helperRead.data?.run?.output?.data).includes("Slate tablet"), String(JSON.stringify(helperRead.error || helperRead.data?.run?.output)).slice(0, 300));

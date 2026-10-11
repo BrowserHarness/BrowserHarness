@@ -63,6 +63,8 @@ test("a write the server took and then hung up on is ambiguous and says not to r
     const contract = await learned(shop);
     const write = at(contract, shop.origin, "/api/hangup", {
       side_effect: "write",
+      // a fixed-target write: what it acts on is recorded with it
+      target: { kind: "fixed", request: `POST ${shop.origin}/api/hangup`, fields: [{ at: "body json:/sku", value: "lt-1" }] },
       request: { method: "POST", url: `${shop.origin}/api/hangup`, headers: { "content-type": "application/json" }, body: '{"sku":"lt-1"}' }
     });
     const writes = shop.state.writes;
@@ -89,6 +91,8 @@ test("a write the site answers 2xx without changing anything looks like any acce
     const contract = await learned(shop);
     const write = at(contract, shop.origin, "/api/cart", {
       side_effect: "write",
+      // a fixed-target write: what it acts on is recorded with it
+      target: { kind: "fixed", request: `POST ${shop.origin}/api/cart`, fields: [{ at: "body json:/sku", value: "lt-1" }] },
       request: { method: "POST", url: `${shop.origin}/api/cart`, headers: { "content-type": "application/json" }, body: '{"sku":"lt-1","note":"x"}' }
     });
     const answer = await callTier1(write, {}, { approved: true, minIntervalMs: 0 });

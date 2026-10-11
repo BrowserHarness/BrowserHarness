@@ -31,8 +31,9 @@ import {
   type ApiCallResult
 } from "./api-recipe";
 import { searchContract } from "./api-recipe.fixture";
+import { apiWriteApprovalMessage, describeWriteTarget } from "./api-recipe";
 import { runSiteSkillRecipe, SiteSkillRunError } from "./site-skill-runner";
-import { buildSiteCommands } from "./site-commands";
+import { buildSiteCommands, describeSiteCommand } from "./site-commands";
 
 const learning = {
   entry_url: "https://shop.example/search",
@@ -149,6 +150,27 @@ describe("API Recipe v2", () => {
     expect(missing.code).toBe("API_ENGINE_UNAVAILABLE");
   });
 
+  it("a fixed-target write given another item's value refuses before sending (RC2 review)", async () => {
+    const fixed = {
+      ...searchContract(),
+      side_effect: "write" as const,
+      params: [],
+      slots: [],
+      target: { kind: "fixed" as const, request: "POST https://shop.example/api/save", fields: [{ at: "body json:/videoId", value: "jNQXAC9IVRw" }] }
+    };
+    const candidate = withApiRecipe(null, { ...learning, contract: fixed });
+    const apiCall = vi.fn(async () => okResult({ ok: true }));
+    const error = await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: { video: "dQw4w9WgXcQ" }, api_call: apiCall }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(SiteSkillRunError);
+    expect(error.code).toBe("API_INPUT");
+    expect(error.message).toMatch(/jNQXAC9IVRw/);
+    expect(error.submitted).toBe(false);
+    expect(apiCall).not.toHaveBeenCalled();
+    // as learned, it is sent
+    await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: {}, api_call: apiCall });
+    expect(apiCall).toHaveBeenCalledWith(fixed, {});
+  });
+
   it("records a write the site answered 2xx as sent and unverified, never passed (the change was not read back)", async () => {
     // the site says 200 OK but nothing in its state changed: the run cannot tell, so it must not claim success
     const write = withApiRecipe(null, { ...learning, contract: { ...searchContract(), side_effect: "write" as const } });
@@ -186,5 +208,29 @@ describe("API Recipe v2", () => {
     expect(command).toMatchObject({ kind: "read", parameters: [{ name: "q", key: "q", required: true }] });
     const write = withApiRecipe(null, { ...learning, contract: { ...searchContract(), side_effect: "write" } });
     expect(buildSiteCommands([family(write)])[0].kind).toBe("form");
+    // a fixed-target write's command says what it acts on (RC2 review)
+    const fixed = withApiRecipe(null, {
+      ...learning,
+      contract: { ...searchContract(), side_effect: "write", params: [], slots: [], target: { kind: "fixed", request: "POST https://shop.example/api/save", fields: [{ at: "body json:/videoId", value: "jNQXAC9IVRw" }] } }
+    });
+    const [saved] = buildSiteCommands([family(fixed)]);
+    expect(saved.api?.target).toMatch(/always acts on videoId jNQXAC9IVRw/);
+    expect(describeSiteCommand(saved)).toMatchObject({ acts_on: expect.stringMatching(/jNQXAC9IVRw/) });
+  });
+
+  it("a write's approval names exactly what it acts on (RC2 review: parameterless write targeting)", () => {
+    const base = { ...searchContract(), name: "watch_later", side_effect: "write" as const, side_effect_basis: "declared a write by the person", params: [] };
+    const fixed = {
+      ...base,
+      target: { kind: "fixed" as const, request: "POST https://www.youtube.com/youtubei/v1/browse/edit_playlist", fields: [{ at: "body json:/actions/0/addedVideoId", value: "jNQXAC9IVRw" }] }
+    };
+    expect(describeWriteTarget(fixed)).toMatch(/always acts on addedVideoId jNQXAC9IVRw/);
+    expect(describeWriteTarget(fixed)).toMatch(/not on the page you are viewing/);
+    const message = apiWriteApprovalMessage("YouTube", "https://www.youtube.com", fixed);
+    expect(message).toMatch(/watch_later/);
+    expect(message).toMatch(/jNQXAC9IVRw/);
+    const dynamic = { ...base, params: [{ name: "video", type: "string" as const, required: true }], target: { kind: "parameter" as const, request: "POST https://www.youtube.com/x", params: ["video"] } };
+    expect(describeWriteTarget(dynamic)).toMatch(/acts on the video given/);
+    expect(describeWriteTarget(base)).toMatch(/not recorded/);
   });
 });

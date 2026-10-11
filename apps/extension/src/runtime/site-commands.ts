@@ -2,7 +2,7 @@
 // command with typed parameters, like `amazon-search --q kettle`. The side
 // panel runs it with /name, coding agents get it as a tool, and the Bridge
 // CLI runs it with `browserharness-bridge site <name>`.
-import { apiRecipeNeedsApproval, recipeKind } from "./api-recipe";
+import { apiRecipeNeedsApproval, describeWriteTarget, recipeKind } from "./api-recipe";
 import type { SiteSkillParameterType, SiteSkillRecipe } from "./site-skill";
 import { listSiteSkillFamilies, type SiteSkillFamilyRecord } from "./site-skill-store";
 import { loadAllSkills } from "./skills";
@@ -42,6 +42,8 @@ export interface SiteCommand {
     verification: "unverified" | "verified" | "failed";
     learned_tier?: 1 | 2 | 3;
     min_tier: 1 | 2 | 3;
+    /** a write: what it acts on, in words (a fixed item, or the inputs given) */
+    target?: string;
   };
   status: "proven" | "testing" | "check failed";
   skill_id: string;
@@ -198,6 +200,7 @@ export function buildSiteCommands(
               operation_id: step.contract.operation_id,
               side_effect: step.contract.side_effect,
               verification: step.contract.verification.status,
+              ...(step.contract.side_effect !== "read" ? { target: describeWriteTarget(step.contract) } : {}),
               ...(step.contract.transport.learned_tier ? { learned_tier: step.contract.transport.learned_tier } : {}),
               min_tier: step.contract.min_tier
             }
@@ -331,6 +334,7 @@ export function describeSiteCommand(command: SiteCommand) {
     kind: command.kind,
     status: command.status,
     ...(command.needs_page === false ? { runs_without_page: true } : {}),
+    ...(command.api?.target ? { acts_on: command.api.target } : {}),
     usage: usage(command),
     parameters: command.parameters.map((parameter) => ({
       name: parameter.name,

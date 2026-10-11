@@ -24,7 +24,7 @@ const PAGE_OWNED = /^(host|cookie|cookie2|content-length|connection|keep-alive|a
  * produced here: that operation needs tier 3.
  */
 export function buildForPage(contract, args = {}, { provided, approved = false } = {}) {
-  const refused = refusedBeforeSend(contract, 2, { approved });
+  const refused = refusedBeforeSend(contract, 2, { approved, args });
   if (refused) return { refused };
   const base = { tier: 2, operation_id: contract.operation_id, sent: false };
   if (contract.min_tier > 2) {
@@ -111,10 +111,48 @@ export function triggerFor(contract, args = {}) {
   return { url: filled.url };
 }
 
+const PAGE_HEADERS = new Set(["referer", "origin"]);
+const URL_TEMPLATE = /^([a-z][a-z0-9+.-]*:\/\/|\/)\S*$/i;
+
 /**
- * Whether an observed request carries these inputs: every place a param goes
- * (its slots) holds the value these args put there. Slots that also carry a
- * session reference are not compared (their values are the page's own).
+ * A header slot that mirrors the page's address: referer, origin, or a
+ * header whose learned template is itself an address (a site's own
+ * x-...-url). An app may write those differently from the trigger URL (an
+ * extra &sort=, another order), so they are not compared character for
+ * character. Any other header slot is a real input and is compared.
+ */
+function mirrorsPage(slot) {
+  const [at] = slot.at;
+  if (!at.startsWith("header:")) return false;
+  return PAGE_HEADERS.has(at.slice("header:".length).toLowerCase()) || (typeof slot.template === "string" && URL_TEMPLATE.test(slot.template));
+}
+
+/** Whether an address names this value as a whole query value or path segment. */
+function addressNames(text, value) {
+  let url;
+  try {
+    url = new URL(String(text), "http://page.invalid");
+  } catch {
+    return false;
+  }
+  const want = asText(value);
+  const decode = (part) => {
+    try {
+      return decodeURIComponent(part);
+    } catch {
+      return part;
+    }
+  };
+  return [...url.searchParams.values()].some((item) => item === want) || url.pathname.split("/").some((segment) => decode(segment) === want);
+}
+
+/**
+ * Whether an observed request carries these inputs. Every input slot that is
+ * not a mirror of the page's address must hold exactly the value these args
+ * put there. Every param must be proven by at least one slot: a param that
+ * only a page-address header carries is checked there (the address must name
+ * the value). Slots that also carry a session reference are not compared
+ * (their values are the page's own). Anything that cannot be checked fails.
  */
 export function carriesArgs(op, observed, args) {
   let expected;
@@ -123,28 +161,35 @@ export function carriesArgs(op, observed, args) {
   } catch {
     return false;
   }
-  // A header slot that templates the page's address (referer, origin, a
-  // site's own x-...-url) echoes where the page is, which an app may write
-  // differently from the trigger URL. Where the request carries the inputs
-  // anywhere else (path, query, body), those places decide.
-  const inputSlots = op.slots.filter((slot) => slot.param !== undefined && !holdsRef(slot));
-  const beyondHeaders = inputSlots.filter((slot) => !slot.at[0].startsWith("header:"));
-  let compared = 0;
-  for (const slot of beyondHeaders.length ? beyondHeaders : inputSlots) {
-    let want;
-    let got;
+  const read = (request, at) => {
     try {
-      want = getAt(expected, slot.at);
-      got = getAt(observed, slot.at);
+      return { value: getAt(request, at) };
     } catch {
-      return false;
+      return null;
     }
-    if (want === undefined) continue;
-    if (got === undefined || asText(got) !== asText(want)) return false;
-    compared += 1;
+  };
+  const inputSlots = op.slots.filter((slot) => slot.param !== undefined && !holdsRef(slot));
+  const proven = new Set();
+  for (const slot of inputSlots.filter((item) => !mirrorsPage(item))) {
+    const want = read(expected, slot.at);
+    const got = read(observed, slot.at);
+    if (!want || !got) return false;
+    if (want.value === undefined) continue;
+    if (got.value === undefined || asText(got.value) !== asText(want.value)) return false;
+    proven.add(slot.param);
   }
-  // an operation with inputs must show at least one of them in the request
-  return compared > 0 || !op.params.length;
+  for (const param of op.params) {
+    if (proven.has(param.name) || args[param.name] === undefined) continue;
+    const mirrors = inputSlots.filter((slot) => slot.param === param.name && mirrorsPage(slot));
+    if (!mirrors.length) return false;
+    for (const slot of mirrors) {
+      const got = read(observed, slot.at);
+      if (!got || got.value === undefined || !addressNames(got.value, args[param.name])) return false;
+    }
+    proven.add(param.name);
+  }
+  // an operation with inputs must show them in the request
+  return op.params.every((param) => proven.has(param.name) || args[param.name] === undefined) && (proven.size > 0 || !op.params.length);
 }
 
 /** Tier 3: find this operation's request for these args among what the page sent, and judge its answer. */

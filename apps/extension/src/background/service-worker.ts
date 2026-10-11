@@ -111,7 +111,7 @@ import {
 } from "./api-watch";
 import { checkApiHealth, nextForClass, repairApiOperation, type RepairLedger } from "./api-repair";
 import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
-import { apiRecipeNeedsApproval, apiRunRecord, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
+import { apiRecipeNeedsApproval, apiRunRecord, apiWriteApprovalMessage, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
   runSiteSkillRecipe,
@@ -672,7 +672,10 @@ async function runApiOperationRecipe(
       data: { revision_id: revision.revision_id },
       error: {
         code: "APPROVAL_REQUIRED",
-        message: `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}${step && step.kind === "api_operation" && step.contract.origin !== existing.site.origin ? ` (it sends to ${new URL(step.contract.origin).hostname})` : ""}? It may change data there (${step && step.kind === "api_operation" ? step.contract.side_effect_basis : "not known to be read-only"}).`
+        message:
+          step && step.kind === "api_operation"
+            ? apiWriteApprovalMessage(existing.name, existing.site.origin, step.contract, recipe.name)
+            : `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}? It may change data there (not known to be read-only).`
       }
     };
   }

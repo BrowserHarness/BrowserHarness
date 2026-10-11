@@ -16,6 +16,8 @@ import {
 } from "./site-skill-api";
 import {
   contractArgs,
+  describeWriteTarget,
+  unmappedArgs,
   type ApiCallResult,
   type ApiOperationContract
 } from "./api-recipe";
@@ -313,6 +315,12 @@ export async function runSiteSkillRecipe(input: {
       if (step.kind === "api_operation") {
         if (!input.api_call) {
           throw new Error("API_ENGINE_UNAVAILABLE: this recipe needs the helper app");
+        }
+        // a write never drops a value it was given: one it cannot take (an
+        // item for a write fixed to another) is refused before anything is sent
+        const extra = step.contract.side_effect !== "read" ? unmappedArgs(step.contract, input.parameters) : [];
+        if (extra.length) {
+          throw new Error(`API_INPUT: ${step.contract.name} cannot take ${extra.join(", ")}. ${describeWriteTarget(step.contract)} Nothing was sent.`);
         }
         const result = await input.api_call(
           step.contract,

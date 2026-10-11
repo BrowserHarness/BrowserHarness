@@ -7,6 +7,8 @@ import { recordRun } from "./fixtures/record-run.mjs";
 import { learnApiOperation } from "../src/api-engine/learn.mjs";
 import { judgePageRun } from "../src/api-engine/transport.mjs";
 import { verifyUnseenInput } from "../src/api-engine/verify.mjs";
+import { callTier1 } from "../src/api-engine/tier1.mjs";
+import { buildForPage } from "../src/api-engine/transport.mjs";
 
 async function withShop(fn, state) {
   const shop = await startApiShop(state);
@@ -115,7 +117,7 @@ test("F6: a checkbox write with no typed input is learned from the request a per
     assert.equal(contract.side_effect, "write");
     assert.deepEqual(contract.params, []);
     assert.notEqual(contract.verification.status, "verified");
-    assert.equal(shop.state.writes, 1, "learning sent nothing");
+    assert.equal(shop.state.requests.filter((item) => item.path === "/api/playlist/edit").length, 1, "learning sent nothing");
   }));
 
 test("F6: a signed-in list with no input is learned from two runs and a picked request", () =>
@@ -185,4 +187,121 @@ test("F3: a whole-page answer never passes the live check either", () =>
     const live = await verifyUnseenInput(learned.contract, { q: "monitors" }, { examples: [{ q: "laptops" }, { q: "keyboards" }], provided: { cookies: SIGNED_IN, storage: {} }, minIntervalMs: 0 });
     assert.equal(live.check.passed, false);
     assert.notEqual(live.contract.verification.status, "verified");
+  }));
+
+// RC2 review: tier 3 may set aside only headers that mirror the page's address
+test("RC2 review: an independent header input must match too, not only the body or query", () =>
+  withShop(async (shop) => {
+    // q goes in the query; region goes only in a header the page sets
+    const run = (q, region, extra = {}) => recordRun(shop.origin, "rest", q, { apiHeaders: { "x-region": region, ...extra } });
+    const { contract } = learnApiOperation({
+      name: "search",
+      captures: [await run("laptops", "northeast"), await run("keyboards", "southwest")],
+      examples: [{ q: "laptops", region: "northeast" }, { q: "keyboards", region: "southwest" }]
+    });
+    assert.ok(contract.slots.some((slot) => slot.param === "region" && slot.at[0] === "header:x-region"), JSON.stringify(contract.slots));
+    const args = { q: "monitors", region: "midwest" };
+    // query matches, the independent header does not: another request's data
+    assert.equal(judgePageRun(contract, await run("monitors", "northeast"), args).ok, false, "a differing input header is rejected");
+    // both match: accepted
+    const both = judgePageRun(contract, await run("monitors", "midwest"), args);
+    assert.equal(both.ok, true, both.reason);
+    // two similar requests: the one carrying every input answers
+    const wrong = await run("monitors", "northeast");
+    const right = await run("monitors", "midwest");
+    const mixed = { ...right, exchanges: [...right.exchanges, ...wrong.exchanges.map((item) => ({ ...item, id: item.id + 100 }))] };
+    const picked = judgePageRun(contract, mixed, args);
+    assert.equal(picked.ok, true, picked.reason);
+    assert.equal(judgePageRun(contract, { ...right, exchanges: [...wrong.exchanges.map((item) => ({ ...item, id: item.id + 100 }))] }, args).ok, false);
+  }));
+
+test("RC2 review: a page-address header may differ when the other inputs match; wrong GraphQL variables are rejected", () =>
+  withShop(async (shop) => {
+    const run = (term, extra = "") => recordRun(shop.origin, "rest", term, { apiHeaders: { "x-site-url": `${shop.origin}/search?q=${encodeURIComponent(term)}${extra}` } });
+    const { contract } = learnApiOperation({ name: "search", captures: [await run("laptops"), await run("keyboards")], examples: [{ q: "laptops" }, { q: "keyboards" }] });
+    // GBIF case kept: the echo is written differently, the query decides
+    assert.equal(judgePageRun(contract, await run("monitors", "&view=list"), { q: "monitors" }).ok, true);
+    const gql = (term) => recordRun(shop.origin, "graphql", term);
+    const graph = learnApiOperation({ name: "products", captures: [await gql("laptops"), await gql("keyboards")], examples: [{ term: "laptops" }, { term: "keyboards" }] }).contract;
+    assert.equal(judgePageRun(graph, await gql("monitors"), { term: "monitors" }).ok, true);
+    assert.equal(judgePageRun(graph, await gql("keyboards"), { term: "monitors" }).ok, false, "other variables are another request");
+  }));
+
+test("RC2 review: an input carried only by a page-address header is still checked (fail closed)", () =>
+  withShop(async (shop) => {
+    const run = (term, url = `${shop.origin}/search?q=${encodeURIComponent(term)}`) => recordRun(shop.origin, "rest", term, { apiHeaders: { "x-site-url": url } });
+    const learned = learnApiOperation({ name: "search", captures: [await run("laptops"), await run("keyboards")], examples: [{ q: "laptops" }, { q: "keyboards" }] }).contract;
+    // the same operation as if its only carrier of q were the echo header
+    const contract = { ...learned, slots: learned.slots.filter((slot) => slot.at[0].startsWith("header:")) };
+    assert.ok(contract.slots.length, JSON.stringify(learned.slots));
+    assert.equal(judgePageRun(contract, await run("monitors", `${shop.origin}/search?q=monitors&sort=new`), { q: "monitors" }).ok, true);
+    assert.equal(judgePageRun(contract, await run("monitors", `${shop.origin}/search?q=laptops`), { q: "monitors" }).ok, false, "an echo naming other inputs is rejected");
+  }));
+
+// RC2 review: a checkbox write names the item it acts on (YouTube Watch later's video id)
+const VIDEO_A = "jNQXAC9IVRw";
+const VIDEO_B = "dQw4w9WgXcQ";
+
+test("RC2 review: a parameterless write is fixed to the item it was learned on, says so, and never takes another", () =>
+  withShop(async (shop) => {
+    const captures = [await recordRun(shop.origin, "save", VIDEO_A, { cookies: [VISITOR] })];
+    const { contract } = learnApiOperation({ name: "watch_later", captures, examples: [{}], side_effect: "write", pick_request: `POST ${shop.origin}/api/playlist/edit` });
+    assert.deepEqual(contract.params, []);
+    assert.equal(contract.target?.kind, "fixed", JSON.stringify(contract.target));
+    assert.equal(contract.target.request, `POST ${shop.origin}/api/playlist/edit`);
+    assert.ok(contract.target.fields.some((field) => field.value === VIDEO_A && /addedVideoId/.test(field.at)), JSON.stringify(contract.target));
+    assert.ok(!JSON.stringify(contract).includes("Vx9kQ2mLp7Rt"), "no visitor id in the Skill");
+
+    const writes = () => shop.state.requests.filter((item) => item.path === "/api/playlist/edit");
+    const before = writes().length;
+    // asked to act on video B (the page the person is on now): refused, nothing sent
+    for (const args of [{ video: VIDEO_B }, { videoId: VIDEO_B }]) {
+      const tier1 = await callTier1(contract, args, { approved: true, minIntervalMs: 0 });
+      assert.equal(tier1.ok, false);
+      assert.equal(tier1.class, "input");
+      assert.equal(tier1.sent, false);
+      assert.match(tier1.reason, new RegExp(VIDEO_A));
+      assert.equal(buildForPage(contract, args, { approved: true }).refused?.class, "input");
+    }
+    assert.equal(writes().length, before, "nothing was sent for video B");
+    // run as learned: it acts on A, and only once
+    const ran = await callTier1(contract, {}, { approved: true, minIntervalMs: 0 });
+    assert.equal(ran.sent, true);
+    assert.equal(writes().length, before + 1);
+    assert.match(writes().at(-1).body, new RegExp(VIDEO_A));
+    assert.doesNotMatch(writes().at(-1).body, new RegExp(VIDEO_B));
+  }));
+
+test("RC2 review: a write whose target was never recorded is refused before sending", () =>
+  withShop(async (shop) => {
+    const captures = [await recordRun(shop.origin, "save", VIDEO_A, { cookies: [VISITOR] })];
+    const { contract } = learnApiOperation({ name: "watch_later", captures, examples: [{}], side_effect: "write", pick_request: `POST ${shop.origin}/api/playlist/edit` });
+    const legacy = { ...contract };
+    delete legacy.target;
+    const before = shop.state.requests.length;
+    const tier1 = await callTier1(legacy, {}, { approved: true, minIntervalMs: 0 });
+    assert.equal(tier1.ok, false);
+    assert.equal(tier1.sent, false);
+    assert.match(tier1.reason, /target/);
+    assert.equal(buildForPage(legacy, {}, { approved: true }).refused?.class, "input");
+    assert.equal(shop.state.requests.length, before);
+  }));
+
+test("RC2 review: a dynamic target is bound to an explicit parameter and only acts on the value given", () =>
+  withShop(async (shop) => {
+    const captures = [await recordRun(shop.origin, "save", VIDEO_A, { cookies: [VISITOR] })];
+    const { contract } = learnApiOperation({ name: "watch_later", captures, examples: [{ video: VIDEO_A }], side_effect: "write", pick_request: `POST ${shop.origin}/api/playlist/edit` });
+    assert.equal(contract.target?.kind, "parameter");
+    assert.deepEqual(contract.target.params, ["video"]);
+    assert.ok(!JSON.stringify(contract).includes(VIDEO_A), "the demonstrated video is not kept");
+    assert.ok(!JSON.stringify(contract).includes("Vx9kQ2mLp7Rt"));
+    const writes = () => shop.state.requests.filter((item) => item.path === "/api/playlist/edit");
+    const before = writes().length;
+    const missing = await callTier1(contract, {}, { approved: true, minIntervalMs: 0 });
+    assert.equal(missing.sent, false);
+    assert.equal(writes().length, before, "no video given: nothing sent");
+    const ran = await callTier1(contract, { video: VIDEO_B }, { approved: true, minIntervalMs: 0 });
+    assert.equal(ran.sent, true);
+    assert.match(writes().at(-1).body, new RegExp(VIDEO_B));
+    assert.doesNotMatch(writes().at(-1).body, new RegExp(VIDEO_A));
   }));

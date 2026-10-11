@@ -2,7 +2,7 @@
 
 Date: 2026-10-10. Scope: the six-PR plan from the master implementation brief ("Native API Learning, Hybrid Execution & Self-Healing Engine").
 
-**Status:** v1 is built and verified against local fixtures in real Chromium. Release candidate 1 (`4e79b41`) went through real-site acceptance on 2026-10-10 and was **rejected** (2 of 8 scenarios passed). Release candidate 2 fixes every defect found there, each reproduced first with a failing test. RC2 has **not** been through real-site acceptance; nothing below about RC2 is a real-website result.
+**Status:** v1 is built and verified against local fixtures in real Chromium. Release candidate 1 (`4e79b41`) went through real-site acceptance on 2026-10-10 and was **rejected** (2 of 8 scenarios passed). Release candidate 2 fixes every defect found there and the two found by a later source review, each reproduced first with a failing test. RC2 has **not** been through real-site acceptance; nothing below about RC2 is a real-website result: every RC2 result is from local fixtures (Node tests and real Chromium against a local test shop).
 
 ## RC2: fixes from the real-site acceptance of RC1
 
@@ -23,6 +23,19 @@ RC1 acceptance (Windows 11, Chrome for Testing, the person's own accounts) found
 **The visitor-id protection is unchanged.** Acceptance saw YouTube's `get_panel` refused because `x-goog-visitor-id` carries the visitor cookie. That refusal still fails closed, including when that request is picked by hand (F9 test, "choosing the panel request is still refused"). Picking only lets a person choose a different request. It never makes a refused one learnable.
 
 Hermes on the acceptance PC was restored by hand from its backup after acceptance, not by rerunning an installer. RC2's installer no longer touches it in that setup.
+
+### RC2 final: independent source review
+
+A source review of RC2 (`95b35db`) found two more problems. Both were reproduced first (Bridge tests failed; the real-Chromium e2e then found a third path, below), then fixed.
+
+| Problem | Fix | Regression test |
+|---|---|---|
+| Tier 3 set aside every header input whenever the path, query or body carried one, so a request whose body matched but whose independent header input (say a region) differed was accepted. | Only headers that mirror the page's address are set aside: `referer`, `origin`, or a header whose learned template is itself an address (GBIF's `x-gbif-site-url`). Every other input slot must hold exactly the value given. Every param must be proven by at least one slot; a param that only a page-address header carries must be named in that address (as a whole query value or path segment), else the request is rejected. | `api-engine-acceptance.test.mjs`: independent header differs (rejected), both match (accepted), two similar requests (the right one answers), page-address header differs (accepted, GBIF kept), wrong GraphQL variables (rejected), echo-only input names other values (rejected) |
+| A checkbox write learned with no input (Watch later) kept the video id from the demonstration, and nothing said so: run while viewing another video, it would act on the first one. | A learned write records its `target`. **Fixed**: no inputs; the identifying fields of its request (for example `addedVideoId jNQXAC9IVRw`) are listed in the Skill's details, the Site Command (`acts_on`) and the approval prompt, which says it acts on that item, not on the page being viewed. A fixed write given any value (another video) is refused before sending. **Parameter**: the item is an input (learned from an example), required on every run, and only the value given is sent; the demonstrated value is not kept. A write with no inputs and no recorded target (learned before RC2) is refused before sending: teach it again. | Bridge: fixed write refuses video B and sends A as learned; untargeted write refused; dynamic write sends only B. Extension: approval text; Site Command `acts_on`; runner refuses an unmapped value before calling. e2e: tick Watch later on video A, learn it, open video B: the prompt names A, an approved run with video B sends nothing, an approved run as learned sends A once and says sent, unverified |
+
+The e2e caught one more path the Bridge tests could not: the extension mapped run values to the contract's params and silently dropped any other, so an approved run "for video B" of the fixed write sent video A. A write now refuses any value it cannot take, before calling the helper app.
+
+Unchanged: the session-value refusal (YouTube's visitor id), approval before every write, no automatic resend, and `sent: true` with `verification: "unverified"` for a write the site accepted.
 
 Known limit: repair of a no-input operation needs the request picked again (`learn_api` with `pick_request`), because repair has no input to find the moved request by.
 
@@ -187,13 +200,13 @@ All runs were local, on approved development infrastructure. No GitHub Actions w
 | Step | Result |
 |---|---|
 | vendor check | Passed |
-| Bridge tests | 115/115 |
-| Extension tests | 789/789 |
+| Bridge tests | 121/121 |
+| Extension tests | 791/791 |
 | Typecheck | Passed |
 | Build | Passed |
 | Bridge bundle | Passed |
 | MV3 contract | Passed |
-| `smoke:api-engine` (real Chromium, local fixture) | 42/42 |
+| `smoke:api-engine` (real Chromium, local fixture) | 48/48 |
 
 Regression suites for the areas the review named, also in real Chromium against local fixtures:
 

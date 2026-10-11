@@ -10,6 +10,7 @@ import {
   isApiContract,
   withApiRecipe,
   apiRecipeFromContract,
+  describeWriteTarget,
   type ApiCallResult,
   type ApiOperationContract,
   type ApiVerificationCheck
@@ -71,7 +72,7 @@ export type ApiLearnOutcome =
         candidate_id: string;
         revision_id: string;
         recipe_id: string;
-        operation: Pick<ApiOperationContract, "operation_id" | "name" | "side_effect" | "side_effect_basis" | "params" | "session_refs" | "min_tier">;
+        operation: Pick<ApiOperationContract, "operation_id" | "name" | "side_effect" | "side_effect_basis" | "params" | "session_refs" | "min_tier" | "target"> & { acts_on?: string };
         contract: ApiOperationContract;
         verification: ApiOperationContract["verification"];
         result_preview?: unknown;
@@ -359,7 +360,9 @@ async function learnAndSave(deps: ApiLearnDeps, input: ApiLearnInput, run: Learn
         side_effect_basis: contract.side_effect_basis,
         params: contract.params,
         session_refs: contract.session_refs,
-        min_tier: contract.min_tier
+        min_tier: contract.min_tier,
+        ...(contract.target ? { target: contract.target } : {}),
+        ...(contract.side_effect !== "read" ? { acts_on: describeWriteTarget(contract) } : {})
       },
       contract,
       verification: contract.verification,

@@ -56,6 +56,22 @@ export const ApiOperationContractSchema = z.object({
     )
     .default([]),
   public: z.array(z.string()).optional(),
+  /**
+   * What a write acts on. "fixed": no inputs, so it always acts on the
+   * item(s) named in its learned request (fields, shown before every run).
+   * "parameter": the item is an input the caller must give. A write without
+   * a target is refused before sending.
+   */
+  target: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("fixed"),
+        request: z.string().max(400),
+        fields: z.array(z.object({ at: z.string().max(200), value: z.string().max(120) })).max(8)
+      }),
+      z.object({ kind: z.literal("parameter"), request: z.string().max(400), params: z.array(z.string()).min(1).max(20) })
+    ])
+    .optional(),
   response: ResponseSchema,
   match: MatchSchema,
   trigger: TriggerSchema,

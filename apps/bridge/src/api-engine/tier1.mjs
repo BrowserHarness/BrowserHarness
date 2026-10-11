@@ -16,8 +16,29 @@ const WRITE_NEXT = "the write may have run: check the site; do not resend";
  * value only a page can produce. `sent: false` lets the dispatcher try another
  * tier, even for a write.
  */
-export function refusedBeforeSend(contract, tier, { approved }) {
+export function refusedBeforeSend(contract, tier, { approved, args = {} }) {
   const base = { tier, operation_id: contract.operation_id, sent: false };
+  if (contract.side_effect !== "read") {
+    const target = contract.target;
+    if (!target && !contract.params.length) {
+      return result({
+        ...base,
+        ok: false,
+        cls: "input",
+        reason: `${contract.name} takes no inputs and its target (what it acts on) was not recorded when it was learned, so it cannot be sent safely; teach it again from a demonstration`
+      });
+    }
+    const given = Object.keys(args || {}).filter((key) => args[key] !== undefined);
+    if (target?.kind === "fixed" && given.length) {
+      const named = target.fields.map((field) => field.value).join(", ") || target.request;
+      return result({
+        ...base,
+        ok: false,
+        cls: "input",
+        reason: `${contract.name} always acts on what it was learned on (${named}); it takes no inputs, so it cannot act on ${given.join(", ")}. Teach it again with that value as an input to act on other items`
+      });
+    }
+  }
   if (contract.side_effect !== "read" && !approved) {
     return result({
       ...base,
@@ -48,7 +69,7 @@ export function judgeObserved(contract, observed, tier, { maxChars = 20_000 } = 
  */
 export async function callTier1(contract, args = {}, { provided, approved = false, fetchImpl, minIntervalMs, timeoutMs, maxChars = 20_000 } = {}) {
   const base = { tier: 1, operation_id: contract.operation_id, sent: false };
-  const refused = refusedBeforeSend(contract, 1, { approved });
+  const refused = refusedBeforeSend(contract, 1, { approved, args });
   if (refused) return refused;
   if (contract.min_tier > 1) {
     return result({ ...base, ok: false, cls: "unavailable", reason: `${contract.name} changes per page load (min tier ${contract.min_tier}); plain HTTP cannot send it` });
