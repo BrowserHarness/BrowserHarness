@@ -1,10 +1,10 @@
 // Tier 1: a learned operation sent as plain HTTP from the Bridge, with the
 // session values the extension handed over for this call only. Always a live
 // request: nothing here returns a stored or example response.
-import { judge } from "../../vendor/api-anything/dist/classify.js";
+import { judge, loginPath, signInForm } from "../../vendor/api-anything/dist/classify.js";
 import { capOutput } from "../../vendor/api-anything/dist/extract.js";
 import { BadHeader, RedirectRefused, send } from "../../vendor/api-anything/dist/http.js";
-import { bhClass, result } from "./outcome.mjs";
+import { bhClass, result, structuredResponse } from "./outcome.mjs";
 import { toUpstreamOperation } from "./recipe.mjs";
 import { resolveSession } from "./session.mjs";
 
@@ -50,10 +50,33 @@ export function refusedBeforeSend(contract, tier, { approved, args = {} }) {
   return undefined;
 }
 
+// what a server says when the session is missing, on a page shown instead of the data
+const SIGN_IN_SAID = /(log|sign) ?in to continue|please (log|sign) ?in|login_required|"require_login"\s*:\s*true|session (has )?expired/i;
+
+/**
+ * A read learned from a whole page (no recipe for its data) proves nothing
+ * when it answers: the page is "something" signed in or out. Never ok, at any
+ * tier: a sign-in page is auth, anything else says what to teach instead.
+ */
+function wholePageAnswer(contract, observed, base) {
+  const body = String(observed.body ?? "");
+  if ((observed.url && loginPath(observed.url)) || signInForm(body) || SIGN_IN_SAID.test(body.slice(0, 200_000))) {
+    return result({ ...base, ok: false, cls: "auth", reason: "the site answered with a sign-in page: sign in on the site" });
+  }
+  return result({
+    ...base,
+    ok: false,
+    cls: "unavailable",
+    reason: `${contract.name} answers with a whole page (HTML), not data, so its answer cannot be checked; teach it again and pick the request that returns the data`,
+    next: "teach the operation again"
+  });
+}
+
 /** Classify and extract an answer, whichever tier observed it. */
 export function judgeObserved(contract, observed, tier, { maxChars = 20_000 } = {}) {
   const op = toUpstreamOperation(contract);
   const base = { tier, operation_id: contract.operation_id, sent: true, status: observed.status, ms: observed.ms };
+  if (contract.side_effect === "read" && !structuredResponse(contract.response)) return wholePageAnswer(contract, observed, base);
   const judged = judge(op, { status: observed.status, headers: observed.headers || {}, body: observed.body ?? "", url: observed.url });
   const cls = bhClass(judged.class, { status: observed.status, missing: judged.missing, sideEffect: contract.side_effect, sent: true });
   if (cls !== "ok") {

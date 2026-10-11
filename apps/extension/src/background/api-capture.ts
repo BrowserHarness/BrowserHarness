@@ -192,6 +192,27 @@ export async function collectApiCapture(tabId: number, finalUrl: string, locatio
 }
 
 /**
+ * Hosts of one load-balanced service (Algolia's APPID-dsn.algolia.net and
+ * APPID-3.algolianet.com): an app-id-like first label up to a -dsn or -N
+ * suffix, and a domain name that starts the same. The Bridge's siblingHosts.
+ */
+export function siblingHosts(a: string, b: string): boolean {
+  const left = a.toLowerCase();
+  const right = b.toLowerCase();
+  if (left === right) return true;
+  const split = (host: string) => {
+    const labels = host.split(".");
+    return { stem: labels[0].replace(/-(dsn|\d{1,2})$/, ""), domain: labels.slice(1, -1).join(".") || labels[labels.length - 1] };
+  };
+  const one = split(left);
+  const two = split(right);
+  if (one.stem !== two.stem || !/^[a-z0-9]{6,}$/.test(one.stem) || !/\d/.test(one.stem) || !/[a-z]/.test(one.stem)) return false;
+  let shared = 0;
+  while (shared < one.domain.length && one.domain[shared] === two.domain[shared]) shared++;
+  return shared >= 5;
+}
+
+/**
  * Whether a recorded request looks like the operation's own: method, host and
  * path segment by segment, where `*` (the Bridge matcher's wildcard) or a
  * `{hole}` stands for any one segment. The Bridge does the real match.
@@ -205,7 +226,7 @@ export function looksLikeOperation(record: Pick<NetworkRecord, "method" | "url">
   } catch {
     return false;
   }
-  if (match.host && match.host.toLowerCase() !== url.hostname.toLowerCase()) return false;
+  if (match.host && !siblingHosts(match.host, url.hostname)) return false;
   const want = match.path.split("/");
   const got = url.pathname.split("/");
   return want.length === got.length && want.every((segment, index) => segment === "*" || /^\{[^{}]*\}$/.test(segment) || segment === got[index]);
@@ -216,15 +237,17 @@ export function looksLikeOperation(record: Pick<NetworkRecord, "method" | "url">
  * then a short quiet; without one, the usual network quiet. Saves the full
  * quiet wait when the page makes its request early.
  */
-export async function waitForOperationRequest(tabId: number, match: { method?: string; path?: string }, timeoutMs = 15_000): Promise<void> {
+export async function waitForOperationRequest(tabId: number, match: { method?: string; host?: string; path?: string }, timeoutMs = 15_000, seen = 0): Promise<number> {
   const started = Date.now();
+  const finished = () => listNetworkRecords(tabId, 500).filter((record) => (record.finished_at || record.error_text) && looksLikeOperation(record, match)).length;
   while (Date.now() - started < timeoutMs) {
-    const records = listNetworkRecords(tabId, 500);
-    if (records.some((record) => (record.finished_at || record.error_text) && looksLikeOperation(record, match))) {
+    // `seen`: how many the caller already judged; wait for one more
+    if (finished() > seen) {
       await waitForNetworkQuiet(tabId, 250, 2000);
-      return;
+      return finished();
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await waitForNetworkQuiet(tabId, 1200, 5000);
+  return finished();
 }

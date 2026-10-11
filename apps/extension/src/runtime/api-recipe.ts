@@ -65,7 +65,7 @@ export interface ApiOperationContract {
   public?: string[];
   /** what a write acts on (Bridge recipe.mjs): fixed items, or the inputs given */
   target?:
-    | { kind: "fixed"; request: string; fields: Array<{ at: string; value: string }> }
+    | { kind: "fixed"; request: string; fields: Array<{ at: string; name?: string; value: string }> }
     | { kind: "parameter"; request: string; params: string[] };
   response: Record<string, unknown>;
   match: { method?: string; host?: string; path?: string; operationName?: string };
@@ -116,7 +116,8 @@ export function describeWriteTarget(contract: Pick<ApiOperationContract, "side_e
   if (contract.side_effect === "read") return "";
   const target = contract.target;
   if (target?.kind === "fixed") {
-    const fields = target.fields.map((field) => `${field.at.split(/[/:\s]/).filter(Boolean).at(-1)} ${field.value}`);
+    // the field's own name (json:/items/0/id is "id", not "0")
+    const fields = target.fields.map((field) => `${field.name || field.at.split(/[/:\s]/).filter((token) => token && !/^\d+$/.test(token)).at(-1) || "item"} ${field.value}`);
     return fields.length
       ? `It always acts on ${fields.join(", ")} (what it was learned on), not on the page you are viewing.`
       : `It always sends the same request (${target.request}), with no item of its own.`;

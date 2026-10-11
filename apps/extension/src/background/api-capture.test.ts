@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("./cdp-manager", () => ({ cdpCommand: mocks.cdpCommand, subscribeCdpEvents: mocks.subscribe }));
 vi.mock("./page-evaluate", () => ({ evaluatePageExpression: mocks.evaluatePageExpression }));
 
-import { collectApiCapture, cookieOrigins, looksLikeOperation } from "./api-capture";
+import { collectApiCapture, cookieOrigins, looksLikeOperation, siblingHosts } from "./api-capture";
 import { startNetworkCapture, stopNetworkCapture } from "./network-capture";
 
 function emit(tabId: number, method: string, params: object) {
@@ -80,6 +80,15 @@ describe("spotting the operation's request in a page run", () => {
     expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/items/4/2/reviews" }, { path: "/api/items/{id}/reviews" })).toBe(false);
     expect(looksLikeOperation({ method: "GET", url: "https://shop.example/api/search.json" }, { path: "/api/search" })).toBe(false);
     expect(looksLikeOperation({ method: "GET", url: "https://shop.example/x" }, {})).toBe(false);
+  });
+
+  it("accepts a load-balanced sibling host, not another app's (RC2 N5: Algolia)", () => {
+    expect(siblingHosts("uj5wyc0l7x-dsn.algolia.net", "uj5wyc0l7x-3.algolianet.com")).toBe(true);
+    expect(siblingHosts("uj5wyc0l7x-dsn.algolia.net", "zz9xyz0abc-dsn.algolia.net")).toBe(false);
+    expect(siblingHosts("www.shop.example", "api.shop.example")).toBe(false);
+    const match = { method: "POST", host: "uj5wyc0l7x-dsn.algolia.net", path: "/1/indexes/Item/query" };
+    expect(looksLikeOperation({ method: "POST", url: "https://uj5wyc0l7x-1.algolianet.com/1/indexes/Item/query" }, match)).toBe(true);
+    expect(looksLikeOperation({ method: "POST", url: "https://evil.example/1/indexes/Item/query" }, match)).toBe(false);
   });
 
   it("treats a * path segment as any one segment, like the Bridge's matcher", () => {

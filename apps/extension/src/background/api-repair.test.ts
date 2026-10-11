@@ -50,6 +50,27 @@ describe("API health checks", () => {
 describe("API repair", () => {
   const day = 24 * 60 * 60 * 1000;
 
+  it("re-learns a no-input read from two plain runs, naming its request (and GraphQL operation) as the pick", async () => {
+    const profile: ApiOperationContract = {
+      ...searchContract(),
+      params: [],
+      slots: [],
+      request: { ...searchContract().request, method: "POST", url: "https://shop.example/api/graphql" },
+      match: { method: "POST", host: "shop.example", path: "/api/graphql", operationName: "Profile" },
+      provenance: { ...searchContract().provenance, example_inputs: { learning: [{}] } }
+    };
+    const { deps: d } = deps({ ok: false, error: { code: "API_LEARN_FAILED", message: "no" } });
+    await repairApiOperation(d, { skill_id: "SK", recipe_id: "r", contract: profile });
+    expect(d.learn).toHaveBeenCalledWith(expect.objectContaining({ examples: [{}, {}], verify_args: {}, pick_request: "POST https://shop.example/api/graphql #Profile" }));
+  });
+
+  it("names the inputs it needs when an operation kept no taught values", async () => {
+    const { deps: d } = deps({ ok: false, error: { code: "API_LEARN_FAILED", message: "no" } });
+    const privateContract = { ...searchContract(), params: [{ name: "q", type: "string" as const, required: true }] };
+    const outcome = await repairApiOperation(d, { skill_id: "SK", recipe_id: "r", contract: privateContract });
+    expect(outcome).toMatchObject({ ok: false, error: { code: "API_REPAIR_INPUT", message: expect.stringMatching(/for q: give two example values/) } });
+  });
+
   it("is bounded: a few a day, a pause after a failure, a gap between attempts", () => {
     let ledger: RepairLedger = {};
     const t0 = 1_000_000_000;

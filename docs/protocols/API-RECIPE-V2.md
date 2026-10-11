@@ -81,7 +81,13 @@ Input:
 
 ### Choosing the request (`pick_request`) and pages with no input
 
-When learning would take the wrong request, refuses the one it took, or nothing was typed, the refusal lists the captured requests as `data.candidates`: `request` (`"METHOD https://host/path"`), `id`, method, status, content type, the input names it carries (`carries`) and a score. No values are listed. Learn again with `pick_request` set to a candidate's `request` (the same on every run) or, for a Watch Me capture, its `id`.
+When learning would take the wrong request, refuses the one it took, or nothing was typed, the refusal lists the captured requests as `data.candidates`: `request` (`"METHOD https://host/path"`, with ` #Operation` for a GraphQL operation, since several share one address), `id`, method, status, content type, the input names it carries (`carries`) and a score. No values are listed. Learn again with `pick_request` set to a candidate's `request` or `id`; both name the same request on every run of the page (an id comes from the request's name and how many of that name came before it, not its position). `"METHOD https://host/path"` without an operation takes the best of any operation there.
+
+Without a pick, learning prefers, among requests carrying every input, data over a whole page and anything over a suggestions/autocomplete request; among equals, the page's last one.
+
+What learning met is named: `API_LEARN_AUTH` (a sign-in page or form), `API_LEARN_RATE_LIMITED` (HTTP 429) and `API_LEARN_BLOCKED` (a bot check), with `class` set to `auth`, `rate_limited` or `blocked`.
+
+Page storage values anyone visiting can read are not session values: the site's domain, an address on the capture's hosts with no token in it, a path the capture visited, a GraphQL document or operation name. They neither become session references nor block learning. Tokens, visitor ids and random-looking values are still session values.
 
 - A request refused because it holds a session value (`API_LEARN_FAILED` naming a live cookie, or `API_LEARN_SECRET`) stays refused when picked.
 - When requests carry the inputs equally, the page's last one is learned with a warning. A whole page loses to a data request that carries as many inputs.
@@ -118,6 +124,10 @@ Errors: `API_LEARN_INPUT` (bad name, page_url without a `{param}` for each input
 | 3 | The site's own page: a background tab loads the trigger URL with the inputs, BrowserHarness records the network and the Bridge finds the request matching the operation **that carries the inputs given** (every param slot holds the requested value) and judges its answer; if the page sent the request with other values, or only its default, the run fails as `endpoint_drift` and no other request's data is returned | everything the page has | writes, and triggers with UI steps (not replayed yet) |
 
 Tier 3 accepts a page's request only when every input slot holds the requested value. The exception is a header that mirrors the page's address (`referer`, `origin`, or a header whose learned template is an address): an app may write that address differently, so it is not compared character for character. A param that only such a header carries must still be named in it, as a whole query value or path segment.
+
+A page often sends its default query first and the one with the inputs a moment later. While the page's matching requests carry none of the inputs, the Bridge answers `awaiting_request: true` and the extension keeps watching the page (up to 15 s) before it reports `endpoint_drift`. A load-balanced API that moves a page between sibling hosts of one app id (Algolia's `APPID-dsn.algolia.net` and `APPID-3.algolianet.com`) is recognised at tier 3; nothing is ever sent to a sibling.
+
+A read learned from a whole page (no recipe for its data) is never `ok` at any tier: a sign-in page is `auth`, anything else `unavailable`, "teach it again".
 
 The Bridge builds every request (`page_request`), judges every answer (`call`, `page_answer`, `page_run`) and applies tier 1's redirect policy; the extension only does what needs the browser. Tabs opened for tiers 2 and 3 are closed after the call.
 

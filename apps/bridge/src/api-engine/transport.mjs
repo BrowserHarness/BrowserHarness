@@ -192,26 +192,70 @@ export function carriesArgs(op, observed, args) {
   return op.params.every((param) => proven.has(param.name) || args[param.name] === undefined) && (proven.size > 0 || !op.params.length);
 }
 
+/**
+ * Hosts of one load-balanced service: Algolia answers the same app from
+ * APPID-dsn.algolia.net and APPID-N.algolianet.com and a page moves between
+ * them. Siblings share an app-id-like first label (letters and digits, 6 or
+ * more) up to a -dsn or -N suffix, and a domain name that starts the same.
+ * Only tier 3 uses this, to recognise the page's own request; nothing is sent
+ * to a sibling.
+ */
+export function siblingHosts(a, b) {
+  const left = String(a || "").toLowerCase();
+  const right = String(b || "").toLowerCase();
+  if (left === right) return true;
+  const split = (host) => {
+    const labels = host.split(".");
+    return { stem: labels[0].replace(/-(dsn|\d{1,2})$/, ""), domain: labels.slice(1, -1).join(".") || labels.at(-1) };
+  };
+  const one = split(left);
+  const two = split(right);
+  if (one.stem !== two.stem || !/^[a-z0-9]{6,}$/.test(one.stem) || !/\d/.test(one.stem) || !/[a-z]/.test(one.stem)) return false;
+  const prefix = (x, y) => {
+    let index = 0;
+    while (index < x.length && x[index] === y[index]) index++;
+    return index;
+  };
+  return prefix(one.domain, two.domain) >= 5;
+}
+
+/** The learned request's match, its host or a sibling of it. */
+function matchesService(match, request) {
+  if (!matches({ ...match, host: undefined }, request)) return false;
+  if (!match.host) return true;
+  try {
+    return siblingHosts(match.host, new URL(request.url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Tier 3: find this operation's request for these args among what the page sent, and judge its answer. */
 export function judgePageRun(contract, capture, args) {
   const base = { tier: 3, operation_id: contract.operation_id, sent: true };
   const run = toCaptureResult(capture);
   const op = toUpstreamOperation(contract);
   const match = ownMatch(op);
-  const hits = run.exchanges.filter((exchange) => matches(match, exchange.request) && exchange.response);
+  const hits = run.exchanges.filter((exchange) => matchesService(match, exchange.request) && exchange.response);
   if (!args || typeof args !== "object") {
     return result({ ...base, ok: false, cls: "input", reason: "the page tier needs the inputs to check the page's request against" });
   }
   const hit = hits.filter((exchange) => carriesArgs(op, exchange.request, args)).at(-1);
   if (!hit && hits.length) {
-    // the page made the request, but not with these inputs: never answer with another request's data
-    return result({
-      ...base,
-      ok: false,
-      cls: "endpoint_drift",
-      reason: "the page's request did not carry the inputs given (it ignored them or sent its own default)",
-      next: "teach the operation again"
-    });
+    // the page made the request, but not with these inputs: never answer with
+    // another request's data. A page often sends its default query first and
+    // the one with the inputs a moment later: the caller keeps watching while
+    // it can (awaiting_request) and reports this only when the time is up.
+    return {
+      ...result({
+        ...base,
+        ok: false,
+        cls: "endpoint_drift",
+        reason: "the page's request did not carry the inputs given (it ignored them or sent its own default)",
+        next: "teach the operation again"
+      }),
+      awaiting_request: true
+    };
   }
   if (!hit) {
     if (run.finalUrl && loginPath(run.finalUrl)) {

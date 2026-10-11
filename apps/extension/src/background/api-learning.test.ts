@@ -224,8 +224,8 @@ describe("site_skill learn_api from Watch Me", () => {
     expect(payload.trigger).toBeUndefined();
     expect(payload.captures).toHaveLength(2);
     expect(d.dispatch).toHaveBeenCalledWith(expect.anything(), { search: "monitors" });
-    expect(d.forgetWatch).toHaveBeenCalledWith("a");
-    expect(d.forgetWatch).toHaveBeenCalledWith("b");
+    // RC2 N7: the captures stay for their 15 minutes, so another pick needs no new recording
+    expect(d.forgetWatch).not.toHaveBeenCalled();
   });
 
   it("learns a demonstrated write without sending it, keeping no typed values", async () => {

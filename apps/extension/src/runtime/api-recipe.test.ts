@@ -233,4 +233,12 @@ describe("API Recipe v2", () => {
     expect(describeWriteTarget(dynamic)).toMatch(/acts on the video given/);
     expect(describeWriteTarget(base)).toMatch(/not recorded/);
   });
+
+  it("names a fixed target's field, never an array index (RC2: \"acts on 0 92313813308\")", () => {
+    const base = { ...searchContract(), name: "add_to_cart", side_effect: "write" as const, side_effect_basis: "declared a write by the person", params: [] };
+    const named = { ...base, target: { kind: "fixed" as const, request: "POST https://store.example/cart/add.js", fields: [{ at: "body json:/items/0", name: "id", value: "92313813308" }] } };
+    expect(describeWriteTarget(named)).toMatch(/always acts on id 92313813308/);
+    const older = { ...base, target: { kind: "fixed" as const, request: "POST https://store.example/cart/add.js", fields: [{ at: "body json:/items/0", value: "92313813308" }] } };
+    expect(describeWriteTarget(older)).toMatch(/always acts on items 92313813308/);
+  });
 });

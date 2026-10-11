@@ -2,7 +2,34 @@
 
 Date: 2026-10-10. Scope: the six-PR plan from the master implementation brief ("Native API Learning, Hybrid Execution & Self-Healing Engine").
 
-**Status:** v1 is built and verified against local fixtures in real Chromium. Release candidate 1 (`4e79b41`) went through real-site acceptance on 2026-10-10 and was **rejected** (2 of 8 scenarios passed). Release candidate 2 fixes every defect found there and the two found by a later source review, each reproduced first with a failing test. RC2 has **not** been through real-site acceptance; nothing below about RC2 is a real-website result: every RC2 result is from local fixtures (Node tests and real Chromium against a local test shop).
+**Status:** v1 is built and verified against local fixtures in real Chromium. Release candidate 1 (`4e79b41`) went through real-site acceptance on 2026-10-10 and was **rejected** (2 of 8 scenarios passed). Release candidate 2 (`1f8eee4`) went through real-site acceptance on 2026-10-11 and was **rejected** (NO MERGE: 1 pass, 3 partial, 4 fail), though it fixed F4 to F9. Release candidate 3 fixes the defects found there, each reproduced first with a failing test. RC3 has **not** been through real-site acceptance; every RC3 result below is from local fixtures (Node tests and real Chromium against a local test shop).
+
+## RC3: fixes from the real-site acceptance of RC2
+
+RC2 acceptance (Windows 11, Chrome for Testing, the person's own accounts; full results in `ACCEPTANCE-RESULTS-1f8eee4.md` on the test PC) passed crates.io search and confirmed F4 to F9 fixed, Hermes untouched (`--no-agents`), no credential in any Skill, the visitor-id refusal, candidate isolation and the repair cooldown. It found the defects below. Each was reproduced first with a failing test (`apps/bridge/test/api-engine-rc3.test.mjs`, and extension tests named after them).
+
+| # | What acceptance saw | Cause | Fix |
+|---|---|---|---|
+| N1 (F3) | YouTube history (HTML) and an npm run answered `ok`, signed in and signed out | Learning refused a whole page, but a run judged it with upstream's classifier, which accepts any HTML for a page recipe with no selector | A read whose answer is a whole page is never `ok` at any tier: a sign-in page (sign-in form, login wording, a login address) is `auth`, anything else `unavailable` with "teach it again" |
+| N2 (F1) | Shopify add-to-cart refused as keeping a "session value" | Shopify keeps the product page's address in page storage; the referer and trigger hold it, so the secret scan refused the write | Page storage is filtered before learning: the site's domain, an address on the capture's hosts (with no token in it), a visited path, a GraphQL document or operation name are public. Tokens, visitor ids and random-looking values stay refused (tested) |
+| F1 | Coursera still refused (`IR_gbd`) | The same public values in page storage | The same filter |
+| N3 | `pick_request` picked Profile but learned payment methods or Orders | All of Shopify's customer GraphQL operations share one address; the string form ignored `operationName`; listed ids were capture positions, so they named another request on the next run | Requests are named `"POST https://host/path #Operation"` in listings and `pick_request`; ids are derived from that name and its occurrence, the same on every run; an Apollo-style cached query in storage is never a session value |
+| N4 | GBIF at tier 3: false `endpoint_drift` | The extension stopped at the first matching request (the page's default query without `q`) | The Bridge answers `awaiting_request` when the page's matching requests do not carry the inputs yet; the extension keeps watching (up to 15 s) for the next one |
+| N5 | HN Algolia at tier 3: false drift | Algolia moves a page between `APPID-dsn.algolia.net` and `APPID-N.algolianet.com` | Tier 3 recognises sibling hosts of one app id (letters and digits, a `-dsn`/`-N` suffix, the same domain stem). Only tier 3 uses it, to recognise the page's own request; nothing is sent to a sibling |
+| N6 | YouTube Watch Me search learned the suggestions request | The suggestions request carries the input too and came last | Among requests carrying every input, a suggestions/autocomplete request and a whole page lose to a data request |
+| N7 | A learn that did not verify forced a new recording | Watch Me captures were dropped after any learn | Captures stay their 15 minutes, so another `pick_request` needs no new recording |
+| N8, N9 | A 429, a bot check or a signed-out page during learning said only "learn failed" | Learning never classified what it met | `API_LEARN_RATE_LIMITED`, `API_LEARN_BLOCKED` and `API_LEARN_AUTH`, with `class` `rate_limited`, `blocked` and `auth` |
+| N10 | Shopify's token sign-in recorded `learned_logged_in: false` | Only cookies counted as a sign-in | An authorization header or credential-named value from storage counts too |
+| Low | Approval said "acts on 0 92313813308" | The target named the last path step, an array index | Each target field records its name (`id`) |
+| Low | Repair of a no-input read asked for examples | Repair needed two taught examples | A no-input read is repaired from two plain page runs with its own request (and GraphQL operation) as the pick; a read with inputs names the ones it needs |
+| Low | Empty candidate list said "choose one" | | Says the page made no data requests while watched |
+| Low | A failed run named only the last tier | | The error lists every tier tried with its class and reason |
+
+Not changed: the visitor-id refusal, approval before every write, no automatic resend, `sent: true` / `verification: "unverified"`, revision isolation and the repair cooldown.
+
+**RC3 automated results (local fixtures only):** `gate:api-engine` passed: Bridge 136/136, extension 796/796, typecheck, builds, MV3 contract, real-Chromium API engine 48/48. Smoke suites: sites 21/21, bridge 53/53, memory 31/31, helpers 11/11, learning 24/24, e2e 13/13, agent 13/13, features 18/18. Installer and Hermes isolation 8/8.
+
+**Still to run on real sites:** scenarios 2, 3, 5 (the whole write path: approval prompt naming the item, refusal on another item, one approved send, unverified blocks promotion), 7 and 8. Not covered by any RC3 change: Meetup has no results API (only autocomplete, correctly left unverified), and the tier-3 independent-header check still needs a suitable real site.
 
 ## RC2: fixes from the real-site acceptance of RC1
 

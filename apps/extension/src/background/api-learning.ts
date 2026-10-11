@@ -233,7 +233,8 @@ async function learnFromWatch(deps: ApiLearnDeps, input: ApiLearnInput): Promise
     // anything it does not prove to be a read)
     ...(write ? { private_params: Object.keys(examples[0]) } : {})
   });
-  if (outcome.ok) for (const id of ids) deps.forgetWatch?.(id);
+  // the capture stays for its 15 minutes whatever the learn gave: a learn that
+  // did not verify can be tried again (another pick_request) without recording again
   return outcome;
 }
 

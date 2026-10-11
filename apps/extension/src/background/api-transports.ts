@@ -128,25 +128,36 @@ export async function runTier3(contract: ApiOperationContract, args: Record<stri
   const plan = planned.data as { refused?: ApiCallResult; url?: string };
   if (plan.refused) return plan.refused;
   const started = performance.now();
-  const capture = await withBackgroundTab(
+  const result = await withBackgroundTab(
     plan.url!,
     async (tabId) => {
       try {
-        await waitForOperationRequest(tabId, contract.match);
-        const tab = await chrome.tabs.get(tabId);
-        return await collectApiCapture(tabId, tab.url || plan.url!, [plan.url!]);
+        // A page often sends its default query first and the one with the
+        // inputs a moment later (GBIF): while the Bridge finds only requests
+        // without the inputs (awaiting_request), keep watching for the next.
+        let seen = 0;
+        for (;;) {
+          seen = await waitForOperationRequest(tabId, contract.match, Math.max(0, TIER3_WAIT_MS - (performance.now() - started)), seen);
+          const tab = await chrome.tabs.get(tabId);
+          const capture = await collectApiCapture(tabId, tab.url || plan.url!, [plan.url!]);
+          // only the exchanges go to the Bridge: it matches the request, it needs no cookies
+          const judged = await requestBridgeApi("page_run", { contract, args, capture: { ...capture, cookies: [], storage: {} } });
+          if (!judged.ok) return { ...failed(contract, 3, judged), sent: true };
+          const answer = judged.data as ApiCallResult & { awaiting_request?: boolean };
+          if (!answer.awaiting_request || performance.now() - started >= TIER3_WAIT_MS) return answer;
+        }
       } finally {
         await stopNetworkCapture(tabId).catch(() => undefined);
       }
     },
     (tabId) => startNetworkCapture(tabId, 800)
   );
-  // only the exchanges go to the Bridge: it matches the request, it needs no cookies
-  const judged = await requestBridgeApi("page_run", { contract, args, capture: { ...capture, cookies: [], storage: {} } });
-  if (!judged.ok) return { ...failed(contract, 3, judged), sent: true };
-  const result = judged.data as ApiCallResult;
-  return { ...result, ms: Math.round(performance.now() - started) };
+  const { awaiting_request: _awaiting, ...answer } = result as ApiCallResult & { awaiting_request?: boolean };
+  return { ...answer, ms: Math.round(performance.now() - started) };
 }
+
+/** How long tier 3 watches a page for the operation's request with the inputs. */
+export const TIER3_WAIT_MS = 15_000;
 
 export function runTier(tier: ApiTier, contract: ApiOperationContract, args: Record<string, unknown>, approved: boolean): Promise<ApiCallResult> {
   if (tier === 1) return runTier1(contract, args, approved);

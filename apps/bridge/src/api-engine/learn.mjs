@@ -3,10 +3,11 @@
 // request carrying the inputs, its param slots, session refs, nonces and
 // response recipe. No LLM. The result is an API Recipe v2 contract that is
 // unverified until an unseen third input succeeds (verify.mjs).
-import { judge } from "../../vendor/api-anything/dist/classify.js";
+import { botWall, judge, loginPath, signInForm } from "../../vendor/api-anything/dist/classify.js";
 import { templatizeUrl } from "../../vendor/api-anything/dist/heal.js";
-import { capturePages, checkExamples, learnOperation, rankCandidates } from "../../vendor/api-anything/dist/learn.js";
-import { scanSecrets } from "../../vendor/api-anything/dist/secrets.js";
+import { capturePages, checkExamples, learnOperation, operationNameOf, rankCandidates } from "../../vendor/api-anything/dist/learn.js";
+import { credentialName, highEntropy, leafName, opaqueToken, scanSecrets } from "../../vendor/api-anything/dist/secrets.js";
+import { holdsRef } from "../../vendor/api-anything/dist/http.js";
 import { walk } from "../../vendor/api-anything/dist/codec.js";
 import { loggedIn } from "../../vendor/api-anything/dist/session.js";
 import { toCaptureResult } from "./capture.mjs";
@@ -38,14 +39,53 @@ function where(exchange) {
   }
 }
 
-/** "POST https://host/path": how a person or agent names a captured request, the same on every run. */
-function requestName(method, url) {
+/**
+ * "POST https://host/path", and "POST https://host/path #Profile" for a
+ * GraphQL operation: how a person or agent names a captured request, the same
+ * on every run of the page. Several GraphQL operations share one address, so
+ * the operation's name is part of it.
+ */
+function requestName(method, url, operationName) {
   try {
     const parsed = new URL(url);
-    return `${String(method).toUpperCase()} ${parsed.origin}${parsed.pathname}`;
+    return `${String(method).toUpperCase()} ${parsed.origin}${parsed.pathname}${operationName ? ` #${operationName}` : ""}`;
   } catch {
     return "";
   }
+}
+
+const nameOf = (exchange) => requestName(exchange.request.method, exchange.request.url, operationNameOf(exchange.request));
+
+function fnv(text) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
+/**
+ * A capture with ids that name the same request on every run of the page: a
+ * number from the request's name and how many of that name came before it,
+ * not its position (a page sends its GraphQL operations in any order, and a
+ * second run is a new capture). A listing's id can be passed back as
+ * pick_request after the page ran again.
+ */
+function stableRun(capture) {
+  const run = toCaptureResult(capture);
+  const seen = new Map();
+  const taken = new Set();
+  for (const exchange of run.exchanges) {
+    const name = nameOf(exchange) || `${exchange.request.method} ${exchange.request.url}`;
+    const nth = seen.get(name) ?? 0;
+    seen.set(name, nth + 1);
+    let id = 1 + (fnv(`${name}|${nth}`) % 899_999) + 100_000;
+    while (taken.has(id)) id = id === 999_999 ? 100_000 : id + 1;
+    taken.add(id);
+    exchange.id = id;
+  }
+  return run;
 }
 
 const QUIET = new Set(["document", "stylesheet", "script", "image", "font", "media", "manifest", "ping", "preflight"]);
@@ -57,11 +97,11 @@ const QUIET = new Set(["document", "stylesheet", "script", "image", "font", "med
  * the page's own data requests, its writes first when a write is wanted.
  */
 export function proposeCandidates({ capture, example, side_effect: sideEffect }) {
-  const run = toCaptureResult(capture);
+  const run = stableRun(capture);
   const args = plainArgs(example ?? {}, "example", { allowEmpty: true });
   const describe = (candidate) => ({
     id: candidate.id,
-    request: requestName(candidate.method, candidate.url),
+    request: requestName(candidate.method, candidate.url, candidate.operationName),
     method: candidate.method,
     url: requestName(candidate.method, candidate.url).replace(/^\S+ /, ""),
     resource_type: candidate.resourceType,
@@ -83,17 +123,24 @@ export function proposeCandidates({ capture, example, side_effect: sideEffect })
     .map(({ candidate }) => describe(candidate));
 }
 
-/** The captured request a pick names: its id in run 1, or "METHOD https://host/path" (the best of those, when several). */
+/**
+ * The captured request a pick names: a listed id, or "METHOD https://host/path"
+ * with " #Operation" for one GraphQL operation (the best of those, when several).
+ */
 function pickedExchange(pick, run, args) {
-  if (Number.isInteger(pick)) {
-    if (!run.exchanges.some((exchange) => exchange.id === pick)) throw fail("API_LEARN_FAILED", `no captured request with id ${pick}`);
-    return pick;
+  if (Number.isInteger(pick) || /^\d+$/.test(String(pick).trim())) {
+    const id = Number(pick);
+    if (!run.exchanges.some((exchange) => exchange.id === id)) throw fail("API_LEARN_FAILED", `no captured request with id ${id}`);
+    return id;
   }
-  const wanted = String(pick).trim().replace(/\s+/, " ");
-  const [method, url] = wanted.split(" ");
-  const name = url ? requestName(method, url) : "";
-  if (!name) throw fail("API_LEARN_INPUT", 'pick_request names a request as "METHOD https://host/path", or by its id in the capture');
-  const pool = run.exchanges.filter((exchange) => requestName(exchange.request.method, exchange.request.url) === name);
+  const [method, rawUrl, ...rest] = String(pick).trim().split(/\s+/);
+  let url = rawUrl ?? "";
+  let operation = rest.join(" ").replace(/^#/, "");
+  if (url.includes("#")) [url, operation] = [url.slice(0, url.indexOf("#")), url.slice(url.indexOf("#") + 1) || operation];
+  const name = url ? requestName(method, url, operation || undefined) : "";
+  if (!name) throw fail("API_LEARN_INPUT", 'pick_request names a request as "METHOD https://host/path" (with " #Operation" for one GraphQL operation), or by its listed id');
+  // without an operation name, any operation at that address
+  const pool = run.exchanges.filter((exchange) => (operation ? nameOf(exchange) : requestName(exchange.request.method, exchange.request.url)) === name);
   if (!pool.length) throw fail("API_LEARN_FAILED", `no captured request is ${name}`);
   const ranked = rankCandidates(pool, args, { all: true, pages: capturePages(run) });
   return ranked[0]?.id ?? pool[pool.length - 1].id;
@@ -121,7 +168,10 @@ function writeTarget(contract) {
     const path = leaf.at[0].startsWith("path:");
     if (!path && !TARGET_KEY.test(key)) continue;
     if (path && !/\d|[A-Z].*[a-z]|[a-z].*[A-Z]/.test(value)) continue; // a word in the path is the endpoint, not an item
-    fields.push({ at: leaf.at.join(" "), value });
+    // the nearest named step: json:/items/0/id names "id", not "0"
+    const tokens = leaf.at.flatMap((step) => (step.startsWith("json:") ? step.slice(5).split("/") : [step.slice(step.indexOf(":") + 1)]));
+    const fieldName = tokens.reverse().find((token) => token && !/^\d+$/.test(token)) || "id";
+    fields.push({ at: leaf.at.join(" "), name: fieldName, value });
     if (fields.length === 8) break;
   }
   return { kind: "fixed", request, fields };
@@ -164,6 +214,137 @@ export function credentialCookies(cookies, urls) {
     return [...hosts].some((host) => host === domain || host.endsWith(`.${domain}`));
   };
   return cookies.filter((cookie) => !isDomainOfSite(cookie.value));
+}
+
+const GRAPHQL_DOCUMENT = /^\s*(query|mutation|subscription|fragment)\b[^{}]*\{/;
+
+/**
+ * A value anyone visiting the page can read, so never a credential: the
+ * site's own domain, an address on one of the capture's hosts (whose query
+ * holds no token), a path the capture visited, a GraphQL document or one of
+ * its operation names. Shopify keeps the product page's address in storage,
+ * Coursera its domain, Apollo the query it sends.
+ */
+function publicValue(text, site) {
+  const value = String(text).trim();
+  if (!value) return true;
+  if (GRAPHQL_DOCUMENT.test(value) || site.operations.has(value)) return true;
+  const domain = value.toLowerCase().replace(/^\./, "");
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) && [...site.hosts].some((host) => host === domain || host.endsWith(`.${domain}`))) return true;
+  let url;
+  try {
+    url = new URL(value, "http://relative.invalid");
+  } catch {
+    return false;
+  }
+  const relative = url.host === "relative.invalid";
+  if (relative ? !value.startsWith("/") || !site.paths.has(url.pathname) : !site.hosts.has(url.hostname.toLowerCase())) return false;
+  // an address that carries a token (a callback's ?code=, a signed link) is not public
+  const parts = [...url.searchParams.values(), url.hash.slice(1), ...url.pathname.split("/")];
+  return !parts.some((part) => part.length >= 16 && (opaqueToken(part) || highEntropy(part)));
+}
+
+/** The hosts, paths and GraphQL operation names a run's page and requests show. */
+function siteOf(run) {
+  const site = { hosts: new Set(), paths: new Set(), operations: new Set() };
+  for (const address of [run.finalUrl, ...run.locations, ...run.exchanges.map((exchange) => exchange.request.url)]) {
+    try {
+      const url = new URL(address);
+      site.hosts.add(url.hostname.toLowerCase());
+      site.paths.add(url.pathname);
+    } catch {
+      // not an address
+    }
+  }
+  for (const exchange of run.exchanges) {
+    const operation = operationNameOf(exchange.request);
+    if (operation) site.operations.add(operation);
+  }
+  return site;
+}
+
+/**
+ * Page storage without its public values: an entry that is one is left out,
+ * and a JSON entry keeps only its other leaves. Learning then neither turns a
+ * page address into a session reference nor refuses an operation for
+ * "keeping" one. Tokens, visitor ids and anything random-looking stay.
+ */
+export function privateStorage(storage, run) {
+  const site = siteOf(run);
+  const out = {};
+  for (const [key, value] of Object.entries(storage || {})) {
+    if (publicValue(value, site)) continue;
+    if (!/^\s*[[{]/.test(value)) {
+      out[key] = value;
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      out[key] = value;
+      continue;
+    }
+    let dropped = false;
+    const prune = (node) => {
+      if (typeof node === "string") {
+        if (publicValue(node, site)) {
+          dropped = true;
+          return undefined;
+        }
+        return node;
+      }
+      if (Array.isArray(node)) return node.map(prune);
+      if (node && typeof node === "object") return Object.fromEntries(Object.entries(node).map(([name, child]) => [name, prune(child)]).filter(([, child]) => child !== undefined));
+      return node;
+    };
+    const kept = prune(parsed);
+    out[key] = dropped ? JSON.stringify(kept) : value;
+  }
+  return out;
+}
+
+/**
+ * What stood between the page and its data in a run: a sign-in page, a rate
+ * limit or a bot wall. A learn that meets one says so (auth, rate_limited,
+ * blocked) instead of failing to find the request.
+ */
+function obstacle(run, exchangeId) {
+  if (run.finalUrl && loginPath(run.finalUrl)) return { code: "API_LEARN_AUTH", class: "auth", reason: "the page went to a sign-in page: sign in on the site, then teach it again" };
+  const looked = run.exchanges.filter((exchange) => exchange.response && (exchangeId === undefined ? !QUIET.has(exchange.resourceType) || exchange.resourceType === "document" : exchange.id === exchangeId));
+  for (const exchange of looked) {
+    const response = { status: exchange.response.status, headers: exchange.response.headers || {}, body: exchange.response.body ?? "" };
+    const wall = botWall(response, exchange.resourceType !== "document");
+    if (wall) return { code: "API_LEARN_BLOCKED", class: "blocked", reason: `the site answered with a bot check (${wall}); learning needs the real answer` };
+    if (response.status === 429) return { code: "API_LEARN_RATE_LIMITED", class: "rate_limited", reason: `the site rate-limited the page (HTTP 429${response.headers["retry-after"] ? `, retry after ${response.headers["retry-after"]}` : ""}): try again later` };
+    if (exchange.resourceType === "document" && /html/i.test(response.headers["content-type"] || "") && signInForm(response.body)) {
+      return { code: "API_LEARN_AUTH", class: "auth", reason: "the page showed a sign-in form: sign in on the site, then teach it again" };
+    }
+  }
+  return undefined;
+}
+
+function obstacleError(found) {
+  return Object.assign(fail(found.code, found.reason), { class: found.class });
+}
+
+// what a per-keystroke request is called: it carries the input as well as the real search
+const AUTOCOMPLETE = /auto-?complete|suggest|typeahead|type-ahead|complete\/search|\/complete\b|\/predict|prefetch/i;
+const isAutocomplete = (candidate) => {
+  try {
+    const url = new URL(candidate.url);
+    return AUTOCOMPLETE.test(`${url.hostname}${url.pathname}`) || AUTOCOMPLETE.test(candidate.operationName || "");
+  } catch {
+    return false;
+  }
+};
+
+/** Signed in by a token rather than a cookie: an authorization header, or a credential-named value from page storage. */
+function tokenSignIn(contract) {
+  return (
+    contract.slots.some((slot) => holdsRef(slot) && (slot.at[0] === "header:authorization" || credentialName(leafName(slot.at)))) ||
+    (contract.session_sources || []).some((source) => source.kind !== "cookie" && credentialName(String(source.key || source.ref)))
+  );
 }
 
 /** Upstream's trigger: the page URL with each example value as `{name}`, plus any UI steps. */
@@ -268,10 +449,11 @@ export function learnApiOperation(input) {
   } catch (error) {
     throw fail("API_LEARN_INPUT", error.message);
   }
-  const run1 = toCaptureResult(captures[0]);
-  const run2 = captures[1] ? toCaptureResult(captures[1]) : undefined;
+  const run1 = stableRun(captures[0]);
+  const run2 = captures[1] ? stableRun(captures[1]) : undefined;
   for (const run of [run1, run2].filter(Boolean)) {
     run.cookies = credentialCookies(run.cookies, [run.finalUrl, ...run.locations, ...run.exchanges.map((exchange) => exchange.request.url)]);
+    run.storage = privateStorage(run.storage, run);
   }
   const warnings = [];
   if (!run2) warnings.push("learned from one run: nonces and per-load values could not be told apart from constants");
@@ -300,25 +482,41 @@ export function learnApiOperation(input) {
     try {
       pickedId = pickedExchange(pick, run1, args1);
     } catch (error) {
-      throw withCandidates(error);
+      const found = obstacle(run1);
+      throw withCandidates(found ? obstacleError(found) : error);
     }
   } else if (!Object.keys(args1).length) {
+    const found = obstacle(run1);
+    if (found) throw withCandidates(obstacleError(found));
     // nothing typed (a checkbox, a list with no filter): nothing tells the requests apart
-    throw withCandidates(
+    const error = withCandidates(
       fail("API_LEARN_PICK_REQUEST", "nothing was typed, so no input tells the requests apart: choose the one to learn with pick_request from the requests listed")
     );
+    if (!error.candidates.length) {
+      error.message = "API_LEARN_PICK_REQUEST: the capture has no data requests to choose from: the page made none while it was watched (wait for it to load, or record the action again)";
+    }
+    throw error;
   } else if (!input.match) {
     try {
+      // The page's own order of preference: a request carrying every input
+      // that is data (not a whole page) and not a per-keystroke suggestion;
+      // among equals, the page's last one (the person's action, not a default
+      // query before it). Upstream would take the first of its ranking.
       const ranked = rankCandidates(run1.exchanges, args1, { pages: capturePages(run1) }).filter((candidate) => candidate.hits.length);
       const isPage = (candidate) => /html/i.test(candidate.contentType || "") || candidate.resourceType === "document";
-      const data = ranked.find((candidate) => !isPage(candidate) && candidate.hits.length >= (ranked[0]?.hits.length ?? 0));
-      const tied = ranked.filter((candidate) => candidate.score === ranked[0]?.score);
-      if (ranked[0] && isPage(ranked[0]) && data) {
-        pickedId = data.id;
-        warnings.push(`request #${ranked[0].id} is a whole page; learned #${data.id}, which returns data and carries the inputs as well (pass pick_request to choose another)`);
+      const order = new Map(run1.exchanges.map((exchange, index) => [exchange.id, index]));
+      const full = ranked.filter((candidate) => candidate.hits.length >= (ranked[0]?.hits.length ?? 0));
+      const prefer = (pool, test) => (pool.some(test) ? pool.filter(test) : pool);
+      const pool = prefer(prefer(full, (candidate) => !isAutocomplete(candidate)), (candidate) => !isPage(candidate));
+      const top = Math.max(...pool.map((candidate) => candidate.score));
+      const tied = pool.filter((candidate) => candidate.score === top);
+      const chosen = tied.reduce((last, candidate) => ((order.get(candidate.id) ?? 0) > (order.get(last.id) ?? 0) ? candidate : last), tied[0]);
+      if (chosen && ranked[0] && chosen.id !== ranked[0].id) {
+        pickedId = chosen.id;
+        const why = isAutocomplete(ranked[0]) ? "a suggestions request" : isPage(ranked[0]) ? "a whole page" : "one of several that carry the inputs equally";
+        warnings.push(`learned ${nameOf(run1.exchanges.find((exchange) => exchange.id === chosen.id))} rather than ${why} (pass pick_request to choose another)`);
       } else if (tied.length > 1) {
-        pickedId = Math.max(...tied.map((candidate) => candidate.id));
-        warnings.push(`requests ${tied.map((candidate) => `#${candidate.id}`).join(", ")} carry the inputs equally; learned the page's last one, #${pickedId} (pass pick_request to choose another)`);
+        pickedId = chosen.id;
       }
     } catch {
       // upstream's own ranking reports the problem below
@@ -342,8 +540,15 @@ export function learnApiOperation(input) {
       ...(Array.isArray(input.public) ? { public: input.public.map(String) } : {})
     });
   } catch (error) {
+    const found = obstacle(run1, pickedId);
+    if (found) throw withCandidates(obstacleError(found));
     const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw withCandidates(fail("API_LEARN_FAILED", localHints(message)));
+  }
+  {
+    // the learned request itself answered with a rate limit, a bot check or a sign-in page
+    const found = obstacle(run1, learned.exchange?.id);
+    if (found) throw withCandidates(obstacleError(found));
   }
   warnings.push(...learned.warnings.map(localHints));
 
@@ -366,10 +571,12 @@ export function learnApiOperation(input) {
   });
 
   // signed in: a credential cookie that is not every visitor's anonymous session
-  contract.learned_logged_in = loggedIn(
-    run1.cookies.filter((cookie) => !ANONYMOUS_SESSION.test(cookie.name)),
-    Array.isArray(input.login_cookies) ? input.login_cookies.map(String) : undefined
-  );
+  // or by a token: an authorization header, a credential the page keeps in storage
+  contract.learned_logged_in =
+    loggedIn(
+      run1.cookies.filter((cookie) => !ANONYMOUS_SESSION.test(cookie.name)),
+      Array.isArray(input.login_cookies) ? input.login_cookies.map(String) : undefined
+    ) || tokenSignIn(contract);
 
   // Fail closed: a live cookie or storage value anywhere in the contract means
   // the learner kept a credential literal.
@@ -395,6 +602,11 @@ export function learnApiOperation(input) {
   const argNames = Object.keys(args1);
   const first = exampleCheck(op, learned.exchange, argNames, checkedAt);
   const second = learned.exchange2 ? exampleCheck(op, learned.exchange2, argNames, checkedAt) : undefined;
+  if (!first.check.passed) {
+    // nothing usable was learned: say what was in the way, if something was
+    const found = obstacle(run1);
+    if (found) throw withCandidates(obstacleError(found));
+  }
   contract.verification = {
     status: first.check.passed && (second?.check.passed ?? true) ? "unverified" : "failed",
     checks: [first.check, ...(second ? [second.check] : [])]
