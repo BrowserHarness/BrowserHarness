@@ -63,12 +63,58 @@ async function readText(file) {
   }
 }
 
-/** Keep one copy of a config file as it was before we first changed it. */
+/**
+ * Keep one copy of a config file as it was before we first changed it, and
+ * one as it was before the latest change.
+ */
 async function backupOnce(file, text) {
+  if (text === null) return;
   const backup = `${file}.before-browserharness`;
-  if (text !== null && !existsSync(backup)) {
+  if (!existsSync(backup)) {
     await writeFile(backup, text);
   }
+  await writeFile(`${file}.browserharness-previous`, text);
+}
+
+/** Whether `inner` is `outer` or inside it. */
+function within(outer, inner) {
+  const relative = path.relative(path.resolve(outer), path.resolve(inner));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/**
+ * A Windows profile folder (%LOCALAPPDATA%, %APPDATA%) when it is inside the
+ * chosen home; otherwise the same folder under that home. An install into
+ * another home (a test, a second profile) never writes to the real profile.
+ */
+function profileDir(ctx, variable, fallback) {
+  const given = ctx.env[variable];
+  return given && within(ctx.home, given) ? given : path.join(ctx.home, ...fallback);
+}
+
+/** The Bridge (its cli path) an agent config's browserharness entry already starts, if any. */
+export function registeredBridge(text) {
+  if (!text) return undefined;
+  try {
+    const data = JSON.parse(text);
+    const args = data?.mcpServers?.[SERVER_NAME]?.args;
+    return Array.isArray(args) && typeof args[0] === "string" ? args[0] : undefined;
+  } catch {
+    // TOML or YAML: the managed block's args line
+  }
+  const start = text.indexOf(BLOCK_START);
+  const end = start >= 0 ? text.indexOf(BLOCK_END, start) : -1;
+  if (start < 0 || end < 0) return undefined;
+  const quoted = /args\s*[:=]\s*\[\s*("(?:[^"\\]|\\.)*")/.exec(text.slice(start, end))?.[1];
+  try {
+    return quoted ? JSON.parse(quoted) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sameBridge(ctx, a, b) {
+  return ctx.platform === "win32" ? path.win32.normalize(a).toLowerCase() === path.win32.normalize(b).toLowerCase() : path.posix.normalize(a) === path.posix.normalize(b);
 }
 
 async function writeTextFile(file, text, mode) {
@@ -226,11 +272,17 @@ async function removeSkill(dir) {
 // ---------- agents ----------
 
 function hermesHome(ctx) {
-  if (ctx.platform === "win32" && ctx.env.LOCALAPPDATA) {
-    return path.join(ctx.env.LOCALAPPDATA, "hermes");
-  }
+  if (ctx.platform === "win32") return path.join(profileDir(ctx, "LOCALAPPDATA", ["AppData", "Local"]), "hermes");
   return path.join(ctx.home, ".hermes");
 }
+
+/** The config file whose browserharness entry says which Bridge an agent starts. */
+const AGENT_CONFIG = {
+  claude: (ctx) => path.join(ctx.home, ".claude.json"),
+  codex: (ctx) => path.join(ctx.home, ".codex", "config.toml"),
+  cursor: (ctx) => path.join(ctx.home, ".cursor", "mcp.json"),
+  hermes: (ctx) => path.join(hermesHome(ctx), "config.yaml")
+};
 
 export const AGENTS = [
   {
@@ -336,6 +388,20 @@ export async function registerAgents(ctx, { only } = {}) {
       continue;
     }
     try {
+      // an agent already set up for another BrowserHarness Bridge keeps it
+      // (and its skill file) unless replacing was asked for
+      const config = AGENT_CONFIG[agent.id]?.(ctx);
+      const current = config ? registeredBridge(await readText(config)) : undefined;
+      if (current && !sameBridge(ctx, current, ctx.cliPath) && !ctx.replaceAgents) {
+        results.push({
+          id: agent.id,
+          name: agent.name,
+          status: "kept",
+          config,
+          note: `already uses the Bridge at ${current}; kept it (install with --replace-agents to point it at this one)`
+        });
+        continue;
+      }
       const where = await agent.register(ctx);
       const skills = [];
       for (const dir of agent.skillDirs(ctx, installed)) {
@@ -409,10 +475,7 @@ export function serviceDefinition(ctx) {
     };
   }
   if (ctx.platform === "win32") {
-    const startup = path.join(
-      ctx.env.APPDATA || path.join(ctx.home, "AppData", "Roaming"),
-      "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
-    );
+    const startup = path.join(profileDir(ctx, "APPDATA", ["AppData", "Roaming"]), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
     const quoted = (value) => `""${value}""`;
     return {
       kind: "startup-folder",

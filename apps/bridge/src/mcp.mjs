@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import { isLongCommand } from "./command-timeouts.mjs";
 
 export const BROWSERHARNESS_MCP_VERSION = "0.1.0";
 
@@ -140,7 +141,8 @@ const TOOL_SPECS = [
     verify_args: optional(z.record(z.string(), z.unknown()), "learn_api/repair: a third input neither example used, to check the operation live"),
     skill_name: optional(z.string(), "learn_api: name for a new Skill"),
     from_watch: optional(z.array(z.string()).max(2), "learn_api: learn from one or two Watch Me recording ids (their api_capture) instead of running the page"),
-    side_effect: optional(z.enum(["read", "write"]), "learn_api: read or write; a write is learned only from Watch Me and asks before every run")
+    side_effect: optional(z.enum(["read", "write"]), "learn_api: read or write; a write is learned only from Watch Me and asks before every run"),
+    pick_request: optional(z.union([z.string(), z.number().int()]), "learn_api: the request to learn, as a refusal lists it (\"POST https://host/path\", or its id in a Watch Me capture); needed when nothing was typed (a checkbox, a list with no input)")
   }],
   ["cdp", "Raw Chrome DevTools Protocol call; last resort when no other tool fits.", {
     method: z.string().min(1).describe("CDP method, e.g. Page.getLayoutMetrics"),
@@ -202,6 +204,8 @@ export function createBridgeHttpClient(
   {
     fetchImpl = globalThis.fetch,
     commandTimeoutMs = 40_000,
+    // the Bridge waits up to 5 minutes for a learn or a Site Command run; wait a little longer
+    longCommandTimeoutMs = 310_000,
     statusTimeoutMs = 3_000
   } = {}
 ) {
@@ -258,7 +262,7 @@ export function createBridgeHttpClient(
             action,
             args
           }),
-          signal: AbortSignal.timeout(commandTimeoutMs)
+          signal: AbortSignal.timeout(isLongCommand({ action, args }) ? Math.max(longCommandTimeoutMs, commandTimeoutMs) : commandTimeoutMs)
         });
 
         const body = await responseBody(response);

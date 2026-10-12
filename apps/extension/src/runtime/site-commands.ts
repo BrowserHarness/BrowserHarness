@@ -2,7 +2,7 @@
 // command with typed parameters, like `amazon-search --q kettle`. The side
 // panel runs it with /name, coding agents get it as a tool, and the Bridge
 // CLI runs it with `browserharness-bridge site <name>`.
-import { apiRecipeNeedsApproval, recipeKind } from "./api-recipe";
+import { apiRecipeNeedsApproval, describeWriteTarget, recipeKind } from "./api-recipe";
 import type { SiteSkillParameterType, SiteSkillRecipe } from "./site-skill";
 import { listSiteSkillFamilies, type SiteSkillFamilyRecord } from "./site-skill-store";
 import { loadAllSkills } from "./skills";
@@ -42,6 +42,8 @@ export interface SiteCommand {
     verification: "unverified" | "verified" | "failed";
     learned_tier?: 1 | 2 | 3;
     min_tier: 1 | 2 | 3;
+    /** a write: what it acts on, in words (a fixed item, or the inputs given) */
+    target?: string;
   };
   status: "proven" | "testing" | "check failed";
   skill_id: string;
@@ -175,6 +177,11 @@ export function buildSiteCommands(
       }
     })();
 
+    // a learned operation takes the plain name; the form it was watched on
+    // keeps "-form" (RC3: /site-add-to-cart filled the form instead)
+    const learned = new Set(
+      candidate.recipes.filter((item) => recipeKind(item) !== "ui").map((item) => recipeLabel(item))
+    );
     for (const recipe of candidate.recipes) {
       const key = `${family.id}:${recipe.id}`;
       const executions = (family.executions || []).filter((item) => item.recipe_id === recipe.id);
@@ -198,6 +205,7 @@ export function buildSiteCommands(
               operation_id: step.contract.operation_id,
               side_effect: step.contract.side_effect,
               verification: step.contract.verification.status,
+              ...(step.contract.side_effect !== "read" ? { target: describeWriteTarget(step.contract) } : {}),
               ...(step.contract.transport.learned_tier ? { learned_tier: step.contract.transport.learned_tier } : {}),
               min_tier: step.contract.min_tier
             }
@@ -212,7 +220,9 @@ export function buildSiteCommands(
         worked: executions.filter((item) => item.outcome === "passed").length
       };
       const renamed = slug(names[key] || "");
-      pending.push({ base: renamed || `${siteLabel(candidate.site.origin)}-${recipeLabel(recipe)}`, command });
+      const label = recipeLabel(recipe);
+      const own = recipeKind(recipe) === "ui" && learned.has(label) ? `${label}-form` : label;
+      pending.push({ base: renamed || `${siteLabel(candidate.site.origin)}-${own}`, command });
     }
   }
 
@@ -331,6 +341,7 @@ export function describeSiteCommand(command: SiteCommand) {
     kind: command.kind,
     status: command.status,
     ...(command.needs_page === false ? { runs_without_page: true } : {}),
+    ...(command.api?.target ? { acts_on: command.api.target } : {}),
     usage: usage(command),
     parameters: command.parameters.map((parameter) => ({
       name: parameter.name,
@@ -357,7 +368,7 @@ export function siteCommandAnswer(
   data: unknown
 ): Record<string, unknown> {
   const result = (data || {}) as {
-    run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> };
+    run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> & { api?: { tier?: number; class?: string; item_count?: number } } };
     sent?: boolean;
     verification?: string;
     next_action?: string;
@@ -369,9 +380,14 @@ export function siteCommandAnswer(
     kind: command.kind,
     ...(run?.output
       ? {
+          ...(command.kind === "form" ? { submitted: Boolean(run.submitted) } : {}),
           http_status: run.output.http_status,
           truncated: run.output.truncated,
-          output: run.output.data
+          output: run.output.data,
+          // a learned operation: which tier answered (plain HTTP, the page's request, or the page)
+          ...(run.output.api
+            ? { tier: run.output.api.tier, class: run.output.api.class, ...(run.output.api.item_count !== undefined ? { item_count: run.output.api.item_count } : {}) }
+            : {})
         }
       : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 }),
     ...(result.verification === "unverified"

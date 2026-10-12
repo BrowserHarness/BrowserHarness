@@ -43,6 +43,18 @@ export function bhClass(upstreamClass, { status, missing, sideEffect, sent } = {
   }
 }
 
+/**
+ * Whether a learned answer is data: JSON, or a page read with a recipe (items
+ * by selector, or JSON embedded in it). A whole page returned raw is not: its
+ * text is always "something", signed in or out, so it proves nothing.
+ */
+export function structuredResponse(response) {
+  const format = response?.format ?? "json";
+  if (format === "json") return true;
+  if (format === "embedded") return Boolean(response.embedded);
+  return Boolean(response?.html);
+}
+
 /** How many items a result carries: a list's length, else 1 for a value, 0 for nothing. */
 export function itemCount(data) {
   if (data === undefined || data === null) return 0;

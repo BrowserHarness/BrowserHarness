@@ -29,7 +29,11 @@ const READ_FALLTHROUGH = new Set<ApiResultClass>(["unavailable", "auth", "blocke
 /** The tiers to try, in order: the remembered one first, never below the operation's minimum. */
 export function tierOrder(contract: ApiOperationContract, remembered?: ApiTier, maxTier: ApiTier = 3): ApiTier[] {
   const preference = (contract.transport?.preference?.length ? contract.transport.preference : [1, 2, 3]) as ApiTier[];
-  const allowed = [...new Set(preference)].filter((tier) => tier >= (contract.min_tier || 1) && tier <= maxTier);
+  // a write acts on the person's own session (a cart, a list): it is sent
+  // from their browser, never as plain HTTP without it (RC3: an approved add
+  // to cart landed in a new cart nobody sees)
+  const lowest = Math.max(contract.min_tier || 1, contract.side_effect === "read" ? 1 : 2);
+  const allowed = [...new Set(preference)].filter((tier) => tier >= lowest && tier <= maxTier);
   const first = remembered ?? contract.transport?.learned_tier;
   return first && allowed.includes(first) ? [first, ...allowed.filter((tier) => tier !== first)] : allowed;
 }
@@ -97,7 +101,24 @@ export async function dispatchApiOperation(
       attempts
     };
   }
-  return { ...last, attempts };
+  return { ...overallFailure(last, attempts), attempts };
+}
+
+/**
+ * The class a failed run reports. It is the last tier's, except that a sign-in
+ * any tier saw outranks a later tier that only lacked a value (RC4: signed
+ * out, tiers 3 and 1 saw the sign-in page and tier 2 said "unavailable").
+ */
+export function overallFailure<T extends ApiCallResult>(last: T, attempts: ApiAttempt[]): T {
+  if (last.class !== "unavailable" && last.class !== "network") return last;
+  const signIn = attempts.find((attempt) => attempt.class === "auth");
+  if (!signIn) return last;
+  return {
+    ...last,
+    class: "auth",
+    reason: signIn.reason || "the site wants you signed in",
+    next: "sign in to the site in this browser, then run it again"
+  };
 }
 
 const KEY = "browserharness.apiTransport.v1";

@@ -2,7 +2,7 @@
 // upstream learner's CaptureResult. Cookie values and page storage arrive only
 // to tell credentials from parameters; they are dropped after the call.
 
-const MAX_EXCHANGES = 400;
+export const MAX_EXCHANGES = 400;
 const MAX_BODY_CHARS = 2_000_000;
 
 function lowerHeaders(headers) {
@@ -48,13 +48,29 @@ function cookie(raw) {
   };
 }
 
+/**
+ * The exchanges to keep when a capture has more than MAX_EXCHANGES: the
+ * latest page loads (up to a quarter), then the newest of the rest. The
+ * newest are what the person just did (RC4: on a long-used tab the
+ * demonstrated Add to cart was the newest of 500, and keeping the oldest 400
+ * dropped it).
+ */
+export function keptExchanges(list, max = MAX_EXCHANGES) {
+  if (list.length <= max) return list.map((raw, index) => [index, raw]);
+  const indexed = list.map((raw, index) => [index, raw]);
+  const pages = indexed.filter(([, raw]) => String(raw?.resource_type || "").toLowerCase() === "document").slice(-Math.floor(max / 4));
+  const chosen = new Set(pages.map(([index]) => index));
+  for (let index = list.length - 1; index >= 0 && chosen.size < max; index--) chosen.add(index);
+  return indexed.filter(([index]) => chosen.has(index));
+}
+
 /** One run of a page (a trigger, a demonstration) in upstream's CaptureResult shape. */
 export function toCaptureResult(capture) {
   if (!capture || typeof capture !== "object" || !Array.isArray(capture.exchanges)) {
     throw new Error("API_CAPTURE_INVALID: a capture needs exchanges");
   }
   const exchanges = [];
-  for (const [index, raw] of capture.exchanges.slice(0, MAX_EXCHANGES).entries()) {
+  for (const [index, raw] of keptExchanges(capture.exchanges)) {
     if (!raw?.request?.url || !raw.request.method) continue;
     const responseHeaders = lowerHeaders(raw.response?.headers);
     const body = typeof raw.response?.body === "string" ? raw.response.body.slice(0, MAX_BODY_CHARS) : undefined;

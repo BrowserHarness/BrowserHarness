@@ -536,3 +536,72 @@ test("loopback bridge reports remote_mode false", async () => {
     await env.bridge.close();
   }
 });
+
+test("a long learn gets its answer: learning and repair wait longer than an ordinary command (RC1 acceptance F4)", async () => {
+  const env = await start({ commandTimeoutMs: 150, longCommandTimeoutMs: 3000 });
+  const ws = new WebSocket(`ws://127.0.0.1:${env.port}/ws?token=${env.token}`);
+  try {
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    ws.send(JSON.stringify({ type: "hello", protocol_version: BRIDGE_PROTOCOL_VERSION, extension_id: "test-extension", extension_version: "0.2.0" }));
+    await waitForWsMessage(ws, (msg) => msg.type === "hello_ack");
+    // the extension answers after 400 ms, past the ordinary limit
+    ws.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type !== "command") return;
+      setTimeout(() => ws.send(JSON.stringify({ type: "result", id: msg.id, ok: true, data: { action: msg.action, learned: true } })), 400);
+    });
+    const send = (action, args) =>
+      fetch(`${env.base}/command`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.token}` },
+        body: JSON.stringify({ session: "test", action, args })
+      }).then((response) => response.json());
+    const learned = await send("site_skill", { action: "learn_api", name: "search" });
+    assert.equal(learned.ok, true, JSON.stringify(learned));
+    assert.equal(learned.data.learned, true);
+    const ran = await send("site_commands", { name: "search", args: "q=clap" });
+    assert.equal(ran.ok, true, JSON.stringify(ran));
+    const quick = await send("observe_page", {});
+    assert.equal(quick.ok, false);
+    assert.match(quick.error.message, /timed out/);
+  } finally {
+    ws.close();
+    await env.bridge.close();
+  }
+});
+
+test("a command's fields beside args are not dropped silently (RC1 acceptance F7)", async () => {
+  const env = await start();
+  const ws = new WebSocket(`ws://127.0.0.1:${env.port}/ws?token=${env.token}`);
+  try {
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    ws.send(JSON.stringify({ type: "hello", protocol_version: BRIDGE_PROTOCOL_VERSION, extension_id: "test-extension", extension_version: "0.2.0" }));
+    await waitForWsMessage(ws, (msg) => msg.type === "hello_ack");
+    ws.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === "command") ws.send(JSON.stringify({ type: "result", id: msg.id, ok: true, data: { args: msg.args } }));
+    });
+    const send = (body) =>
+      fetch(`${env.base}/command`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.token}` },
+        body: JSON.stringify({ session: "test", action: "site_commands", ...body })
+      }).then((response) => response.json());
+    // without args, the tool's fields may sit beside session and action
+    const flat = await send({ name: "search", parameters: { q: "clap" } });
+    assert.deepEqual(flat.data.args, { name: "search", parameters: { q: "clap" } });
+    // with args, a field outside it is an error, not a silent drop
+    const mixed = await send({ args: { name: "search" }, parameters: { q: "clap" } });
+    assert.equal(mixed.ok, false);
+    assert.match(mixed.error.message, /parameters.*inside args/);
+  } finally {
+    ws.close();
+    await env.bridge.close();
+  }
+});

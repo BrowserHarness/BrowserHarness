@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { createPairingManager, extensionIdFromOrigin } from "./pairing.mjs";
 import { apiErrorCode } from "./api-engine/service.mjs";
+import { isLongCommand } from "./command-timeouts.mjs";
 
 export const BRIDGE_PROTOCOL_VERSION = "0.1";
 
@@ -71,11 +72,18 @@ function normalizeCommand(body) {
   ) {
     throw new Error("args must be an object");
   }
+  // the tool's own fields go in args; without args they may sit beside
+  // session and action, but never both, so nothing is dropped unseen
+  const { session: _session, action: _action, title: _title, args, ...rest } = body;
+  const beside = Object.keys(rest);
+  if (args !== undefined && beside.length) {
+    throw new Error(`${beside.join(", ")} must go inside args`);
+  }
 
   return {
     session: body.session.trim(),
     action: body.action.trim(),
-    args: body.args || {},
+    args: args || rest,
     title:
       typeof body.title === "string" && body.title.trim()
         ? body.title.trim()
@@ -88,6 +96,7 @@ export function createBridgeServer({
   port = 10087,
   token,
   commandTimeoutMs = 30_000,
+  longCommandTimeoutMs = 300_000,
   mcpManager = null,
   apiEngine = null,
   llmManager = null,
@@ -443,7 +452,7 @@ export function createBridgeServer({
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error("Bridge command timed out"));
-      }, commandTimeoutMs);
+      }, isLongCommand(command) ? Math.max(longCommandTimeoutMs, commandTimeoutMs) : commandTimeoutMs);
 
       pending.set(id, { resolve, reject, timer });
       target.send(

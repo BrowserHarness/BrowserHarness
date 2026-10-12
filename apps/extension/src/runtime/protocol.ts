@@ -83,7 +83,7 @@ export type BrowserToolRequest = {
 
 export type WatchRequest =
   | { type: "WATCH_STATUS" }
-  | { type: "WATCH_START"; tab_id?: number }
+  | { type: "WATCH_START"; tab_id?: number; window_id?: number }
   | { type: "WATCH_STOP" }
   | {
       type: "WATCH_CAPTURE_STEP";
@@ -127,7 +127,7 @@ export type ChatNotify = {
 };
 
 export type ExtensionRequest =
-  | { type: "GET_CURRENT_TAB" }
+  | { type: "GET_CURRENT_TAB"; window_id?: number }
   | RemoteTaskResult
   | ChatNotify
   | BridgeLlmRequest

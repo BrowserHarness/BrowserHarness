@@ -149,6 +149,57 @@ describe("site_skill learn_api", () => {
   });
 });
 
+describe("site_skill learn_api: choosing the request (RC1 acceptance F6, F9)", () => {
+  const listed = [
+    { id: 3, request: "POST https://shop.example/api/panel", method: "POST", url: "https://shop.example/api/panel", carries: [], score: 900 },
+    { id: 4, request: "POST https://shop.example/api/playlist/edit", method: "POST", url: "https://shop.example/api/playlist/edit", carries: [], score: 700 }
+  ];
+
+  it("a refusal returns the requests to choose from, and pick_request is passed to the helper app", async () => {
+    const { deps: d, saved } = deps({
+      bridge: vi.fn(async () => ({ ok: false, error: { code: "API_LEARN_FAILED", message: "holds the live cookie", details: JSON.stringify(listed) } }))
+    });
+    const outcome = await learnApiOperation(d, input);
+    expect(outcome).toMatchObject({ ok: false, error: { code: "API_LEARN_FAILED" }, data: { candidates: listed } });
+    expect(saved).toHaveLength(0);
+    const picked = deps();
+    await learnApiOperation(picked.deps, { ...input, pick_request: listed[1].request });
+    expect(vi.mocked(picked.deps.bridge).mock.calls[0][1]).toMatchObject({ pick_request: "POST https://shop.example/api/playlist/edit" });
+  });
+
+  it("learns a page with no input (a signed-in list) from two plain runs and a picked request, checked live with no input", async () => {
+    const noInput = { name: "orders", page_url: "https://shop.example/account/orders" };
+    // without a pick, the page runs and the helper app's refusal lists its requests
+    const unpicked = deps({
+      bridge: vi.fn(async () => ({ ok: false, error: { code: "API_LEARN_PICK_REQUEST", message: "choose one with pick_request", details: JSON.stringify(listed) } }))
+    });
+    expect(await learnApiOperation(unpicked.deps, noInput as never)).toMatchObject({ ok: false, error: { code: "API_LEARN_PICK_REQUEST" }, data: { candidates: listed } });
+    expect(vi.mocked(unpicked.deps.bridge).mock.calls[0][1]).toMatchObject({ examples: [{}, {}] });
+    expect(unpicked.saved).toHaveLength(0);
+    const { deps: d } = deps();
+    const outcome = await learnApiOperation(d, { ...noInput, pick_request: "GET https://shop.example/api/my-orders" } as never);
+    expect(outcome.ok).toBe(true);
+    expect(d.runPage).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ examples: [{}, {}], pick_request: "GET https://shop.example/api/my-orders" });
+    expect(d.dispatch).toHaveBeenCalledWith(expect.anything(), {});
+  });
+
+  it("learns a checkbox write from Watch Me with a picked request, sending nothing", async () => {
+    const write = { ...searchContract(), side_effect: "write" as const, params: [], verification: { status: "unverified" as const, checks: [] } };
+    const box = { recording_id: "box", start_url: "https://shop.example/watch", capture: capture("https://shop.example/watch"), examples: {}, kept_at: 0 };
+    const { deps: d } = deps({
+      watchCapture: vi.fn(() => box),
+      forgetWatch: vi.fn(),
+      bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: [] } }))
+    });
+    const outcome = await learnApiOperation(d, { name: "watch_later", from_watch: ["box"], side_effect: "write", pick_request: 4 } as never);
+    expect(outcome.ok).toBe(true);
+    expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ examples: [{}], side_effect: "write", pick_request: 4 });
+    expect(d.dispatch).not.toHaveBeenCalled();
+    if (outcome.ok) expect(outcome.data.verification.status).toBe("unverified");
+  });
+});
+
 describe("site_skill learn_api from Watch Me", () => {
   function recording(id: string, search: string) {
     return {
@@ -173,8 +224,8 @@ describe("site_skill learn_api from Watch Me", () => {
     expect(payload.trigger).toBeUndefined();
     expect(payload.captures).toHaveLength(2);
     expect(d.dispatch).toHaveBeenCalledWith(expect.anything(), { search: "monitors" });
-    expect(d.forgetWatch).toHaveBeenCalledWith("a");
-    expect(d.forgetWatch).toHaveBeenCalledWith("b");
+    // RC2 N7: the captures stay for their 15 minutes, so another pick needs no new recording
+    expect(d.forgetWatch).not.toHaveBeenCalled();
   });
 
   it("learns a demonstrated write without sending it, keeping no typed values", async () => {

@@ -2,7 +2,108 @@
 
 Date: 2026-10-10. Scope: the six-PR plan from the master implementation brief ("Native API Learning, Hybrid Execution & Self-Healing Engine").
 
-**Status:** v1 is built and verified against local fixtures in real Chromium. It has **not** been accepted on any real website. That test is the release-candidate acceptance milestone at the end of this report and has not been performed.
+**Status:** v1 is built and verified against local fixtures in real Chromium. Release candidate 1 (`4e79b41`) went through real-site acceptance on 2026-10-10 and was **rejected** (2 of 8 scenarios passed). Release candidate 2 (`1f8eee4`) went through real-site acceptance on 2026-10-11 and was **rejected** (NO MERGE: 1 pass, 3 partial, 4 fail), though it fixed F4 to F9. Release candidate 3 (`58b154c`) went through real-site acceptance on 2026-10-11 and was **rejected** (NO MERGE: 2 pass, 2 partial, 4 fail). Release candidate 4 (`e9c1b73`) went through real-site acceptance on 2026-10-12 and was **rejected** (NO MERGE: 5 pass, 2 partial, 1 not run), though it confirmed every RC4 fix on the real sites. Release candidate 5 is a stabilization fix set for the defects found there, each reproduced first with a failing test, and adds an automated Watch Me acceptance run through the real side panel. RC5 has **not** been through real-site acceptance; every RC5 result below is from local fixtures (Node tests and real Chromium against local stand-in sites).
+
+## RC5: stabilization after the real-site acceptance of RC4
+
+RC4 acceptance (Windows 11, Chrome for Testing, the person's own sabpuja.com account, screen-recorded; `ACCEPTANCE-RESULTS-e9c1b73.md`) confirmed every RC4 fix on the real sites: signed-in Shopify reads, GBIF and Algolia at tier 3; a write asks every time with no "Always allow", also in automatic mode; Cancel closes the question; one approved Add to cart landed in the person's own cart and was reported as sent and not confirmed; promotion was refused. It found the defects below. Each was reproduced first with a failing test (`apps/bridge/test/api-engine-rc5.test.mjs`, `apps/extension/src/runtime/api-engine-rc5.test.ts`, `apps/extension/src/runtime/sensitive-input.test.ts`, and `scripts/e2e-watch-me.mjs` in real Chromium); the failing output before each fix is kept with the release notes.
+
+| # | What acceptance saw | Cause | Fix |
+|---|---|---|---|
+| P0 (R5-1) | The person's own Add to cart demonstration could not be learned on a tab in use for a while ("no captured request is POST …/cart/add.js") | The extension sent the tab's newest 500 requests, from its whole history; the Bridge kept the oldest 400, so the demonstrated request (the newest) was dropped | A Watch Me capture holds only the requests made since Record was pressed; both sides keep at most 400, the newest (and the latest page loads) |
+| P0 (R5-2) | Record recorded the account tab of the last command, not the product page the person was looking at | The panel sent the tab it had remembered when it opened (or a task last used) | Record asks for the tab in front in the panel's window at the moment it is pressed, and says which tab it is recording |
+| P0 (R5-5) | A recording started by an accidental click ran unnoticed through a sign-in and captured the email and the emailed code as typed steps | Only `type="password"` was excluded, and the only sign of recording was a small chip | In the page, before any value is read: passwords, one-time codes (`autocomplete="one-time-code"`, code-named fields), card secrets, and anything typed on a sign-in page or beside a password field are not recorded; the service worker drops such a step again; a recording's network capture drops sign-in requests and what a sign-in page sent. While recording: "REC" on the toolbar icon, a click-through note on every recorded page, and a red bar in the panel with Finish recording |
+| P1 (R5-3) | Signed out, account reads answered `unavailable` | The overall class was the last tier's (tier 2 "unavailable"), though tiers 3 and 1 saw the sign-in page | A sign-in any tier saw makes the failure `auth`; the panel says "you're not signed in to …, sign in, then run it again" |
+| P1 (R5-6) | After a tab closed, Record answered "No tab with id" until the panel was reloaded | The panel kept the tab it read when it opened | The panel follows tab activation, updates and closes, and Record no longer takes a remembered tab |
+| P2 (R5-4) | Coursera's `#Search` GraphQL query was classed `unknown` (a possible write) and needed approval | The class was read from the learned request, whose GraphQL document had been turned into a template; a POST without read evidence is never a read | The class is read from the request the page sent: a GraphQL document with only queries is a read whatever the method (also batched, the `{ … }` shorthand, fragments first); a mutation anywhere is a write; persisted queries go by the operation name's leading verb |
+
+**Automated Watch Me acceptance (`npm run smoke:watch-me`, part of `gate:api-engine`):** real Chromium with the built extension and Bridge, driving the person's real side panel. A product tab whose network was already recorded sends 480 analytics requests; a task then opens another tab; the person looks at the product tab and presses Record in the panel. It checks that the product tab is recorded, the REC badge, the page note and the panel bar; Add to cart is demonstrated and learned (named Akshat (Rice), nothing sent). A tab is opened and closed, and Record still records an open tab. On a sign-in page the person types an email, password, emailed code and name while recording and signs in: none of it is in the recording while it runs, in extension storage, in the Bridge's files, or in the network capture. A signed-in account read (token from the page's storage, as Shopify's) is learned and run, then run again signed out: `API_AUTH`, no data, and the panel says to sign in. Run against RC4's build it fails 13 of 26 checks, as the real run did ("no captured request is POST …/cart/add", the wrong tab recorded, the email and code captured, `API_UNAVAILABLE`); against RC5 it passes 26/26.
+
+**Local gate at RC5:** `npm run gate:api-engine` passed every step: vendor check, Bridge tests 144/144, extension tests 819/819, typecheck, build, Bridge bundle, MV3 contract, `smoke:api-engine` 48/48, `smoke:api-acceptance` 23/23, `smoke:watch-me` 26/26. Regression suites in real Chromium: `smoke:sites` 21/21, `smoke:bridge` 53/53, `smoke:memory` 31/31, `smoke:helpers` 11/11, `smoke:learning` 24/24, `smoke:e2e` 13/13, `smoke:agent` 13/13, `smoke:features` 18/18. None of these is a real-website test.
+
+**Not addressed in RC5 (stabilization only):** R5-7 (a learned write listed as "check failed" before any run), R5-8 (an Add to cart demonstration not marked a write without `side_effect: "write"`), R5-9 (an empty list shown as `[]`), and from RC3: the Shopify token at tiers 1 and 2 and the customer id in a reference name, Coursera's auto-pick and `IR_gbd` refusal and its `__typename` session references, "signed in" detected on public sites, GBIF's public key as a session value, the repair wording.
+
+## RC4 (rejected): fixes from the real-site acceptance of RC3
+
+RC3 acceptance (Windows 11, Chrome for Testing, the person's own accounts; full results and 57 sanitized diagnostics in `acceptance-58b154c/` on the test PC) passed crates.io search and profile isolation, kept every credential out of the Skills and left Hermes untouched. It found the defects below. Each was reproduced first with a failing test (`apps/bridge/test/api-engine-rc4.test.mjs`, `apps/extension/src/runtime/api-engine-rc4.test.ts`); the failing output before each fix is kept with the release notes.
+
+| # | What acceptance saw | Cause | Fix |
+|---|---|---|---|
+| P0 | Every signed-in Shopify read, GBIF and Algolia: tier 3 `endpoint_drift` | Tier 3 built the request expected for the inputs with an empty session that lacked `values`; any operation holding a non-cookie session value threw there and never matched | The expected request is built with an empty session of the right shape; a slot that mixes an input with a session value is matched on the input |
+| P0 | After "Always allow on this site", `/sabpuja-add-to-cart` ran without asking | The site grant (and automatic mode) answered every question on the site, writes included, and a write's question offered the grant | A learned write and a Site Skill submit ask before every run; no grant or automatic mode answers them; their question offers no "Always allow" |
+| P0 | `/sabpuja-add-to-cart` "filled the form without sending it" | Two causes. The side panel read the command's answer as a form's (an API write's answer has no `submitted`), and the page form of the same Skill could take the plain name | A learned write's answer says it sent the request and that the change is not confirmed; the learned operation takes the plain name and the form keeps `-form` |
+| P0 (found by the new automated run) | An approved add to cart answered 200 but the person's cart stayed empty | Tier 1 sent the write as plain HTTP without the browser's cart cookie: Shopify put the item in a new cart | A write never runs at tier 1; it starts at tier 2, from a page of the site with the browser's own cookies |
+| P1 | The prompt said "no item of its own" instead of naming Akshat (Rice) | Shopify sends Add to cart as `multipart/form-data`, which the target reader did not parse | Multipart fields are read (form bookkeeping skipped), and the learned answer's own name for the item is kept as `target.label` |
+| P1 | Cancel on the approval prompt did nothing | The panel never took the question away after an answer | The first answer, Cancel or Approve, closes the question |
+| P1 | A 429 during learning was not reported as rate limited | Only the first example's run was checked for obstacles | Both runs are checked: `API_LEARN_RATE_LIMITED` |
+| Found by the new automated run | A Shopify product form was listed as `/site-object-htmlselectelement` | The page reader used `form.id`, which the variant select named `id` shadows | Form id, name, action and method are read as attributes |
+
+**Automated acceptance (`npm run smoke:api-acceptance`, part of `gate:api-engine`):** real Chromium with the built extension and Bridge, driving the person's real side panel. It learns a Shopify-like product page (multipart Add to cart behind a cart cookie) from a Watch Me demonstration, checks that learning sends nothing and names Akshat (Rice), runs `/local-add-to-cart` from the chat box with a saved "Always allow" grant, Cancels (nothing sent), Approves (sent once, into the person's own cart, read back from the site), checks automatic mode still asks, and that promotion is refused; then learns and runs a signed-in search whose page sends a storage token and a one-time value a moment after it loads (tier 3). Run against RC3's build it fails as the real run did ("Filled the form on … without sending it", no question asked); against RC4 it passes 23/23.
+
+**Not addressed in RC4 (from the RC3 report; need the sanitized diagnostics to reproduce):** the Shopify customer token at tiers 1 and 2 and a session reference name containing the customer id; Coursera (`IR_gbd`, the Search pick refused as a private value, the auto-pick); "signed in" detected on public sites; GBIF's public dataset key treated as a session value; the repair message wording.
+
+## RC3 (rejected): fixes from the real-site acceptance of RC2
+
+
+RC2 acceptance (Windows 11, Chrome for Testing, the person's own accounts; full results in `ACCEPTANCE-RESULTS-1f8eee4.md` on the test PC) passed crates.io search and confirmed F4 to F9 fixed, Hermes untouched (`--no-agents`), no credential in any Skill, the visitor-id refusal, candidate isolation and the repair cooldown. It found the defects below. Each was reproduced first with a failing test (`apps/bridge/test/api-engine-rc3.test.mjs`, and extension tests named after them).
+
+| # | What acceptance saw | Cause | Fix |
+|---|---|---|---|
+| N1 (F3) | YouTube history (HTML) and an npm run answered `ok`, signed in and signed out | Learning refused a whole page, but a run judged it with upstream's classifier, which accepts any HTML for a page recipe with no selector | A read whose answer is a whole page is never `ok` at any tier: a sign-in page (sign-in form, login wording, a login address) is `auth`, anything else `unavailable` with "teach it again" |
+| N2 (F1) | Shopify add-to-cart refused as keeping a "session value" | Shopify keeps the product page's address in page storage; the referer and trigger hold it, so the secret scan refused the write | Page storage is filtered before learning: the site's domain, an address on the capture's hosts (with no token in it), a visited path, a GraphQL document or operation name are public. Tokens, visitor ids and random-looking values stay refused (tested) |
+| F1 | Coursera still refused (`IR_gbd`) | The same public values in page storage | The same filter |
+| N3 | `pick_request` picked Profile but learned payment methods or Orders | All of Shopify's customer GraphQL operations share one address; the string form ignored `operationName`; listed ids were capture positions, so they named another request on the next run | Requests are named `"POST https://host/path #Operation"` in listings and `pick_request`; ids are derived from that name and its occurrence, the same on every run; an Apollo-style cached query in storage is never a session value |
+| N4 | GBIF at tier 3: false `endpoint_drift` | The extension stopped at the first matching request (the page's default query without `q`) | The Bridge answers `awaiting_request` when the page's matching requests do not carry the inputs yet; the extension keeps watching (up to 15 s) for the next one |
+| N5 | HN Algolia at tier 3: false drift | Algolia moves a page between `APPID-dsn.algolia.net` and `APPID-N.algolianet.com` | Tier 3 recognises sibling hosts of one app id (letters and digits, a `-dsn`/`-N` suffix, the same domain stem). Only tier 3 uses it, to recognise the page's own request; nothing is sent to a sibling |
+| N6 | YouTube Watch Me search learned the suggestions request | The suggestions request carries the input too and came last | Among requests carrying every input, a suggestions/autocomplete request and a whole page lose to a data request |
+| N7 | A learn that did not verify forced a new recording | Watch Me captures were dropped after any learn | Captures stay their 15 minutes, so another `pick_request` needs no new recording |
+| N8, N9 | A 429, a bot check or a signed-out page during learning said only "learn failed" | Learning never classified what it met | `API_LEARN_RATE_LIMITED`, `API_LEARN_BLOCKED` and `API_LEARN_AUTH`, with `class` `rate_limited`, `blocked` and `auth` |
+| N10 | Shopify's token sign-in recorded `learned_logged_in: false` | Only cookies counted as a sign-in | An authorization header or credential-named value from storage counts too |
+| Low | Approval said "acts on 0 92313813308" | The target named the last path step, an array index | Each target field records its name (`id`) |
+| Low | Repair of a no-input read asked for examples | Repair needed two taught examples | A no-input read is repaired from two plain page runs with its own request (and GraphQL operation) as the pick; a read with inputs names the ones it needs |
+| Low | Empty candidate list said "choose one" | | Says the page made no data requests while watched |
+| Low | A failed run named only the last tier | | The error lists every tier tried with its class and reason |
+
+Not changed: the visitor-id refusal, approval before every write, no automatic resend, `sent: true` / `verification: "unverified"`, revision isolation and the repair cooldown.
+
+**RC3 automated results (local fixtures only):** `gate:api-engine` passed: Bridge 136/136, extension 796/796, typecheck, builds, MV3 contract, real-Chromium API engine 48/48. Smoke suites: sites 21/21, bridge 53/53, memory 31/31, helpers 11/11, learning 24/24, e2e 13/13, agent 13/13, features 18/18. Installer and Hermes isolation 8/8.
+
+**Still to run on real sites:** scenarios 2, 3, 5 (the whole write path: approval prompt naming the item, refusal on another item, one approved send, unverified blocks promotion), 7 and 8. Not covered by any RC3 change: Meetup has no results API (only autocomplete, correctly left unverified), and the tier-3 independent-header check still needs a suitable real site.
+
+## RC2: fixes from the real-site acceptance of RC1
+
+RC1 acceptance (Windows 11, Chrome for Testing, the person's own accounts) found nine defects (F1 to F9). Each was reproduced against the local fixture shop with a failing test before it was fixed. The fixes are one new stacked PR on top of #52.
+
+| # | What acceptance saw | Cause | Fix | Regression test |
+|---|---|---|---|---|
+| F1 | Coursera and Meetup refused: "header:referer holds the live cookie IR_gbd / _li_dcdm_c". | Tracking cookies whose whole value is the site's own domain; every address on the site "contains" them. | Before learning, a cookie whose value is a host of the capture (or a parent domain of one) is not treated as a credential. Real session cookies are still refused or referenced. | `api-engine-acceptance.test.mjs` F1 |
+| F2 | GBIF: `endpoint_drift` at learn, run and repair. YouTube Watch Me learned the autocomplete request. | Tier 3 required a header that echoes the page address to match character for character. When requests tied, the first was learned. | Tier 3 compares the input slots outside headers when there are any. When requests carry the inputs equally, the page's last one (the one the action produced) is learned, with a warning. | F2 header echo; F2 tie |
+| F3 | AniList and YouTube history learned the HTML document, counted it as 1 item and marked it verified. Signed out it still answered `ok`. | A raw page was judged like data. | A whole page answer (HTML with no extraction recipe) never passes `learned_examples` or the live check. When a page and a data request carry the inputs equally, the data request is learned. | F3 (two tests) |
+| F4 | Learns taking 33 to 39 s returned "Bridge command timed out" and the answer was lost. | One 30 s limit for every command. | Learning, repair, verify, Site Skill runs and Site Command runs wait up to 5 minutes, in the Bridge, the MCP client and the CLI. Ordinary commands keep 30 s. | `core.test.mjs` "a long learn gets its answer" |
+| F5 | AniList `learned_logged_in: true` while signed out. | Laravel's `laravel_session` (set for every visitor) matched the sign-in cookie pattern. | Framework sessions set for anonymous visitors (`laravel_session`, `ci_session`, `PHPSESSID`, `JSESSIONID`, `ASP.NET_SessionId`, `connect.sid`) are not a sign-in. This is a heuristic list. | F5 |
+| F6 | A signed-in list with no input (Shopify orders) and a checkbox write (Watch later) could not be learned. | Learning required typed inputs. | A page with no `{input}`, or a Watch Me recording that typed nothing, is learned from the request picked with `pick_request` (F9). A no-input read verifies only when a live call answers with real data (structured, at least one item). A write stays unverified, is never sent to check it, and asks before every run. | F6 (three tests); e2e "a page with no input lists its requests", "the picked no-input read verifies live" |
+| F7 | The run sheet said `entry_url`; Site Command answers had no tier; object `parameters` sent through raw `/command` were ignored. | Doc error; the answer dropped `run.output.api`; fields beside `args` in a `/command` body were dropped silently. | The run sheet says `page_url`. Site Command answers include `tier`, `class` and `item_count`. A `/command` body with no `args` takes the tool's fields from beside `session` and `action`; fields both beside and inside `args` are an error, never silently dropped. | `site-commands.test.ts`; `core.test.mjs` "fields beside args" |
+| F8 | An install into a redirected home still changed the real `%LOCALAPPDATA%\hermes\config.yaml` and its skill file. | `%LOCALAPPDATA%` (and `%APPDATA%`) were used even when outside the chosen home. An existing registration was repointed at the new Bridge. | Profile folders are used only when they are inside the chosen home. An agent already registered to another BrowserHarness Bridge is kept, with its skill file, unless `--replace-agents` is given. Every change also keeps `<file>.browserharness-previous`. | `install.test.mjs` "a second install in another home never touches the real Hermes" |
+| F9 | The refusal said "add --from <id> --pick-request <n>", which `site_skill learn_api` does not have. | Upstream's command-line hint passed through. | `site_skill learn_api` takes `pick_request`: `"METHOD https://host/path"` (the same on every run) or a request id in the capture. Every learning refusal lists the captured requests as `data.candidates`, with method, origin, path, status, content type, the input names each carries and a score. Values are never included. Upstream's command-line hints are rewritten. | F9 |
+
+**The visitor-id protection is unchanged.** Acceptance saw YouTube's `get_panel` refused because `x-goog-visitor-id` carries the visitor cookie. That refusal still fails closed, including when that request is picked by hand (F9 test, "choosing the panel request is still refused"). Picking only lets a person choose a different request. It never makes a refused one learnable.
+
+Hermes on the acceptance PC was restored by hand from its backup after acceptance, not by rerunning an installer. RC2's installer no longer touches it in that setup.
+
+### RC2 final: independent source review
+
+A source review of RC2 (`95b35db`) found two more problems. Both were reproduced first (Bridge tests failed; the real-Chromium e2e then found a third path, below), then fixed.
+
+| Problem | Fix | Regression test |
+|---|---|---|
+| Tier 3 set aside every header input whenever the path, query or body carried one, so a request whose body matched but whose independent header input (say a region) differed was accepted. | Only headers that mirror the page's address are set aside: `referer`, `origin`, or a header whose learned template is itself an address (GBIF's `x-gbif-site-url`). Every other input slot must hold exactly the value given. Every param must be proven by at least one slot; a param that only a page-address header carries must be named in that address (as a whole query value or path segment), else the request is rejected. | `api-engine-acceptance.test.mjs`: independent header differs (rejected), both match (accepted), two similar requests (the right one answers), page-address header differs (accepted, GBIF kept), wrong GraphQL variables (rejected), echo-only input names other values (rejected) |
+| A checkbox write learned with no input (Watch later) kept the video id from the demonstration, and nothing said so: run while viewing another video, it would act on the first one. | A learned write records its `target`. **Fixed**: no inputs; the identifying fields of its request (for example `addedVideoId jNQXAC9IVRw`) are listed in the Skill's details, the Site Command (`acts_on`) and the approval prompt, which says it acts on that item, not on the page being viewed. A fixed write given any value (another video) is refused before sending. **Parameter**: the item is an input (learned from an example), required on every run, and only the value given is sent; the demonstrated value is not kept. A write with no inputs and no recorded target (learned before RC2) is refused before sending: teach it again. | Bridge: fixed write refuses video B and sends A as learned; untargeted write refused; dynamic write sends only B. Extension: approval text; Site Command `acts_on`; runner refuses an unmapped value before calling. e2e: tick Watch later on video A, learn it, open video B: the prompt names A, an approved run with video B sends nothing, an approved run as learned sends A once and says sent, unverified |
+
+The e2e caught one more path the Bridge tests could not: the extension mapped run values to the contract's params and silently dropped any other, so an approved run "for video B" of the fixed write sent video A. A write now refuses any value it cannot take, before calling the helper app.
+
+Unchanged: the session-value refusal (YouTube's visitor id), approval before every write, no automatic resend, and `sent: true` with `verification: "unverified"` for a write the site accepted.
+
+Known limit: repair of a no-input operation needs the request picked again (`learn_api` with `pick_request`), because repair has no input to find the moved request by.
 
 ## Fixes after the independent review
 
@@ -160,18 +261,18 @@ After the review fixes the benchmark was run again with the same settings ([api-
 
 ## Test results at release
 
-All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. These counts are from the corrected integration head, after both reviews' fixes. `npm run gate:api-engine` passed every step:
+All runs were local, on approved development infrastructure. No GitHub Actions workflow was created or used. These counts are from the RC2 head, after both reviews' fixes and the RC1 acceptance fixes. `npm run gate:api-engine` passed every step:
 
 | Step | Result |
 |---|---|
 | vendor check | Passed |
-| Bridge tests | 102/102 |
-| Extension tests | 786/786 |
+| Bridge tests | 121/121 |
+| Extension tests | 791/791 |
 | Typecheck | Passed |
 | Build | Passed |
 | Bridge bundle | Passed |
 | MV3 contract | Passed |
-| `smoke:api-engine` (real Chromium, local fixture) | 39/39 |
+| `smoke:api-engine` (real Chromium, local fixture) | 48/48 |
 
 Regression suites for the areas the review named, also in real Chromium against local fixtures:
 
@@ -190,16 +291,16 @@ None of these is a real-website test.
 
 ## Limitations
 
-- No real-website acceptance yet (see below). Fixture success is not real-world success.
+- RC2 has had no real-website acceptance yet (see below). Fixture success is not real-world success.
 - **Downgrade:** an older extension cannot run a library that holds API Recipe v2 recipes. Delete those recipes before installing an older build.
 - **Helper app:** API recipes need the helper app (Bridge). Without it they answer `unavailable`, while form recipes keep working.
 - **Watch Me capture lifetime:** captures live in memory for 15 minutes and are lost if the service worker restarts.
 - **Repair scope:** repair re-learns from the operation's trigger page. A site that moved the feature to another page needs a person to teach it again.
 - **Response shape:** the engine extracts JSON (and upstream's supported formats). Responses whose data is only rendered as HTML are left to the existing page tools.
 
-## Real-browser acceptance still needed (release-candidate milestone)
+## Real-browser acceptance (release-candidate milestone)
 
-This should be done once, by a person, on the release-candidate build, in their own Chrome with their own accounts. None of it has been done.
+RC1 (`4e79b41`) was run through these eight scenarios on 2026-10-10: 1 and 4 passed, 6 and 8 partly passed, 2, 3, 5 and 7 failed (findings F1 to F9 above). RC2 needs the same run. It has not been done.
 
 1. **A public search:** learn a public site's search with `learn_api` from two examples. Confirm it verifies, then run it with a new term and compare the result with the page.
 2. **A signed-in read:** while signed in, learn a list such as orders or messages. Confirm:

@@ -74,7 +74,7 @@ describe("hybrid dispatch", () => {
 
   it("a write that reached the site is never sent again, whatever came back", async () => {
     for (const cls of ["ambiguous_write", "auth", "blocked", "network", "schema_drift"] as const) {
-      const { deps: d, run } = deps({ 1: answer(1, cls, { sent: true }), 2: answer(2, "ok") });
+      const { deps: d, run } = deps({ 2: answer(2, cls, { sent: true }), 3: answer(3, "ok") });
       const result = await dispatchApiOperation(d, write, {}, { approved: true });
       expect(result.ok).toBe(false);
       expect(run).toHaveBeenCalledTimes(1);
@@ -82,14 +82,14 @@ describe("hybrid dispatch", () => {
   });
 
   it("a write that nothing sent may go to the next tier once", async () => {
-    const { deps: d, run } = deps({ 1: answer(1, "unavailable", { sent: false }), 2: answer(2, "ok", { sent: true }) });
+    const { deps: d, run } = deps({ 2: answer(2, "unavailable", { sent: false }), 3: answer(3, "ok", { sent: true }) });
     const result = await dispatchApiOperation(d, write, {}, { approved: true });
-    expect(result).toMatchObject({ ok: true, tier: 2 });
+    expect(result).toMatchObject({ ok: true, tier: 3 });
     expect(run).toHaveBeenCalledTimes(2);
   });
 
   it("a transport that throws during a write counts as an ambiguous write", async () => {
-    const { deps: d, run } = deps({ 1: new Error("socket hang up"), 2: answer(2, "ok") });
+    const { deps: d, run } = deps({ 2: new Error("socket hang up"), 3: answer(3, "ok") });
     const result = await dispatchApiOperation(d, write, {}, { approved: true });
     expect(result).toMatchObject({ ok: false, class: "ambiguous_write", next: expect.stringMatching(/do not resend/) });
     expect(run).toHaveBeenCalledTimes(1);
@@ -97,7 +97,7 @@ describe("hybrid dispatch", () => {
   });
 
   it("a write without approval is refused by the first tier and goes no further", async () => {
-    const { deps: d, run } = deps({ 1: answer(1, "approval_required", { sent: false }) });
+    const { deps: d, run } = deps({ 2: answer(2, "approval_required", { sent: false }) });
     const result = await dispatchApiOperation(d, write, {});
     expect(result.class).toBe("approval_required");
     expect(run).toHaveBeenCalledTimes(1);

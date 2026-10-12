@@ -200,3 +200,41 @@ test("adds a browserharness-bridge command only when ~/.local/bin is on PATH", a
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("a second install in another home never touches the real Hermes, and never repoints an agent at another Bridge (RC1 acceptance F8)", async () => {
+  const real = await tempHome();
+  const candidate = await tempHome();
+  try {
+    // Windows: Hermes lives in %LOCALAPPDATA%, which a redirected HOME/USERPROFILE does not move
+    const localAppData = path.join(real, "AppData", "Local");
+    const hermes = path.join(localAppData, "hermes");
+    await mkdir(path.join(hermes, "skills", "browserharness"), { recursive: true });
+    const realConfig = "model: hermes-4\nmcp_servers:\n  github:\n    command: gh\n";
+    await writeFile(path.join(hermes, "config.yaml"), realConfig);
+    await writeFile(path.join(hermes, "skills", "browserharness", "SKILL.md"), `the person's own copy ${SKILL_MARKER}\n`);
+    const { ctx } = ctxFor(candidate, { platform: "win32", env: { PATH: "", LOCALAPPDATA: localAppData, APPDATA: path.join(real, "AppData", "Roaming") }, which: (name) => (name === "hermes" ? "C:\\hermes.exe" : null) });
+    await registerAgents(ctx, { only: ["hermes"] });
+    assert.equal(await read(path.join(hermes, "config.yaml")), realConfig, "the real Hermes config is unchanged");
+    assert.match(await read(path.join(hermes, "skills", "browserharness", "SKILL.md")), /the person's own copy/);
+    assert.ok(!serviceDefinition(ctx).file.startsWith(real), "the login item stays in the chosen home too");
+
+    // the real install: Hermes already uses the person's Bridge
+    const realCtx = ctxFor(real, { platform: "win32", env: { PATH: "", LOCALAPPDATA: localAppData }, cliPath: "C:\\Users\\Neo\\.browserharness-bridge\\bin\\browserharness-bridge.mjs" }).ctx;
+    await registerAgents(realCtx, { only: ["hermes"] });
+    const registered = await read(path.join(hermes, "config.yaml"));
+    assert.match(registered, /\.browserharness-bridge\\\\bin/);
+    // another Bridge installed into the same home keeps that registration and says so
+    const other = ctxFor(real, { platform: "win32", env: { PATH: "", LOCALAPPDATA: localAppData }, cliPath: "C:\\acceptance\\bridge\\browserharness-bridge.mjs" }).ctx;
+    const [result] = (await registerAgents(other, { only: ["hermes"] })).filter((item) => item.id === "hermes");
+    assert.equal(result.status, "kept");
+    assert.match(result.note, /already uses the Bridge at/);
+    assert.equal(await read(path.join(hermes, "config.yaml")), registered);
+    // asked for explicitly, it does repoint, with the previous file kept beside it
+    await registerAgents({ ...other, replaceAgents: true }, { only: ["hermes"] });
+    assert.match(await read(path.join(hermes, "config.yaml")), /acceptance/);
+    assert.equal(await read(path.join(hermes, "config.yaml.browserharness-previous")), registered);
+  } finally {
+    await rm(real, { recursive: true, force: true });
+    await rm(candidate, { recursive: true, force: true });
+  }
+});

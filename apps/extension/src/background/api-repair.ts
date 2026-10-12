@@ -169,14 +169,17 @@ async function reservedRepair(
     };
   }
   const taught = taughtInputs(contract);
-  const examples = input.examples?.length === 2 ? input.examples : taught?.learning.length === 2 ? taught.learning : undefined;
-  const verifyArgs = input.verify_args || taught?.unseen;
+  // an operation with no inputs (a signed-in list) is learned again from two plain runs of its page
+  const noInputs = !contract.params.length;
+  const examples = input.examples?.length === 2 ? input.examples : taught?.learning.length === 2 ? taught.learning : noInputs ? [{}, {}] : undefined;
+  const verifyArgs = input.verify_args || taught?.unseen || (noInputs ? {} : undefined);
   if (!examples || !verifyArgs) {
+    const names = contract.params.map((param) => param.name).join(", ");
     return {
       ok: false,
       error: {
         code: "API_REPAIR_INPUT",
-        message: `Give two example inputs and a third one to check with (examples, verify_args): ${contract.name} keeps no taught inputs.`
+        message: `${contract.name} kept no taught values for ${names}: give two example values (examples, like [{"${contract.params[0]?.name}": "…"}, {…}]) and a third to check with (verify_args).`
       }
     };
   }
@@ -190,6 +193,8 @@ async function reservedRepair(
     id: input.skill_id,
     ...(contract.description ? { description: contract.description } : {}),
     source: "repair",
+    // with nothing typed, the request is named: the one the operation sends (its GraphQL operation too)
+    ...(noInputs ? { pick_request: requestNameOf(contract) } : {}),
     parent_operation_id: contract.operation_id,
     replace_recipe_id: input.recipe_id
   });
@@ -210,6 +215,13 @@ async function reservedRepair(
         : "The repair did not verify; it is saved as a candidate for inspection and will not be promoted."
     }
   };
+}
+
+/** "METHOD https://host/path #Operation": the request an operation sends, as pick_request names it. */
+export function requestNameOf(contract: ApiOperationContract): string {
+  const url = new URL(contract.request.url);
+  const operation = contract.match?.operationName;
+  return `${contract.request.method.toUpperCase()} ${url.origin}${url.pathname}${operation ? ` #${operation}` : ""}`;
 }
 
 /** What to do next after a failed run, by class. */

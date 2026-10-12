@@ -106,12 +106,14 @@ import {
   keepWatchCapture,
   noteWatchStart,
   takeWatchStart,
+  withoutSignIn,
   watchCapture,
   watchCaptureSummary
 } from "./api-watch";
+import { isSensitiveStep } from "../runtime/sensitive-input";
 import { checkApiHealth, nextForClass, repairApiOperation, type RepairLedger } from "./api-repair";
 import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
-import { apiRecipeNeedsApproval, apiRunRecord, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
+import { apiRecipeNeedsApproval, apiRunRecord, apiWriteApprovalMessage, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
   runSiteSkillRecipe,
@@ -431,11 +433,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   });
 });
 
-async function activeTab() {
-  const [tab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
+async function activeTab(windowId?: number) {
+  const [tab] = await chrome.tabs.query(
+    typeof windowId === "number" ? { active: true, windowId } : { active: true, currentWindow: true }
+  );
   if (!tab?.id) throw new Error("No active tab");
   return tab;
 }
@@ -445,10 +446,10 @@ async function activeTab() {
  * it is in front, tasks work in the web page the person used last (or a new
  * tab), never in the chat itself.
  */
-async function activeWebTab(openIfNone: boolean): Promise<chrome.tabs.Tab | null> {
-  const tab = await activeTab();
+async function activeWebTab(openIfNone: boolean, windowId?: number): Promise<chrome.tabs.Tab | null> {
+  const tab = await activeTab(windowId);
   if (!tab.url?.startsWith(chrome.runtime.getURL(""))) return tab;
-  const [recent] = (await chrome.tabs.query({ currentWindow: true }))
+  const [recent] = (await chrome.tabs.query(typeof windowId === "number" ? { windowId } : { currentWindow: true }))
     .filter((item) => item.id !== tab.id && isInjectableUrl(item.url))
     .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
   if (recent?.id) return recent;
@@ -546,7 +547,9 @@ async function finishWatchApiCapture(
         return false;
       }
     });
-    const capture = await collectApiCapture(started.tab_id, finalUrl, [located || finalUrl]);
+    // only what the demonstration did since Record (not the tab's earlier
+    // traffic), and nothing a sign-in step sent
+    const capture = withoutSignIn(await collectApiCapture(started.tab_id, finalUrl, [located || finalUrl], { since: started.started_at }));
     return watchCaptureSummary(keepWatchCapture({ recording_id: recordingId, start_url: startUrl, capture, examples }));
   } catch {
     return undefined;
@@ -672,7 +675,10 @@ async function runApiOperationRecipe(
       data: { revision_id: revision.revision_id },
       error: {
         code: "APPROVAL_REQUIRED",
-        message: `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}${step && step.kind === "api_operation" && step.contract.origin !== existing.site.origin ? ` (it sends to ${new URL(step.contract.origin).hostname})` : ""}? It may change data there (${step && step.kind === "api_operation" ? step.contract.side_effect_basis : "not known to be read-only"}).`
+        message:
+          step && step.kind === "api_operation"
+            ? apiWriteApprovalMessage(existing.name, existing.site.origin, step.contract, recipe.name)
+            : `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}? It may change data there (not known to be read-only).`
       }
     };
   }
@@ -3575,6 +3581,17 @@ async function handleBridgeCommand(
   return page.ok && page.data ? { ...result, page: page.data as PageObservation } : result;
 }
 
+/** "REC" on the toolbar icon in every window while Watch Me records. */
+async function showRecordingBadge(on: boolean): Promise<void> {
+  await chrome.action.setBadgeText({ text: on ? "REC" : "" }).catch(() => undefined);
+  if (on) await chrome.action.setBadgeBackgroundColor({ color: "#c62828" }).catch(() => undefined);
+}
+
+// a recording outlives a service worker restart: so does its badge
+void getWatchRecording()
+  .then((active) => showRecordingBadge(Boolean(active)))
+  .catch(() => undefined);
+
 async function armWatchTab(tabId: number): Promise<ToolResult> {
   return sendToTab(tabId, { type: "WATCH_ARM" });
 }
@@ -3705,7 +3722,8 @@ chrome.runtime.onMessage.addListener(
         }
 
         if (request.type === "GET_CURRENT_TAB") {
-          const tab = (await activeWebTab(false)) ?? (await activeTab());
+          const windowId = typeof request.window_id === "number" ? request.window_id : undefined;
+          const tab = (await activeWebTab(false, windowId)) ?? (await activeTab(windowId));
           sendResponse({
             ok: true,
             data: {
@@ -3766,11 +3784,22 @@ chrome.runtime.onMessage.addListener(
         }
 
         if (request.type === "WATCH_START") {
-          const resolved = await targetTab(
+          // the panel's Record button records the page in front of the
+          // person in its window, never a tab remembered from a task (RC4)
+          const resolved =
             typeof request.tab_id === "number"
-              ? { tab_id: request.tab_id }
-              : {}
-          );
+              ? await targetTab({ tab_id: request.tab_id })
+              : { tab: await activeWebTab(false, typeof request.window_id === "number" ? request.window_id : undefined) };
+          if (!resolved.tab?.id || !isInjectableUrl(resolved.tab.url)) {
+            sendResponse({
+              ok: false,
+              error: {
+                code: "WATCH_TAB_REQUIRED",
+                message: "Open the webpage you want to show me, then press Record."
+              }
+            });
+            return;
+          }
 
           const session = await startWatchRecording(resolved.tab);
           const armed = await armWatchTab(resolved.tab.id!);
@@ -3781,6 +3810,7 @@ chrome.runtime.onMessage.addListener(
             return;
           }
           await beginWatchApiCapture(session.id, resolved.tab.id!);
+          await showRecordingBadge(true);
 
           sendResponse({
             ok: true,
@@ -3788,7 +3818,8 @@ chrome.runtime.onMessage.addListener(
               recording: true,
               recording_id: session.id,
               root_tab_id: session.root_tab_id,
-              start_url: session.start_url
+              start_url: session.start_url,
+              title: resolved.tab.title || ""
             }
           });
           return;
@@ -3808,6 +3839,11 @@ chrome.runtime.onMessage.addListener(
             return;
           }
 
+          // never keep what was typed into a password, a code or a sign-in step
+          if (isSensitiveStep(request.step)) {
+            sendResponse({ ok: true, data: { accepted: false } });
+            return;
+          }
           const captured = await appendWatchStep(
             tabId,
             request.step
@@ -3855,6 +3891,7 @@ chrome.runtime.onMessage.addListener(
           await new Promise((resolve) => setTimeout(resolve, 25));
 
           const completed = await stopWatchRecording();
+          await showRecordingBadge(false);
           if (!completed) {
             sendResponse({
               ok: false,
