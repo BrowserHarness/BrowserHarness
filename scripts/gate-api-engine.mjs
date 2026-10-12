@@ -20,16 +20,17 @@ const steps = [
   ["Bridge bundle", npm, ["run", "build:bridge"]],
   ["MV3 contract", npm, ["run", "validate:mvp"]],
   ["real-Chromium API engine test (local fixture)", npm, ["run", "smoke:api-engine"]],
-  ["real-Chromium acceptance: learn, run, approve in the side panel, verify", npm, ["run", "smoke:api-acceptance"]]
+  ["real-Chromium acceptance: learn, run, approve in the side panel, verify", npm, ["run", "smoke:api-acceptance"]],
+  ["real-Chromium acceptance: Watch Me from the side panel, sign-in privacy, signed out", npm, ["run", "smoke:watch-me"]]
 ];
-if (process.argv.includes("--quick")) steps.splice(steps.length - 2, 2);
+if (process.argv.includes("--quick")) steps.splice(steps.length - 3, 3);
 
 for (const [name, cmd, args] of steps) {
   const started = Date.now();
   const run = spawnSync(cmd, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const output = `${run.stdout || ""}${run.stderr || ""}`;
-  const counts = output.match(/# pass \d+|Tests\s+\d+ passed[^\n]*|\d+\/\d+ API (?:engine|acceptance) checks passed/g);
+  const counts = output.match(/# pass \d+|Tests\s+\d+ passed[^\n]*|\d+\/\d+ (?:API engine|API acceptance|Watch Me acceptance) checks passed/g);
   if (run.status !== 0) {
     console.log(`FAIL ${name} (${seconds} s)`);
     console.log(output.split("\n").slice(-40).join("\n"));

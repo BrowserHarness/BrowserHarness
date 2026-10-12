@@ -101,7 +101,24 @@ export async function dispatchApiOperation(
       attempts
     };
   }
-  return { ...last, attempts };
+  return { ...overallFailure(last, attempts), attempts };
+}
+
+/**
+ * The class a failed run reports. It is the last tier's, except that a sign-in
+ * any tier saw outranks a later tier that only lacked a value (RC4: signed
+ * out, tiers 3 and 1 saw the sign-in page and tier 2 said "unavailable").
+ */
+export function overallFailure<T extends ApiCallResult>(last: T, attempts: ApiAttempt[]): T {
+  if (last.class !== "unavailable" && last.class !== "network") return last;
+  const signIn = attempts.find((attempt) => attempt.class === "auth");
+  if (!signIn) return last;
+  return {
+    ...last,
+    class: "auth",
+    reason: signIn.reason || "the site wants you signed in",
+    next: "sign in to the site in this browser, then run it again"
+  };
 }
 
 const KEY = "browserharness.apiTransport.v1";

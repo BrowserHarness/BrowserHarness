@@ -29,6 +29,8 @@ export interface ApiCapture {
 }
 
 const DATA_TYPES = new Set(["document", "xhr", "fetch", "other"]);
+/** The most exchanges one capture sends; the Bridge keeps as many (its MAX_EXCHANGES). */
+export const MAX_CAPTURE_EXCHANGES = 400;
 const MAX_BODY = 2_000_000;
 const MAX_BODIES = 120;
 const TEXT_TYPE = /json|text|javascript|xml|html|graphql|x-www-form-urlencoded/i;
@@ -138,28 +140,41 @@ export function cookieOrigins(pageUrl: string, records: Array<{ url: string }>):
   return origins.slice(0, 20);
 }
 
+/**
+ * The records a capture holds: only those made since `since` (a Watch Me
+ * recording's start; RC4: a long-used tab's earlier traffic crowded out the
+ * demonstrated request), and at most MAX_CAPTURE_EXCHANGES, the newest.
+ */
+export function captureRecords(records: NetworkRecord[], since?: number): NetworkRecord[] {
+  const recent = typeof since === "number" ? records.filter((record) => record.started_at >= since) : records;
+  return recent.slice(-MAX_CAPTURE_EXCHANGES);
+}
+
 /** Reads the run's capture from the tab's active network capture. */
-export async function collectApiCapture(tabId: number, finalUrl: string, locations: string[] = []): Promise<ApiCapture> {
-  const records = listNetworkRecords(tabId, 500);
-  const exchanges: ApiCaptureExchange[] = [];
-  let bodies = 0;
-  for (const [index, record] of records.entries()) {
-    let body: string | undefined;
+export async function collectApiCapture(
+  tabId: number,
+  finalUrl: string,
+  locations: string[] = [],
+  { since }: { since?: number } = {}
+): Promise<ApiCapture> {
+  const records = captureRecords(listNetworkRecords(tabId, 500), since);
+  const bodies = new Map<string, string | undefined>();
+  // response bodies for the newest data requests first: they are what the run did
+  for (const record of [...records].reverse()) {
+    if (bodies.size >= MAX_BODIES) break;
     const wanted =
       DATA_TYPES.has(record.resource_type || "other") &&
       record.finished_at &&
       !record.error_text &&
-      TEXT_TYPE.test(record.mime_type || "") &&
-      bodies < MAX_BODIES;
-    if (wanted) {
-      bodies += 1;
-      const detail = await networkRecordDetail(tabId, record.request_id, true).catch(() => undefined);
-      if (typeof detail?.body === "string") {
-        body = detail.base64_encoded ? decodeBase64Text(detail.body) : detail.body;
-      }
-    }
-    exchanges.push(exchangeFrom(record, index, body));
+      TEXT_TYPE.test(record.mime_type || "");
+    if (!wanted) continue;
+    const detail = await networkRecordDetail(tabId, record.request_id, true).catch(() => undefined);
+    bodies.set(
+      record.request_id,
+      typeof detail?.body === "string" ? (detail.base64_encoded ? decodeBase64Text(detail.body) : detail.body) : undefined
+    );
   }
+  const exchanges = records.map((record, index) => exchangeFrom(record, index, bodies.get(record.request_id)));
   const origins = cookieOrigins(finalUrl, records);
   const cookieReply = await cdpCommand<{ cookies?: Array<Record<string, unknown>> }>(tabId, "Network.getCookies", { urls: origins.length ? origins : [finalUrl] }).catch(() => ({ cookies: [] }));
   const cookies = (cookieReply.cookies || [])

@@ -51,6 +51,9 @@ export function siteCommandAnswer(command: SiteCommand, result: ToolResult<unkno
     const drifted = /no longer matches|SITE_SKILL_VERIFICATION_FAILED|ORIGIN_MISMATCH/i.test(
       `${result.error?.code} ${message}`
     );
+    if (/^API_AUTH\b/.test(`${result.error?.code}`) || /^API_AUTH:/.test(message)) {
+      return `/${command.name} didn't run: you're not signed in to ${command.site}, so it returned no data. Sign in to ${command.site} in this browser, then run it again.`;
+    }
     return drifted
       ? `/${command.name} didn't run: ${command.site} has changed since BrowserHarness learned it. Ask me to learn the site again, or do the task normally.`
       : `/${command.name} didn't run: ${message}`;

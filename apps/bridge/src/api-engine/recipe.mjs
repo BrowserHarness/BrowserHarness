@@ -140,10 +140,68 @@ const WRITE_PATH =
   /(^|[/_.-])(add|create|delete|remove|destroy|update|edit|save|submit|post|send|vote|upvote|downvote|like|unlike|follow|unfollow|subscribe|unsubscribe|purchase|buy|checkout|order|pay|cart|logout|signout|sign-out|register|signup|comment|reply|share|invite|transfer|cancel|book|reserve|archive|mute|block|report)([/_.-]|$)/i;
 const READ_PATH = /(^|[/_.-])(search|query|find|list|lookup|get|fetch|read|autocomplete|suggest|typeahead|browse|filter|results?|feed|details?|info|view)([/_.-]|$)/i;
 
+/** The GraphQL documents and operation names a request carries (JSON body, batched array, or URL). */
+export function graphqlOf(request) {
+  const documents = [];
+  const names = [];
+  const body = typeof request.body === "string" ? request.body : "";
+  let parsed;
+  try {
+    parsed = body ? JSON.parse(body) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  for (const item of Array.isArray(parsed) ? parsed : parsed ? [parsed] : []) {
+    if (!item || typeof item !== "object") continue;
+    if (typeof item.query === "string") documents.push(item.query);
+    if (typeof item.operationName === "string") names.push(item.operationName);
+  }
+  if (!parsed && /^\s*(query|mutation|subscription|fragment|\{)/.test(body)) documents.push(body);
+  try {
+    const url = new URL(request.url);
+    for (const key of ["query"]) {
+      const value = url.searchParams.get(key);
+      if (value && /^\s*(query|mutation|fragment|\{)/.test(value)) documents.push(value);
+    }
+    for (const key of ["operationName", "opname", "operation"]) {
+      const value = url.searchParams.get(key);
+      if (value) names.push(value);
+    }
+  } catch {
+    // no address to read
+  }
+  const headers = request.headers || {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (/^(x-apollo-)?operation-?name$/i.test(key) && typeof value === "string" && value) names.push(value);
+  }
+  return { documents, names };
+}
+
+/**
+ * The kind of a GraphQL document: "mutation" if it defines one anywhere,
+ * "query" if it defines only queries (or is the `{ … }` shorthand). Fragments
+ * alone say nothing.
+ */
+export function graphqlKind(document) {
+  const text = document.replace(/#[^\n]*/g, "").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  if (/(^|[\s}])(mutation|subscription)\s*[A-Za-z_({@]/.test(text)) return "mutation";
+  if (/(^|[\s}])query\s*[A-Za-z_({@]/.test(text) || /^\s*\{/.test(text)) return "query";
+  return undefined;
+}
+
+// an operation name's leading verb (createOrder, AddToCart; not AddressLookup)
+const GQL_WRITE_VERB = /^(create|delete|remove|update|add|set|save|submit|send|post|upsert|insert|edit|cancel|checkout|pay|purchase|follow|unfollow|like|unlike|vote|subscribe|unsubscribe|login|logout|register)(?=[A-Z_0-9]|$)/;
+const GQL_READ_VERB = /^(search|query|get|list|fetch|find|lookup|load|read|browse|autocomplete|suggest)(?=[A-Z_0-9]|$)|(Search|Query|List|Lookup|Details?|Info)$/;
+const verbOf = (name) => name.charAt(0).toLowerCase() + name.slice(1);
+const writeName = (name) => /mutation/i.test(name) || GQL_WRITE_VERB.test(verbOf(name));
+const readName = (name) => GQL_READ_VERB.test(verbOf(name)) || GQL_READ_VERB.test(name);
+
 /**
  * Conservative side-effect class from evidence, never from the method alone.
  * A GET to an action-looking path is unknown; a POST is read only with a
- * GraphQL query, a search-like path, or a person's say-so.
+ * GraphQL query, a search-like path, or a person's say-so. `request` is the
+ * request as the page sent it: a learned request's own body can have had its
+ * GraphQL document turned into a template.
  */
 export function classifySideEffect(request, { operationName, declared } = {}) {
   if (declared === "write") return { side_effect: "write", basis: "declared a write by the person" };
@@ -156,8 +214,10 @@ export function classifySideEffect(request, { operationName, declared } = {}) {
     pathname = "";
   }
   const body = typeof request.body === "string" ? request.body : "";
-  const gql = /"query"\s*:\s*"\s*(query|mutation|subscription)\b/.exec(body)?.[1] || /^\s*(query|mutation)\b/.exec(body)?.[1];
-  if (gql === "mutation" || /mutation/i.test(operationName || "") || /"operationName"\s*:\s*"[^"]*(Create|Delete|Update|Add|Remove|Mutation)/.test(body)) {
+  const graphql = graphqlOf(request);
+  const names = [...new Set([...(operationName ? [operationName] : []), ...graphql.names])];
+  const kinds = graphql.documents.map(graphqlKind).filter(Boolean);
+  if (kinds.includes("mutation") || names.some(writeName)) {
     return { side_effect: "write", basis: "GraphQL mutation" };
   }
   if (method === "GET" || method === "HEAD") {
@@ -165,12 +225,15 @@ export function classifySideEffect(request, { operationName, declared } = {}) {
     return { side_effect: "read", basis: `${method} without an action-looking path` };
   }
   if (method === "POST") {
-    if (gql === "query") return { side_effect: "read", basis: "GraphQL query" };
+    // the method says nothing for GraphQL: every operation is a POST
+    if (kinds.length && kinds.every((kind) => kind === "query")) {
+      return { side_effect: "read", basis: `GraphQL query${names[0] ? ` ${names[0]}` : ""}` };
+    }
     if (READ_PATH.test(pathname) && !WRITE_PATH.test(pathname)) {
       return { side_effect: "read", basis: `POST to a search-like path ${pathname}` };
     }
-    if (/persistedQuery/.test(body) && /(Search|Query|Get|List|Fetch)/.test(operationName || "")) {
-      return { side_effect: "read", basis: `persisted GraphQL ${operationName}` };
+    if (/persistedQuery/.test(body) && names.some(readName)) {
+      return { side_effect: "read", basis: `persisted GraphQL ${names.find(readName)}` };
     }
   }
   return { side_effect: "unknown", basis: `${method} ${pathname || "request"} without read evidence` };
@@ -219,7 +282,7 @@ function withoutPrivateValues(request, slots, params, privateParams = []) {
 
 export function contractFromOperation(operation, meta) {
   const origin = new URL(operation.request.url).origin;
-  const classified = classifySideEffect(operation.request, {
+  const classified = classifySideEffect(meta.observed_request || operation.request, {
     operationName: operation.match?.operationName,
     declared: meta.side_effect
   });

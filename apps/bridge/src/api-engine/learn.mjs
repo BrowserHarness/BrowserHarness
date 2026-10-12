@@ -604,11 +604,12 @@ export function learnApiOperation(input) {
   const declared = input.side_effect === "read" || input.side_effect === "write" ? input.side_effect : undefined;
   // what a person typed into anything not proven to be a read is theirs (a
   // message, a name, an address): keep none of it, whatever the caller listed
-  const sideEffect = classifySideEffect(learned.operation.request, { operationName: learned.operation.match?.operationName, declared }).side_effect;
+  const sideEffect = classifySideEffect(learned.exchange?.request || learned.operation.request, { operationName: learned.operation.match?.operationName, declared }).side_effect;
   const givenPrivate = Array.isArray(input.private_params) ? input.private_params.map(String) : [];
   const privateParams = sideEffect === "read" ? givenPrivate : [...new Set([...givenPrivate, ...Object.keys(args1), ...learned.operation.params.map((param) => param.name)])];
   const contract = contractFromOperation(learned.operation, {
     side_effect: declared,
+    observed_request: learned.exchange?.request,
     description: typeof input.description === "string" ? input.description.slice(0, 500) : undefined,
     private_params: privateParams,
     source: input.source === "repair" || input.source === "watch_me" || input.source === "network_capture" ? input.source : "two_example_learning",

@@ -6,6 +6,7 @@
 // and page storage, and it is dropped once it is learned from or expires.
 import type { ApiCapture } from "./api-capture";
 import { inferWorkflowInputs, type RecordedWorkflowStep } from "../runtime/workflows";
+import { isSignInPage } from "../runtime/sensitive-input";
 
 export const WATCH_CAPTURE_TTL_MS = 15 * 60 * 1000;
 
@@ -18,7 +19,7 @@ export interface WatchApiCapture {
   kept_at: number;
 }
 
-const pending = new Map<string, { tab_id: number; started_capture: boolean }>();
+const pending = new Map<string, { tab_id: number; started_capture: boolean; started_at: number }>();
 const kept = new Map<string, WatchApiCapture>();
 
 const SECRET_FIELD = /pass(word|code)?|secret|otp|one.?time|verification.?code|auth.?code|2fa|mfa|\bpin\b|cvv|cvc|card.?(number|no)|security.?code|token|ssn/i;
@@ -38,12 +39,28 @@ export function examplesFromSteps(steps: RecordedWorkflowStep[]): Record<string,
   return out;
 }
 
-export function noteWatchStart(recordingId: string, tabId: number, startedCapture: boolean): void {
-  pending.set(recordingId, { tab_id: tabId, started_capture: startedCapture });
+/**
+ * A demonstration's capture without anything a sign-in step sent or loaded:
+ * a sign-in form's request carries the email, password or code the page
+ * keeps out of the recording, so the capture keeps it out too.
+ */
+export function withoutSignIn(capture: ApiCapture): ApiCapture {
+  const referer = (headers: Record<string, string>) =>
+    Object.entries(headers).find(([key]) => key.toLowerCase() === "referer")?.[1];
+  return {
+    ...capture,
+    exchanges: capture.exchanges.filter(
+      (exchange) => !isSignInPage(exchange.request.url) && !isSignInPage(referer(exchange.request.headers || {}))
+    )
+  };
 }
 
-/** The tab a recording captured, and whether the capture was started for it. */
-export function takeWatchStart(recordingId: string): { tab_id: number; started_capture: boolean } | undefined {
+export function noteWatchStart(recordingId: string, tabId: number, startedCapture: boolean, startedAt = Date.now()): void {
+  pending.set(recordingId, { tab_id: tabId, started_capture: startedCapture, started_at: startedAt });
+}
+
+/** The tab a recording captured, when it started, and whether the capture was started for it. */
+export function takeWatchStart(recordingId: string): { tab_id: number; started_capture: boolean; started_at: number } | undefined {
   const value = pending.get(recordingId);
   pending.delete(recordingId);
   return value;

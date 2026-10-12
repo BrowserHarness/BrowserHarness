@@ -272,6 +272,15 @@ function fromStored(message: ChatMessage): Message {
 
 const now = () => new Date().toISOString();
 
+/** The window this panel (or the full-page chat) is in. */
+async function panelWindowId(): Promise<number | undefined> {
+  try {
+    return (await chrome.windows.getCurrent()).id;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The chat. In the side panel the menu of chats and Spaces slides in from the
  * left; as a full page (chat.html) it stays open on the left, like Claude and
@@ -309,6 +318,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [recordingTitle, setRecordingTitle] = useState("");
   const [lastWorkflow, setLastWorkflow] = useState<SavedWorkflow | null>(null);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
@@ -388,7 +398,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       fallbackConnection,
       watchStatus
     ] = await Promise.all([
-      extensionMessage<CurrentTab>({ type: "GET_CURRENT_TAB" }),
+      extensionMessage<CurrentTab>({ type: "GET_CURRENT_TAB", window_id: await panelWindowId() }),
       loadActiveConnection(),
       loadFallbackConnection(),
       extensionMessage<{ recording: boolean }>({
@@ -407,6 +417,28 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
   useEffect(() => {
     void refreshContext();
   }, [view]);
+
+  // the tab chip and the Record button follow the tab in front: a closed or
+  // switched-away tab is never kept (RC4: "No tab with id" until a reload)
+  useEffect(() => {
+    const refreshTab = async () => {
+      const current = await extensionMessage<CurrentTab>({ type: "GET_CURRENT_TAB", window_id: await panelWindowId() });
+      setTab(current.ok && current.data ? current.data : null);
+    };
+    const onActivated = () => void refreshTab();
+    const onRemoved = () => void refreshTab();
+    const onUpdated = (_id: number, change: chrome.tabs.TabChangeInfo) => {
+      if (change.url || change.title || change.status === "complete") void refreshTab();
+    };
+    chrome.tabs.onActivated.addListener(onActivated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    return () => {
+      chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    };
+  }, []);
 
   useEffect(() => {
     const consume = async () => {
@@ -874,23 +906,22 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
   };
 
   const handleRecord = async () => {
-    if (!tab?.tab_id) {
-      addAssistantMessage("Open a normal webpage before recording a workflow.");
-      return;
-    }
-
     if (!recording) {
-      const result = await extensionMessage<{ recording: boolean }>({
+      // the page in front of the person in this window, whatever a task used last
+      const result = await extensionMessage<{ recording: boolean; start_url?: string; title?: string }>({
         type: "WATCH_START",
-        tab_id: tab.tab_id
+        window_id: await panelWindowId()
       });
       if (!result.ok) {
         addAssistantMessage(result.error?.message || "I couldn't start recording on this page.");
         return;
       }
+      const recorded = result.data?.title || safeHostname(result.data?.start_url) || "this tab";
       setRecording(true);
+      setRecordingTitle(recorded);
+      void refreshContext();
       addAssistantMessage(
-        "Recording across pages and tabs. Show BrowserHarness the workflow you want it to learn; navigation, new tabs, clicks, text entry, Enter and Tab are captured. Password fields are never recorded."
+        `Recording “${recorded}”, and any pages and tabs it opens. Show BrowserHarness the workflow you want it to learn; navigation, new tabs, clicks, text entry, Enter and Tab are captured. Passwords, sign-in codes and anything typed while signing in are never recorded. Press Finish recording when you're done.`
       );
       return;
     }
@@ -908,6 +939,7 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
       type: "WATCH_STOP"
     });
     setRecording(false);
+    setRecordingTitle("");
     if (!result.ok || !result.data) {
       addAssistantMessage(result.error?.message || "I couldn't finish this recording.");
       return;
@@ -927,11 +959,11 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
         minute: "2-digit"
       })}`,
       created_at: new Date().toISOString(),
-      url: result.data.start_url || tab.url || "",
+      url: result.data.start_url || tab?.url || "",
       end_url:
         result.data.end_url ||
         steps.at(-1)?.url ||
-        tab.url ||
+        tab?.url ||
         "",
       inputs: inferWorkflowInputs(steps),
       steps,
@@ -1729,16 +1761,26 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
               sx={{ maxWidth: "100%" }}
             />
           </Tooltip>}
-          {recording && (
-            <Chip
-              size="small"
-              color="error"
-              label="Recording"
-              icon={<RecordIcon />}
-            />
-          )}
         </Stack>
       </Box>
+
+      {recording && (
+        <Alert
+          severity="error"
+          variant="filled"
+          icon={<RecordIcon />}
+          role="status"
+          aria-label="Recording in progress"
+          sx={{ borderRadius: 0, py: 0 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => void handleRecord()} disabled={running}>
+              Finish recording
+            </Button>
+          }
+        >
+          Recording {recordingTitle ? `“${recordingTitle}”` : "this tab"}. Passwords and sign-in codes are never recorded.
+        </Alert>
+      )}
 
       <Box sx={{ flex: 1, p: 2, overflowY: "auto", ...column }}>
         {messages.length === 0 ? (

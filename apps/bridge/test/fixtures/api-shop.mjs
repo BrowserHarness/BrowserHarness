@@ -292,8 +292,16 @@ document.getElementById("add").addEventListener("click", () => {
 <label>Variant <select name="id"><option value="44012345678901">Rice</option></select></label>
 <input type="hidden" name="quantity" value="1"><input type="hidden" name="product-id" value="8123456789012">
 <input type="hidden" name="section-id" value="template--19283746__main">
-<button id="add" type="submit">Add to cart</button></form><p id="done"></p>
+<button id="add" type="submit">Add to cart</button></form><p id="done"></p><p id="busy"></p>
 <script>
+// ?busy=N: a tab in use for a while (RC4: analytics had sent hundreds of requests before Record)
+(async () => {
+  const busy = Number(new URLSearchParams(location.search).get("busy") || 0);
+  for (let i = 0; i < busy; i += 20) {
+    await Promise.all(Array.from({ length: Math.min(20, busy - i) }, (_, k) => fetch("/beacon?n=" + (i + k), { method: "POST", body: "event=page_view" })));
+  }
+  if (busy) document.getElementById("busy").textContent = "sent " + busy;
+})();
 document.getElementById("product-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const body = new FormData(event.target);
@@ -305,6 +313,68 @@ document.getElementById("product-form").addEventListener("submit", (event) => {
 </script>`);
       return;
     }
+    if (url.pathname === "/beacon") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // A customer account like Shopify's (RC4): signed out, the page goes to
+    // the sign-in page; signed in, the page sends a token from its own storage.
+    const signedIn = /(?:^|;\s*)acct=signed-in-7Qp2/.test(req.headers.cookie || "");
+    if (url.pathname === "/my-account") {
+      if (!signedIn) {
+        res.writeHead(302, { location: "/account/login?return_to=/my-account" });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Your account</title><ul id="orders"></ul>
+<script>
+fetch("/api/my-account?view=orders", { headers: { accept: "application/json", authorization: "Bearer " + localStorage.getItem("acctToken") } })
+  .then((r) => r.json()).then((data) => {
+    for (const item of data.orders || []) { const li = document.createElement("li"); li.textContent = item.id; document.getElementById("orders").append(li); }
+  });
+</script>`);
+      return;
+    }
+    if (url.pathname === "/api/my-account") {
+      if (!signedIn || req.headers.authorization !== "Bearer acct_tok_Zr81kLm2Qw") {
+        json(401, { error: "Please sign in" });
+        return;
+      }
+      json(200, { orders: [{ id: "#1001", total: 42 }, { id: "#1002", total: 17 }] });
+      return;
+    }
+    // the sign-in step: an email, a password and an emailed one-time code
+    if (url.pathname === "/account/login" && req.method === "GET") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><title>Sign in – Sabpuja</title><h1>Sign in</h1>
+<form id="login">
+<label>Email <input id="email" type="email" name="customer[email]" autocomplete="email"></label>
+<label>Password <input id="password" type="password" name="customer[password]" autocomplete="current-password"></label>
+<label>Code we emailed you <input id="code" type="text" name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label>
+<label>Full name <input id="fullname" type="text" name="customer[name]"></label>
+<button id="signin" type="submit">Sign in</button></form><p id="done"></p>
+<script>
+document.getElementById("login").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  fetch("/account/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) })
+    .then((r) => r.json()).then((data) => {
+      if (data.token) localStorage.setItem("acctToken", data.token);
+      document.getElementById("done").textContent = data.ok ? "Signed in" : "Try again";
+      if (data.ok) setTimeout(() => location.assign("/my-account"), 300);
+    });
+});
+</script>`);
+      return;
+    }
+    if (url.pathname === "/account/login" && req.method === "POST") {
+      json(200, { ok: true, token: "acct_tok_Zr81kLm2Qw" }, { "set-cookie": "acct=signed-in-7Qp2; Path=/; SameSite=Lax" });
+      return;
+    }
+
     if (url.pathname === "/cart/add" && req.method === "POST") {
       const boundary = /boundary=([^;]+)/.exec(req.headers["content-type"] || "")?.[1];
       const fields = {};
