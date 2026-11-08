@@ -37,3 +37,24 @@ describe("classifyTaskIntent", () => {
     expect(classifyTaskIntent(prompt)).toBe("browser");
   });
 });
+
+describe("tasks on named sites, shopping and follow-ups", () => {
+  it("treats doing something on a known site as a browser task", () => {
+    expect(classifyTaskIntent("find an electric kettle under 2000 rupees amazon")).toBe("browser");
+    expect(classifyTaskIntent("Follow 20 relevant public accounts from @ritualistic.in's followers")).toBe("browser");
+    expect(classifyTaskIntent("buy me a phone charger")).toBe("browser");
+    expect(classifyTaskIntent("order 2 packs of coffee")).toBe("browser");
+  });
+
+  it("keeps ordinary questions as chat", () => {
+    expect(classifyTaskIntent("what is the order of operations in maths?")).toBe("chat");
+    expect(classifyTaskIntent("explain how photosynthesis works")).toBe("chat");
+    expect(classifyTaskIntent("proceed")).toBe("chat");
+  });
+
+  it("carries a browser task on when the next message is a follow-up", () => {
+    expect(classifyTaskIntent("proceed", { continuing: true })).toBe("browser");
+    expect(classifyTaskIntent("Go ahead and repeat for the other competitors", { continuing: true })).toBe("browser");
+    expect(classifyTaskIntent("why is the sky blue?", { continuing: true })).toBe("chat");
+  });
+});

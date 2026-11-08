@@ -39,7 +39,9 @@ export function runCommand(command, args) {
 }
 
 export function findOnPath(command, env = process.env, platform = process.platform) {
-  const extensions = platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
+  // On Windows only files with a program ending run; npm also leaves a
+  // no-ending copy (for Git Bash) next to each .cmd, which can't be started.
+  const extensions = platform === "win32" ? (/\.[a-z0-9]+$/i.test(command) ? [""] : [".exe", ".cmd", ".bat"]) : [""];
   for (const dir of String(env.PATH || "").split(path.delimiter)) {
     if (!dir) continue;
     for (const extension of extensions) {

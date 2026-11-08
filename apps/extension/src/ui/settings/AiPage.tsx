@@ -104,7 +104,7 @@ function Readiness({ readiness, provider, onRecheck }: { readiness: Subscription
   }
   const problem: Problem =
     readiness.state === "cli_missing"
-      ? subscriptionAppMissing(appName)
+      ? { ...subscriptionAppMissing(appName), detail: readiness.message }
       : readiness.state === "bridge_offline"
         ? diagnoseHelper("not-connected", readiness.message)
         : { ...diagnoseAi(readiness.message), guide: "subscription-app-missing" };

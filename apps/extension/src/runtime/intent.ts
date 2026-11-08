@@ -25,13 +25,26 @@ const BROWSER_CONTEXT_PATTERNS: RegExp[] = [
   /\b[a-z0-9-]+\.(com|org|net|io|ai|dev|app|co|in|edu|gov|uk)\b/i
 ];
 
+// Doing something on a named site ("find a kettle amazon", "follow 20 accounts
+// from @brand's instagram followers") is a browser task wherever the site sits.
+const SITE_ACTION = new RegExp(
+  `\\b(find|search|look for|buy|order|shop|book|follow|unfollow|like|comment on|reply to|message|check|compare|add|watch|play)\\b[\\s\\S]*\\b(${KNOWN_SITES})\\b|\\b(${KNOWN_SITES})\\b[\\s\\S]*\\b(find|search|look for|buy|order|shop|book|follow|unfollow|like|comment on|reply to|message|check|compare|add|watch|play)\\b`,
+  "i"
+);
+const SHOPPING = /\b(buy|purchase|shop for)\s+(me\s+)?(a|an|the|some|\d+)?\s*\w+|\border\s+(me\s+)?(a|an|some|\d+)\s+\w+/i;
+const SOCIAL_HANDLE_ACTION = /\b(follow|unfollow|like|dm|message)\b[\s\S]*@[a-z0-9._]{2,}/i;
+
+// "Go ahead", "proceed", "try again" right after a browser task carry it on.
+const FOLLOW_UP = /^(ok(ay)?|yes|yeah|yep|sure|go ahead|proceed|continue|carry on|keep going|do it|try again|again|retry|next|go on|now do|then|and then|also|same for|repeat)\b/i;
+
 export type TaskIntent = "chat" | "browser";
 
-export function classifyTaskIntent(task: string): TaskIntent {
+export function classifyTaskIntent(task: string, { continuing = false }: { continuing?: boolean } = {}): TaskIntent {
   const normalized = task.trim();
   if (!normalized) return "chat";
+  if (continuing && FOLLOW_UP.test(normalized)) return "browser";
 
-  return BROWSER_CONTEXT_PATTERNS.some((pattern) => pattern.test(normalized))
+  return [...BROWSER_CONTEXT_PATTERNS, SITE_ACTION, SHOPPING, SOCIAL_HANDLE_ACTION].some((pattern) => pattern.test(normalized))
     ? "browser"
     : "chat";
 }

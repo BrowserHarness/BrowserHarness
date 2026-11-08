@@ -192,8 +192,11 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 `
   );
   fs.chmodSync(fake, 0o755);
+  // Windows can't run a #! script; signal-cli ships there as a .bat, so stand in with one.
+  const command = process.platform === "win32" ? `${fake}.bat` : fake;
+  if (command !== fake) fs.writeFileSync(command, `@node "%~dp0signal-cli" %*\r\n`);
   const tasks = [];
-  const relay = createSignalRelay({ number: "+15559998888", command: fake, allowedUserIds: ["+15550001111"], runTask: acceptingTasks(tasks) });
+  const relay = createSignalRelay({ number: "+15559998888", command, allowedUserIds: ["+15550001111"], runTask: acceptingTasks(tasks) });
   relay.start();
   try {
     const sent = () => (fs.existsSync(sentFile) ? fs.readFileSync(sentFile, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);

@@ -16,6 +16,12 @@ import {
 async function fakeCli(body) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "bh-fake-cli-"));
   const file = path.join(dir, "fake-cli");
+  if (process.platform === "win32") {
+    // The same shape as the .cmd script npm writes for an installed CLI.
+    await writeFile(`${file}.js`, `${body}\n`);
+    await writeFile(`${file}.cmd`, `@ECHO off\r\nnode  "%dp0%\\fake-cli.js" %*\r\n`);
+    return `${file}.cmd`;
+  }
   await writeFile(file, `#!/usr/bin/env node\n${body}\n`);
   await chmod(file, 0o755);
   return file;
@@ -45,7 +51,7 @@ test("claude adapter runs the CLI with tools disabled and prompt on stdin", asyn
   const out = await manager.complete({
     adapter: "claude_cli",
     model: "sonnet",
-    system: "be brief",
+    system: 'be brief\n"and" kind & 100% honest',
     prompt: "hello there"
   });
   const echoed = JSON.parse(out.text);
@@ -55,7 +61,7 @@ test("claude adapter runs the CLI with tools disabled and prompt on stdin", asyn
     ["-p", "--output-format", "json", "--tools", ""]
   );
   assert.ok(echoed.args.includes("--no-session-persistence"));
-  assert.equal(echoed.args[echoed.args.indexOf("--system-prompt") + 1], "be brief");
+  assert.equal(echoed.args[echoed.args.indexOf("--system-prompt") + 1], 'be brief\n"and" kind & 100% honest');
   assert.equal(echoed.args[echoed.args.indexOf("--model") + 1], "sonnet");
   assert.match(echoed.cwd, /browserharness-llm-/);
 });
@@ -134,7 +140,7 @@ process.stdin.on("end", () => {
     prompt: "USER"
   });
   const echoed = JSON.parse(out.text);
-  assert.ok(echoed.input.startsWith("SYS"));
+  assert.match(echoed.input, /^You are the decision-maker inside a browser app\.[^\n]*\n\nSYS/, "Codex is told not to use its own tools, then gets the system prompt");
   assert.ok(echoed.input.endsWith("USER"));
   assert.deepEqual(echoed.args.slice(0, 2), ["exec", "--skip-git-repo-check"]);
   assert.equal(echoed.args[echoed.args.indexOf("--sandbox") + 1], "read-only");
@@ -196,5 +202,24 @@ test("Bridge relays llm_request only from the paired extension", async () => {
     ext.close();
   } finally {
     await bridge.close();
+  }
+});
+
+test("on Windows the npm .cmd is used, not the no-ending copy npm leaves for Git Bash", async () => {
+  const { mkdtemp, writeFile, rm, mkdir } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { windowsLaunch } = await import("../src/llm-adapters.mjs");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "bh-npm-"));
+  try {
+    await writeFile(path.join(dir, "codex"), "#!/bin/sh\nexec node codex.js\n");
+    await writeFile(path.join(dir, "codex.cmd"), '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n');
+    await mkdir(path.join(dir, "node_modules"), { recursive: true });
+    const launch = windowsLaunch("codex", ["--version"], { PATH: dir }, "win32");
+    assert.equal(launch.command, process.execPath);
+    assert.equal(launch.args.at(-1), "--version");
+    assert.match(launch.args[0], /codex\.js$/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });

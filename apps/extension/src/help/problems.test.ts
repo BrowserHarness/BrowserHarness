@@ -75,6 +75,10 @@ describe("guides", () => {
     const guide = parseGuide('---\ntype: guide\nslug: x\ntitle: "X title"\nsummary: "Short"\n---\n\n# X title\n\nBody text.\n\n## How to fix it\n1. Do it.\n\n## Related\n- [[knowledge/help/y]]\n\n## Sources\n- s\n');
     expect(guide).toEqual({ slug: "x", title: "X title", summary: "Short", body: "Body text.\n\n## How to fix it\n1. Do it.", related: ["y"] });
   });
+  it("reads guides with Windows line endings", () => {
+    const guide = parseGuide('---\r\nslug: x\r\ntitle: "X title"\r\nsummary: "Short"\r\n---\r\n\r\n# X title\r\n\r\nBody text.\r\n');
+    expect(guide).toEqual({ slug: "x", title: "X title", summary: "Short", body: "Body text.", related: [] });
+  });
   it("related guides all exist", () => {
     for (const guide of GUIDES) for (const slug of guide.related) expect(findGuide(slug), `${guide.slug} → ${slug}`).toBeDefined();
   });

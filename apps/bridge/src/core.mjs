@@ -801,9 +801,12 @@ export function createBridgeServer({
         () => undefined
       );
       await new Promise((resolve) => wss.close(() => resolve()));
-      await new Promise((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve()))
-      );
+      await new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        // Programs that keep asking for /status hold a connection open; end
+        // those too, or stopping waits on them.
+        server.closeAllConnections?.();
+      });
     },
     sendCommand,
     server
