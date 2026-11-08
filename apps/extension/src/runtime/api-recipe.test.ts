@@ -1,0 +1,244 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  captureAxSnapshot: vi.fn(),
+  trustedClick: vi.fn(),
+  trustedKey: vi.fn(),
+  trustedType: vi.fn(),
+  selectOptions: vi.fn(),
+  uploadFiles: vi.fn(),
+  evaluatePageExpression: vi.fn()
+}));
+
+vi.mock("../background/cdp-semantic", () => ({ captureAxSnapshot: mocks.captureAxSnapshot }));
+vi.mock("../background/cdp-input", () => ({
+  trustedClick: mocks.trustedClick,
+  trustedKey: mocks.trustedKey,
+  trustedType: mocks.trustedType
+}));
+vi.mock("../background/cdp-select", () => ({ selectOptions: mocks.selectOptions }));
+vi.mock("../background/page-evaluate", () => ({ evaluatePageExpression: mocks.evaluatePageExpression }));
+vi.mock("../background/file-tools", () => ({ uploadFiles: mocks.uploadFiles }));
+
+import {
+  apiRecipeFromContract,
+  apiRecipeNeedsApproval,
+  apiRunRecord,
+  contractArgs,
+  isApiContract,
+  recipeKind,
+  withApiRecipe,
+  type ApiCallResult
+} from "./api-recipe";
+import { searchContract } from "./api-recipe.fixture";
+import { apiWriteApprovalMessage, describeWriteTarget } from "./api-recipe";
+import { runSiteSkillRecipe, SiteSkillRunError } from "./site-skill-runner";
+import { buildSiteCommands, describeSiteCommand } from "./site-commands";
+
+const learning = {
+  entry_url: "https://shop.example/search",
+  title: "shop.example",
+  evidence_id: "api-abc123",
+  captured_at: "2026-10-10T06:00:00.000Z"
+};
+
+function okResult(data: unknown): ApiCallResult {
+  return { ok: true, class: "ok", tier: 1, status: 200, ms: 12, data, item_count: Array.isArray(data) ? data.length : 1, fetched_at: "2026-10-10T06:00:01.000Z", fresh: true };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("API Recipe v2", () => {
+  it("wraps a contract as an api recipe with one api_operation step", () => {
+    const contract = searchContract();
+    expect(isApiContract(contract)).toBe(true);
+    expect(isApiContract({ ...contract, contract_version: 1 })).toBe(false);
+    const recipe = apiRecipeFromContract(contract, learning.entry_url);
+    expect(recipe).toMatchObject({
+      id: "recipe-api-v2-e7562f40fbcdce1c",
+      kind: "api",
+      form_index: -1,
+      method: "GET",
+      action: "/api/search",
+      parameters: ["q"]
+    });
+    expect(recipe.steps).toEqual([{ kind: "api_operation", contract, approval: "none_read_only" }]);
+    expect(recipeKind(recipe)).toBe("api");
+    expect(apiRecipeNeedsApproval(recipe)).toBe(false);
+  });
+
+  it("asks for approval for anything not known to be a read", () => {
+    for (const side_effect of ["write", "unknown"] as const) {
+      const recipe = apiRecipeFromContract({ ...searchContract(), side_effect }, learning.entry_url);
+      expect(apiRecipeNeedsApproval(recipe)).toBe(true);
+      expect(recipe.steps[0]).toMatchObject({ approval: "browserharness_runtime" });
+    }
+  });
+
+  it("creates a new Skill or adds the operation to an existing one, replacing an earlier copy", () => {
+    const created = withApiRecipe(null, { ...learning, contract: searchContract() });
+    expect(created).toMatchObject({
+      id: "SK-SITE-API-ABC123",
+      status: "candidate",
+      lifecycle: { auto_promote: false, promotion_requires_evaluation: true },
+      site: { origin: "https://shop.example" },
+      provenance: { source_kind: "api_learning_v2" }
+    });
+    expect(created.parameters).toEqual([
+      { name: "q", label: "q", type: "string", required: true, sensitive: false, source: { form_index: -1, field_name: "q" } }
+    ]);
+
+    const again = withApiRecipe(created, { ...learning, contract: { ...searchContract(), description: "Search again" } });
+    expect(again.id).toBe(created.id);
+    expect(again.recipes).toHaveLength(1);
+    expect(again.recipes[0].name).toBe("Search again");
+
+    // the skill belongs to the page's site, wherever the page sends its request
+    expect(() => withApiRecipe(created, { ...learning, entry_url: "https://other.example/search", contract: searchContract() })).toThrow(
+      /SITE_SKILL_ORIGIN_MISMATCH/
+    );
+  });
+
+  it("keeps the visible website and the API host apart (www page, api host)", () => {
+    const api = { ...searchContract(), origin: "https://api.shop.example", request: { ...searchContract().request, url: "https://api.shop.example/v1/search?q=laptops" } };
+    const page = { ...learning, entry_url: "https://shop.example/search" };
+    const created = withApiRecipe(null, { ...page, contract: api });
+    expect(created.site.origin).toBe("https://shop.example");
+    // the API stays the request's destination
+    expect((created.recipes[0].steps[0] as { contract: { origin: string } }).contract.origin).toBe("https://api.shop.example");
+    // a second operation learned on the same page joins the same Skill
+    const more = withApiRecipe(created, { ...page, contract: { ...api, name: "suggest", operation_id: "op-suggest" } });
+    expect(more.recipes).toHaveLength(2);
+  });
+
+  it("keeps no example values or session values in the stored recipe beyond the contract's own params", () => {
+    const text = JSON.stringify(withApiRecipe(null, { ...learning, contract: searchContract() }));
+    expect(text).not.toMatch(/cookie"\s*:/i);
+    expect(text).not.toMatch(/authorization/i);
+  });
+
+  it("maps recipe parameter values to the contract's own param names", () => {
+    expect(contractArgs(searchContract(), { q: "monitors", other: 1 })).toEqual({ q: "monitors" });
+  });
+
+  it("runs an api_operation step through the injected transport and returns the fresh answer", async () => {
+    const candidate = withApiRecipe(null, { ...learning, contract: searchContract() });
+    const apiCall = vi.fn(async () => okResult([{ id: "m1", title: "27 inch monitor" }]));
+    const run = await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: { q: "monitors" }, api_call: apiCall });
+    expect(apiCall).toHaveBeenCalledWith(searchContract(), { q: "monitors" });
+    expect(run).toMatchObject({
+      executed_steps: 1,
+      submitted: false,
+      output: { http_status: 200, data: [{ id: "m1", title: "27 inch monitor" }], api: { tier: 1, class: "ok", item_count: 1 } }
+    });
+    expect(mocks.evaluatePageExpression).not.toHaveBeenCalled();
+  });
+
+  it("reports failures by class, and a write that left the browser as submitted", async () => {
+    const write = { ...searchContract(), side_effect: "write" as const };
+    const candidate = withApiRecipe(null, { ...learning, contract: write });
+    const ambiguous = vi.fn(async () => ({ ...okResult(null), ok: false, class: "ambiguous_write" as const, data: undefined, reason: "no answer", next: "do not resend" }));
+    const error = await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: { q: "x1" }, api_call: ambiguous }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(SiteSkillRunError);
+    expect(error.code).toBe("API_AMBIGUOUS_WRITE");
+    expect(error.submitted).toBe(true);
+    expect(ambiguous).toHaveBeenCalledTimes(1);
+
+    const missing = await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: { q: "x1" } }).catch((caught) => caught);
+    expect(missing.code).toBe("API_ENGINE_UNAVAILABLE");
+  });
+
+  it("a fixed-target write given another item's value refuses before sending (RC2 review)", async () => {
+    const fixed = {
+      ...searchContract(),
+      side_effect: "write" as const,
+      params: [],
+      slots: [],
+      target: { kind: "fixed" as const, request: "POST https://shop.example/api/save", fields: [{ at: "body json:/videoId", value: "jNQXAC9IVRw" }] }
+    };
+    const candidate = withApiRecipe(null, { ...learning, contract: fixed });
+    const apiCall = vi.fn(async () => okResult({ ok: true }));
+    const error = await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: { video: "dQw4w9WgXcQ" }, api_call: apiCall }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(SiteSkillRunError);
+    expect(error.code).toBe("API_INPUT");
+    expect(error.message).toMatch(/jNQXAC9IVRw/);
+    expect(error.submitted).toBe(false);
+    expect(apiCall).not.toHaveBeenCalled();
+    // as learned, it is sent
+    await runSiteSkillRecipe({ tab_id: 1, candidate, recipe_id: candidate.recipes[0].id, parameters: {}, api_call: apiCall });
+    expect(apiCall).toHaveBeenCalledWith(fixed, {});
+  });
+
+  it("records a write the site answered 2xx as sent and unverified, never passed (the change was not read back)", async () => {
+    // the site says 200 OK but nothing in its state changed: the run cannot tell, so it must not claim success
+    const write = withApiRecipe(null, { ...learning, contract: { ...searchContract(), side_effect: "write" as const } });
+    const accepted = vi.fn(async () => okResult({ ok: true, items: [] }));
+    const run = await runSiteSkillRecipe({ tab_id: -1, candidate: write, recipe_id: write.recipes[0].id, parameters: { q: "x1" }, api_call: accepted });
+    const record = apiRunRecord(write.recipes[0], run.output, "shop.example");
+    expect(accepted).toHaveBeenCalledTimes(1);
+    expect(record.outcome).toBe("unverified");
+    expect(record.detail).toMatch(/not verified/);
+    expect(record.result).toEqual({ sent: true, verification: "unverified", next_action: expect.stringMatching(/do not resend/) });
+
+    // an unclassified operation is treated the same way
+    const unknown = withApiRecipe(null, { ...learning, contract: { ...searchContract(), side_effect: "unknown" as const } });
+    expect(apiRunRecord(unknown.recipes[0], run.output, "shop.example").outcome).toBe("unverified");
+
+    // a read's answer is its own result
+    const read = withApiRecipe(null, { ...learning, contract: searchContract() });
+    const readRun = await runSiteSkillRecipe({ tab_id: -1, candidate: read, recipe_id: read.recipes[0].id, parameters: { q: "monitors" }, api_call: vi.fn(async () => okResult([{ id: "m1" }])) });
+    expect(apiRunRecord(read.recipes[0], readRun.output, "shop.example")).toEqual({ outcome: "passed", detail: expect.stringMatching(/1 items/), result: {} });
+  });
+
+  it("lists a learned read as a read command and a learned write as a form-like command", () => {
+    const read = withApiRecipe(null, { ...learning, contract: searchContract() });
+    const family = (candidate: typeof read) => ({
+      id: candidate.id,
+      slug: candidate.slug,
+      name: candidate.name,
+      latest_revision_id: "r1",
+      revisions: [{ revision_id: "r1", ordinal: 1, created_at: "", reason: "create" as const, candidate }],
+      evaluations: [],
+      executions: [],
+      lifecycle_events: []
+    });
+    const [command] = buildSiteCommands([family(read)]);
+    expect(command).toMatchObject({ kind: "read", parameters: [{ name: "q", key: "q", required: true }] });
+    const write = withApiRecipe(null, { ...learning, contract: { ...searchContract(), side_effect: "write" } });
+    expect(buildSiteCommands([family(write)])[0].kind).toBe("form");
+    // a fixed-target write's command says what it acts on (RC2 review)
+    const fixed = withApiRecipe(null, {
+      ...learning,
+      contract: { ...searchContract(), side_effect: "write", params: [], slots: [], target: { kind: "fixed", request: "POST https://shop.example/api/save", fields: [{ at: "body json:/videoId", value: "jNQXAC9IVRw" }] } }
+    });
+    const [saved] = buildSiteCommands([family(fixed)]);
+    expect(saved.api?.target).toMatch(/always acts on videoId jNQXAC9IVRw/);
+    expect(describeSiteCommand(saved)).toMatchObject({ acts_on: expect.stringMatching(/jNQXAC9IVRw/) });
+  });
+
+  it("a write's approval names exactly what it acts on (RC2 review: parameterless write targeting)", () => {
+    const base = { ...searchContract(), name: "watch_later", side_effect: "write" as const, side_effect_basis: "declared a write by the person", params: [] };
+    const fixed = {
+      ...base,
+      target: { kind: "fixed" as const, request: "POST https://www.youtube.com/youtubei/v1/browse/edit_playlist", fields: [{ at: "body json:/actions/0/addedVideoId", value: "jNQXAC9IVRw" }] }
+    };
+    expect(describeWriteTarget(fixed)).toMatch(/always acts on addedVideoId jNQXAC9IVRw/);
+    expect(describeWriteTarget(fixed)).toMatch(/not on the page you are viewing/);
+    const message = apiWriteApprovalMessage("YouTube", "https://www.youtube.com", fixed);
+    expect(message).toMatch(/watch_later/);
+    expect(message).toMatch(/jNQXAC9IVRw/);
+    const dynamic = { ...base, params: [{ name: "video", type: "string" as const, required: true }], target: { kind: "parameter" as const, request: "POST https://www.youtube.com/x", params: ["video"] } };
+    expect(describeWriteTarget(dynamic)).toMatch(/acts on the video given/);
+    expect(describeWriteTarget(base)).toMatch(/not recorded/);
+  });
+
+  it("names a fixed target's field, never an array index (RC2: \"acts on 0 92313813308\")", () => {
+    const base = { ...searchContract(), name: "add_to_cart", side_effect: "write" as const, side_effect_basis: "declared a write by the person", params: [] };
+    const named = { ...base, target: { kind: "fixed" as const, request: "POST https://store.example/cart/add.js", fields: [{ at: "body json:/items/0", name: "id", value: "92313813308" }] } };
+    expect(describeWriteTarget(named)).toMatch(/always acts on id 92313813308/);
+    const older = { ...base, target: { kind: "fixed" as const, request: "POST https://store.example/cart/add.js", fields: [{ at: "body json:/items/0", value: "92313813308" }] } };
+    expect(describeWriteTarget(older)).toMatch(/always acts on items 92313813308/);
+  });
+});

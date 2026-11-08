@@ -1,6 +1,7 @@
 import type { RecordedWorkflowStep } from "../runtime/workflows";
 import {
   changesPage,
+  ranWithoutPage,
   observationInputAfter,
   settleMsAfter
 } from "../runtime/post-action";
@@ -17,7 +18,8 @@ import {
   findSiteCommand,
   loadSiteCommands,
   parseCommandArgs,
-  recipeParameters
+  recipeParameters,
+  siteCommandAnswer
 } from "../runtime/site-commands";
 import {
   ALARM_PREFIX,
@@ -51,7 +53,8 @@ import {
   requestBridgeLlm,
   sendBridgeEvent,
   startBridgeClient,
-  type BridgeCommand
+  type BridgeCommand,
+  requestBridgeApi
 } from "./bridge-client";
 import { originPatternForUrl } from "../settings/browser-access";
 import { readPage } from "./read-page";
@@ -94,6 +97,23 @@ import { captureCdpScreenshot } from "./cdp-screenshot";
 import { selectOptions } from "./cdp-select";
 import { evaluatePageExpression } from "./page-evaluate";
 import { collectCurrentSiteSkill } from "../runtime/site-skill-collector";
+import { collectApiCapture, waitForNetworkQuiet } from "./api-capture";
+import { learnApiOperation, type ApiLearnInput } from "./api-learning";
+import { runTier } from "./api-transports";
+import {
+  examplesFromSteps,
+  forgetWatchCapture,
+  keepWatchCapture,
+  noteWatchStart,
+  takeWatchStart,
+  withoutSignIn,
+  watchCapture,
+  watchCaptureSummary
+} from "./api-watch";
+import { isSensitiveStep } from "../runtime/sensitive-input";
+import { checkApiHealth, nextForClass, repairApiOperation, type RepairLedger } from "./api-repair";
+import { dispatchApiOperation, rememberedTier, rememberTier } from "../runtime/api-dispatch";
+import { apiRecipeNeedsApproval, apiRunRecord, apiWriteApprovalMessage, type ApiCallResult, type ApiOperationContract } from "../runtime/api-recipe";
 import { verifySiteSkillCandidate } from "../runtime/site-skill-verifier";
 import {
   runSiteSkillRecipe,
@@ -363,9 +383,10 @@ async function siteCommandsTool(
     ? await chrome.tabs.get(session.current_tab_id).catch(() => null)
     : null;
   const ready =
-    command.kind === "read"
+    command.needs_page === false ||
+    (command.kind === "read"
       ? sameOrigin(current?.url, command.origin)
-      : samePage(current?.url, command.entry_url);
+      : samePage(current?.url, command.entry_url));
   if (!ready) {
     // Never repurpose the person's own tab: open the site in a task tab.
     const opened = await runTool("open_tab", { url: command.entry_url }, taskId, taskTitle);
@@ -386,22 +407,7 @@ async function siteCommandsTool(
     options
   );
   if (!result.ok) return result;
-  const run = (result.data as { run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> } })?.run;
-  return {
-    ok: true,
-    data: {
-      command: command.name,
-      site: command.site,
-      kind: command.kind,
-      ...(run?.output
-        ? {
-            http_status: run.output.http_status,
-            truncated: run.output.truncated,
-            output: run.output.data
-          }
-        : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 })
-    }
-  };
+  return { ok: true, data: siteCommandAnswer(command, result.data) };
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -427,11 +433,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   });
 });
 
-async function activeTab() {
-  const [tab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
+async function activeTab(windowId?: number) {
+  const [tab] = await chrome.tabs.query(
+    typeof windowId === "number" ? { active: true, windowId } : { active: true, currentWindow: true }
+  );
   if (!tab?.id) throw new Error("No active tab");
   return tab;
 }
@@ -441,14 +446,305 @@ async function activeTab() {
  * it is in front, tasks work in the web page the person used last (or a new
  * tab), never in the chat itself.
  */
-async function activeWebTab(openIfNone: boolean): Promise<chrome.tabs.Tab | null> {
-  const tab = await activeTab();
+async function activeWebTab(openIfNone: boolean, windowId?: number): Promise<chrome.tabs.Tab | null> {
+  const tab = await activeTab(windowId);
   if (!tab.url?.startsWith(chrome.runtime.getURL(""))) return tab;
-  const [recent] = (await chrome.tabs.query({ currentWindow: true }))
+  const [recent] = (await chrome.tabs.query(typeof windowId === "number" ? { windowId } : { currentWindow: true }))
     .filter((item) => item.id !== tab.id && isInjectableUrl(item.url))
     .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
   if (recent?.id) return recent;
   return openIfNone ? chrome.tabs.create({ active: false }) : null;
+}
+
+/**
+ * One run of a page for API learning in a background tab this task owns: the
+ * capture starts before the page loads and the tab closes afterwards.
+ */
+async function runPageForApiLearning(url: string, session: TaskSession | null) {
+  const tab = await chrome.tabs.create({ url: "about:blank", active: false });
+  if (!tab?.id) throw new Error("Chrome did not open a tab for the run");
+  const tabId = tab.id;
+  let owned = session;
+  try {
+    if (owned) {
+      owned = await ownTab(owned, tabId);
+      owned = await groupOwnedTab(owned, tabId);
+    }
+    await startNetworkCapture(tabId, 800);
+    await chrome.tabs.update(tabId, { url });
+    const ready = await waitForTabUsable(tabId);
+    await waitForNetworkQuiet(tabId);
+    return await collectApiCapture(tabId, ready.url || url, [url]);
+  } finally {
+    await stopNetworkCapture(tabId).catch(() => undefined);
+    await chrome.tabs.remove(tabId).catch(() => undefined);
+    if (owned) await removeSessionTab(owned, tabId).catch(() => undefined);
+  }
+}
+
+async function learnApiTool(
+  input: Record<string, unknown>,
+  session: TaskSession | null
+): Promise<ToolResult> {
+  return learnApiOperation(apiLearnDeps(session), input as unknown as ApiLearnInput);
+}
+
+const API_REPAIR_KEY = "browserharness.apiRepair.v1";
+
+function apiLearnDeps(session: TaskSession | null) {
+  return {
+    runPage: (url: string) => runPageForApiLearning(url, session),
+    bridge: (action: "learn" | "verify", payload: Record<string, unknown>) => requestBridgeApi(action, payload, { timeoutMs: 120_000 }),
+    // reads only: learn_api refuses writes before this point
+    dispatch: (contract: ApiOperationContract, args: Record<string, unknown>) => callApiOperation(contract, args, false),
+    loadBase: async (id: string) => {
+      const revision = await getSiteSkillExecutableRevision(id);
+      return revision ? { candidate: revision.candidate, revision_id: revision.revision_id } : null;
+    },
+    save: (candidate: import("../runtime/site-skill").SiteCandidateSkill, reason: "create" | "refinement") => saveSiteSkillCandidate(candidate, { reason }),
+    evaluate: async (id: string, revisionId: string, entry: { kind: "structural-verification" | "execution"; outcome: "passed" | "failed"; detail: string }) => {
+      await recordSiteSkillEvaluation(id, revisionId, entry);
+    },
+    execution: (id: string, revisionId: string, entry: Parameters<typeof recordSiteSkillExecutionEvidence>[2]) => recordSiteSkillExecutionEvidence(id, revisionId, entry),
+    now: () => new Date().toISOString(),
+    newId: () => crypto.randomUUID().slice(0, 12),
+    watchCapture: (id: string) => watchCapture(id),
+    forgetWatch: (id: string) => forgetWatchCapture(id)
+  };
+}
+
+/** Starts capturing the recorded tab's requests, for learning its API later. */
+async function beginWatchApiCapture(recordingId: string, tabId: number): Promise<void> {
+  const already = networkCaptureActive(tabId);
+  if (!already) await startNetworkCapture(tabId, 2000).catch(() => undefined);
+  if (networkCaptureActive(tabId)) noteWatchStart(recordingId, tabId, !already);
+}
+
+/** Keeps the recording's capture in memory, with what was typed, and says what it holds. */
+async function finishWatchApiCapture(
+  recordingId: string,
+  startUrl: string,
+  steps: import("../runtime/workflows").RecordedWorkflowStep[],
+  events: import("../runtime/workflows").WorkflowRecordingEvent[]
+) {
+  const started = takeWatchStart(recordingId);
+  if (!started || !networkCaptureActive(started.tab_id)) return undefined;
+  try {
+    await waitForNetworkQuiet(started.tab_id, 500, 3000);
+    const tab = await chrome.tabs.get(started.tab_id).catch(() => null);
+    const finalUrl = tab?.url || startUrl;
+    const examples = examplesFromSteps(steps);
+    const values = Object.values(examples).map((value) => value.toLowerCase());
+    const visited = events
+      .filter((event) => event.type === "navigation" && event.tab_id === started.tab_id)
+      .map((event) => (event as { url: string }).url);
+    // the page to replay is the one whose address carries what was typed, if any
+    const located = [...visited, finalUrl].find((url) => {
+      try {
+        const decoded = decodeURIComponent(url).toLowerCase();
+        return values.some((value) => decoded.includes(value));
+      } catch {
+        return false;
+      }
+    });
+    // only what the demonstration did since Record (not the tab's earlier
+    // traffic), and nothing a sign-in step sent
+    const capture = withoutSignIn(await collectApiCapture(started.tab_id, finalUrl, [located || finalUrl], { since: started.started_at }));
+    return watchCaptureSummary(keepWatchCapture({ recording_id: recordingId, start_url: startUrl, capture, examples }));
+  } catch {
+    return undefined;
+  } finally {
+    if (started.started_capture) await stopNetworkCapture(started.tab_id).catch(() => undefined);
+  }
+}
+
+function apiRecipesOf(candidate: import("../runtime/site-skill").SiteCandidateSkill, recipeId?: string) {
+  return candidate.recipes
+    .filter((recipe) => !recipeId || recipe.id === recipeId)
+    .flatMap((recipe) => {
+      const step = recipe.steps.find((item) => item.kind === "api_operation");
+      return step && step.kind === "api_operation" ? [{ recipe, contract: step.contract }] : [];
+    });
+}
+
+/** site_skill verify for a Skill made of learned operations: each read is called live with a taught input. */
+async function apiHealthTool(
+  id: string,
+  revision: { revision_id: string; candidate: import("../runtime/site-skill").SiteCandidateSkill },
+  recipeId?: string
+): Promise<ToolResult> {
+  const checks = [];
+  for (const { recipe, contract } of apiRecipesOf(revision.candidate, recipeId)) {
+    checks.push(await checkApiHealth((c, args) => callApiOperation(c, args, false), recipe.id, contract));
+  }
+  const ran = checks.filter((check) => check.class !== "skipped");
+  const passed = ran.length > 0 && ran.every((check) => check.passed);
+  await recordSiteSkillEvaluation(id, revision.revision_id, {
+    kind: "structural-verification",
+    outcome: passed ? "passed" : "failed",
+    detail: `API health: ${checks.map((check) => `${check.recipe_id} ${check.passed ? "ok" : check.class}`).join("; ")}`.slice(0, 500)
+  });
+  const failing = ran.find((check) => !check.passed);
+  return {
+    ok: passed,
+    data: {
+      id,
+      revision_id: revision.revision_id,
+      health: checks,
+      ...(failing ? { next_action: nextForClass(failing.class as ApiCallResult["class"], revision.candidate.site.origin) } : {})
+    },
+    ...(passed
+      ? {}
+      : {
+          error: {
+            code: "SITE_SKILL_VERIFICATION_FAILED",
+            message: ran.length ? "A learned operation did not answer as it did when it was taught" : "No learned read could be checked"
+          }
+        })
+  };
+}
+
+/** site_skill repair: learn a drifted read again as a new candidate revision; bounded per operation. */
+async function repairApiTool(input: Record<string, unknown>, session: TaskSession | null): Promise<ToolResult> {
+  if (typeof input.id !== "string" || !input.id.trim()) {
+    return { ok: false, error: { code: "SITE_SKILL_ID_REQUIRED", message: "site_skill repair requires id" } };
+  }
+  const revision = await getSiteSkillExecutableRevision(input.id, typeof input.revision_id === "string" ? input.revision_id : undefined);
+  if (!revision) return { ok: false, error: { code: "SITE_SKILL_NOT_FOUND", message: "Site Skill candidate was not found" } };
+  const targets = apiRecipesOf(revision.candidate, typeof input.recipe_id === "string" ? input.recipe_id : undefined);
+  if (targets.length !== 1) {
+    return {
+      ok: false,
+      error: {
+        code: targets.length ? "SITE_SKILL_RECIPE_REQUIRED" : "SITE_SKILL_RECIPE_NOT_FOUND",
+        message: targets.length ? "Name the learned operation to repair with recipe_id" : "No learned API operation to repair; refine form recipes with site_skill refine"
+      }
+    };
+  }
+  const plain = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined);
+  return repairApiOperation(
+    {
+      learn: (learnInput) => learnApiOperation(apiLearnDeps(session), learnInput),
+      ledger: async () => ((await chrome.storage.local.get(API_REPAIR_KEY))[API_REPAIR_KEY] || {}) as RepairLedger,
+      saveLedger: (ledger) => chrome.storage.local.set({ [API_REPAIR_KEY]: ledger }),
+      now: () => Date.now()
+    },
+    {
+      skill_id: input.id,
+      recipe_id: targets[0].recipe.id,
+      contract: targets[0].contract,
+      ...(Array.isArray(input.examples) ? { examples: input.examples.map(plain).filter((item): item is Record<string, unknown> => Boolean(item)) } : {}),
+      ...(plain(input.verify_args) ? { verify_args: plain(input.verify_args) } : {}),
+      ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {})
+    }
+  );
+}
+
+/** Hybrid execution: the remembered tier first, then cheapest first; a write gets one attempt that reaches the site. */
+function callApiOperation(
+  contract: ApiOperationContract,
+  args: Record<string, unknown>,
+  approved: boolean
+): Promise<ApiCallResult> {
+  return dispatchApiOperation(
+    { run: runTier, remembered: rememberedTier, remember: rememberTier },
+    contract,
+    args,
+    { approved }
+  );
+}
+
+/**
+ * site_skill run for an API Recipe v2 recipe: no page or tab is needed. Reads
+ * run without a prompt; anything else needs the person's approval first, and
+ * one that may have run is never offered again.
+ */
+async function runApiOperationRecipe(
+  input: Record<string, unknown>,
+  revision: { revision_id: string; candidate: import("../runtime/site-skill").SiteCandidateSkill },
+  recipeId: string,
+  options: ToolExecutionOptions
+): Promise<ToolResult> {
+  const existing = revision.candidate;
+  const id = String(input.id);
+  const recipe = existing.recipes.find((item) => item.id === recipeId)!;
+  const step = recipe.steps.find((item) => item.kind === "api_operation");
+  if (apiRecipeNeedsApproval(recipe) && !options.approvalGranted) {
+    return {
+      ok: false,
+      data: { revision_id: revision.revision_id },
+      error: {
+        code: "APPROVAL_REQUIRED",
+        message:
+          step && step.kind === "api_operation"
+            ? apiWriteApprovalMessage(existing.name, existing.site.origin, step.contract, recipe.name)
+            : `Run Site Skill “${existing.name}” operation “${recipe.name}” on ${new URL(existing.site.origin).hostname}? It may change data there (not known to be read-only).`
+      }
+    };
+  }
+  const parameters =
+    input.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters)
+      ? (input.parameters as Record<string, unknown>)
+      : {};
+  const startedAt = new Date().toISOString();
+  const evidenceId = existing.provenance.evidence_id;
+  try {
+    const run = await runSiteSkillRecipe({
+      tab_id: -1,
+      candidate: existing,
+      recipe_id: recipe.id,
+      parameters,
+      api_call: (contract, args) => callApiOperation(contract, args, options.approvalGranted === true)
+    });
+    const { outcome, detail, result } = apiRunRecord(recipe, run.output, new URL(existing.site.origin).hostname);
+    await recordSiteSkillEvaluation(id, revision.revision_id, { kind: "execution", outcome, detail });
+    const execution = await recordSiteSkillExecutionEvidence(id, revision.revision_id, {
+      recipe_id: recipe.id,
+      started_at: startedAt,
+      outcome,
+      evidence_id: evidenceId,
+      executed_steps: run.executed_steps,
+      submitted: run.submitted,
+      parameter_names: Object.keys(parameters).sort()
+    });
+    return {
+      ok: true,
+      data: {
+        candidate_id: existing.id,
+        revision_id: revision.revision_id,
+        run,
+        execution,
+        ...result
+      }
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Site Skill API operation failed";
+    const code = error instanceof SiteSkillRunError && error.code ? error.code : "SITE_SKILL_RUN_FAILED";
+    await recordSiteSkillEvaluation(id, revision.revision_id, { kind: "execution", outcome: "failed", detail: message }).catch(() => undefined);
+    await recordSiteSkillExecutionEvidence(id, revision.revision_id, {
+      recipe_id: recipe.id,
+      started_at: startedAt,
+      outcome: "failed",
+      evidence_id: evidenceId,
+      executed_steps: 0,
+      submitted: error instanceof SiteSkillRunError ? error.submitted : false,
+      parameter_names: Object.keys(parameters).sort(),
+      error_code: code,
+      error_message: message
+    }).catch(() => null);
+    const cls = code.startsWith("API_") ? (code.slice(4).toLowerCase() as ApiCallResult["class"]) : "network";
+    return {
+      ok: false,
+      data: {
+        candidate_id: existing.id,
+        revision_id: revision.revision_id,
+        failure_class: cls,
+        repair_recommended: cls === "schema_drift" || cls === "endpoint_drift",
+        next_action: nextForClass(cls, existing.site.origin) || "report the failure"
+      },
+      error: { code, message }
+    };
+  }
 }
 
 async function requestSession(
@@ -1187,6 +1483,68 @@ async function runTool(
         ? input.action
         : "create";
 
+    if (action === "learn_api") {
+      return learnApiTool(input, session);
+    }
+
+    if (action === "repair") {
+      return repairApiTool(input, session);
+    }
+
+    if (action === "verify" && typeof input.id === "string" && input.id.trim()) {
+      // a Skill of learned operations is checked by calling them; one with forms by reading the page
+      const revision = await getSiteSkillRevision(input.id, typeof input.revision_id === "string" ? input.revision_id : undefined);
+      const recipeId = typeof input.recipe_id === "string" ? input.recipe_id : undefined;
+      if (revision && apiRecipesOf(revision.candidate, recipeId).length && (recipeId || revision.candidate.recipes.every((recipe) => recipe.form_index < 0))) {
+        return apiHealthTool(input.id, revision, recipeId);
+      }
+    }
+
+    if (action === "run" && input.api_read_only === true) {
+      // a helper's run: only a learned API read, never a form or a write
+      const revision = typeof input.id === "string"
+        ? await getSiteSkillExecutableRevision(input.id, typeof input.revision_id === "string" ? input.revision_id : undefined)
+        : null;
+      let recipe: import("../runtime/site-skill").SiteSkillRecipe | null = null;
+      try {
+        recipe = revision ? selectSiteSkillRecipe(revision.candidate, typeof input.recipe_id === "string" ? input.recipe_id : undefined) : null;
+      } catch {
+        recipe = null;
+      }
+      const step = recipe?.steps.find((item) => item.kind === "api_operation");
+      if (!revision || !recipe || !step || step.kind !== "api_operation" || step.contract.side_effect !== "read") {
+        return {
+          ok: false,
+          error: {
+            code: "SUBAGENT_SCOPE_DENIED",
+            message: "Helpers may run only a Site Skill's learned API reads (recipes whose id starts with recipe-api-v2- and that only get data)."
+          }
+        };
+      }
+      return runApiOperationRecipe(input, revision, recipe.id, { ...options, approvalGranted: false });
+    }
+
+    if (action === "run" && typeof input.id === "string" && input.id.trim()) {
+      // an API Recipe v2 recipe needs no tab; others fall through to the page path
+      const revision = await getSiteSkillExecutableRevision(
+        input.id,
+        typeof input.revision_id === "string" ? input.revision_id : undefined
+      );
+      if (revision) {
+        try {
+          const recipe = selectSiteSkillRecipe(
+            revision.candidate,
+            typeof input.recipe_id === "string" ? input.recipe_id : undefined
+          );
+          if (recipe.steps.some((step) => step.kind === "api_operation")) {
+            return runApiOperationRecipe(input, revision, recipe.id, options);
+          }
+        } catch {
+          // reported by the page path below with its usual errors
+        }
+      }
+    }
+
     if (action === "list") {
       return {
         ok: true,
@@ -1477,7 +1835,7 @@ async function runTool(
         error: {
           code: "SITE_SKILL_ACTION_INVALID",
           message:
-            "site_skill action must be create, verify, run, refine, list, get, history, compare, promote, rollback, or delete"
+            "site_skill action must be create, learn_api, verify, run, refine, repair, list, get, history, compare, promote, rollback, or delete"
         }
       };
     }
@@ -1746,19 +2104,23 @@ async function runTool(
                 outcome: "failed",
                 evidence_id: apiEvidenceId,
                 executed_steps: 0,
-                submitted: false,
+                submitted: error instanceof SiteSkillRunError ? error.submitted : false,
                 parameter_names: Object.keys(apiParameters).sort(),
                 error_code: code,
                 error_message: message
               }
             ).catch(() => null);
+            // a write that may have run is never offered again
+            const ambiguous = code === "API_AMBIGUOUS_WRITE";
             return {
               ok: false,
               data: {
                 candidate_id: existing.id,
                 revision_id: revision.revision_id,
-                refinement_recommended: true,
-                next_action: "site_skill refine"
+                refinement_recommended: !ambiguous,
+                next_action: ambiguous
+                  ? "check the site to see whether it happened; do not run it again"
+                  : "site_skill refine"
               },
               error: { code, message }
             };
@@ -3215,7 +3577,7 @@ async function handleBridgeCommand(
   // a separate observe_page call per step. observe:false turns this off.
   const { observe: returnPage, ...args } = command.args;
   const result = await runTool(tool, args, command.session, command.title);
-  if (!result.ok || returnPage === false || !changesPage(tool, args)) {
+  if (!result.ok || returnPage === false || !changesPage(tool, args) || ranWithoutPage(tool, result)) {
     return result;
   }
   const settleMs = settleMsAfter(tool);
@@ -3228,6 +3590,17 @@ async function handleBridgeCommand(
   );
   return page.ok && page.data ? { ...result, page: page.data as PageObservation } : result;
 }
+
+/** "REC" on the toolbar icon in every window while Watch Me records. */
+async function showRecordingBadge(on: boolean): Promise<void> {
+  await chrome.action.setBadgeText({ text: on ? "REC" : "" }).catch(() => undefined);
+  if (on) await chrome.action.setBadgeBackgroundColor({ color: "#c62828" }).catch(() => undefined);
+}
+
+// a recording outlives a service worker restart: so does its badge
+void getWatchRecording()
+  .then((active) => showRecordingBadge(Boolean(active)))
+  .catch(() => undefined);
 
 async function armWatchTab(tabId: number): Promise<ToolResult> {
   return sendToTab(tabId, { type: "WATCH_ARM" });
@@ -3359,7 +3732,8 @@ chrome.runtime.onMessage.addListener(
         }
 
         if (request.type === "GET_CURRENT_TAB") {
-          const tab = (await activeWebTab(false)) ?? (await activeTab());
+          const windowId = typeof request.window_id === "number" ? request.window_id : undefined;
+          const tab = (await activeWebTab(false, windowId)) ?? (await activeTab(windowId));
           sendResponse({
             ok: true,
             data: {
@@ -3420,11 +3794,22 @@ chrome.runtime.onMessage.addListener(
         }
 
         if (request.type === "WATCH_START") {
-          const resolved = await targetTab(
+          // the panel's Record button records the page in front of the
+          // person in its window, never a tab remembered from a task (RC4)
+          const resolved =
             typeof request.tab_id === "number"
-              ? { tab_id: request.tab_id }
-              : {}
-          );
+              ? await targetTab({ tab_id: request.tab_id })
+              : { tab: await activeWebTab(false, typeof request.window_id === "number" ? request.window_id : undefined) };
+          if (!resolved.tab?.id || !isInjectableUrl(resolved.tab.url)) {
+            sendResponse({
+              ok: false,
+              error: {
+                code: "WATCH_TAB_REQUIRED",
+                message: "Open the webpage you want to show me, then press Record."
+              }
+            });
+            return;
+          }
 
           const session = await startWatchRecording(resolved.tab);
           const armed = await armWatchTab(resolved.tab.id!);
@@ -3434,6 +3819,8 @@ chrome.runtime.onMessage.addListener(
             sendResponse(armed);
             return;
           }
+          await beginWatchApiCapture(session.id, resolved.tab.id!);
+          await showRecordingBadge(true);
 
           sendResponse({
             ok: true,
@@ -3441,7 +3828,8 @@ chrome.runtime.onMessage.addListener(
               recording: true,
               recording_id: session.id,
               root_tab_id: session.root_tab_id,
-              start_url: session.start_url
+              start_url: session.start_url,
+              title: resolved.tab.title || ""
             }
           });
           return;
@@ -3461,6 +3849,11 @@ chrome.runtime.onMessage.addListener(
             return;
           }
 
+          // never keep what was typed into a password, a code or a sign-in step
+          if (isSensitiveStep(request.step)) {
+            sendResponse({ ok: true, data: { accepted: false } });
+            return;
+          }
           const captured = await appendWatchStep(
             tabId,
             request.step
@@ -3508,6 +3901,7 @@ chrome.runtime.onMessage.addListener(
           await new Promise((resolve) => setTimeout(resolve, 25));
 
           const completed = await stopWatchRecording();
+          await showRecordingBadge(false);
           if (!completed) {
             sendResponse({
               ok: false,
@@ -3523,6 +3917,7 @@ chrome.runtime.onMessage.addListener(
           const currentTab = await chrome.tabs
             .get(completed.current_tab_id)
             .catch(() => null);
+          const apiCapture = await finishWatchApiCapture(completed.id, completed.start_url, completed.steps, completed.events);
 
           sendResponse({
             ok: true,
@@ -3538,7 +3933,8 @@ chrome.runtime.onMessage.addListener(
               steps: completed.steps,
               events: completed.events,
               boundary_step_id: completed.boundary_step_id,
-              recording: watchRecordingSummary(completed)
+              recording: watchRecordingSummary(completed),
+              ...(apiCapture ? { api_capture: apiCapture } : {})
             }
           });
           return;

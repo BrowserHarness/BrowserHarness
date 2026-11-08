@@ -1,5 +1,6 @@
 node_modules
 dist/
+!apps/bridge/vendor/api-anything/dist/
 .DS_Store
 *.log
 .env

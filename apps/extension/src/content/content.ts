@@ -1,5 +1,6 @@
 import type { RecordedWorkflowStep, WorkflowLocator } from "../runtime/workflows";
 import { adapterForUrl } from "./adapters/registry";
+import { isSensitiveField } from "./sensitive-input";
 import { extractTables } from "./tables";
 import {
   collectRoots,
@@ -240,6 +241,7 @@ const RECORDED_ATTRIBUTES = [
   "id",
   "name",
   "type",
+  "autocomplete",
   "role",
   "href",
   "aria-label",
@@ -266,6 +268,8 @@ function recordedAttributes(
 // General text, contact and sign-in fields may contain private information.
 function shareableValue(element: HTMLElement): string | undefined {
   if (!(isInputElement(element) || element instanceof HTMLTextAreaElement)) return undefined;
+  // Apply Watch Me's sign-in and secret-field filter to all planner observations too.
+  if (isSensitiveEntry(element)) return undefined;
   if (isInputElement(element) && !["text", "search"].includes(element.type.toLowerCase())) return undefined;
   const autocomplete = (element.getAttribute("autocomplete") || "").toLowerCase();
   if (/cc-|password|one-time-code/.test(autocomplete)) return undefined;
@@ -427,6 +431,55 @@ function currentTextValue(element: HTMLElement): string {
   return element.innerText || element.textContent || "";
 }
 
+/**
+ * Whether Watch Me must not record what is typed here: a password, a one-time
+ * code, or a field of a sign-in step. Checked before a value is ever read.
+ */
+function isSensitiveEntry(element: HTMLElement): boolean {
+  const input = isInputElement(element) ? element : null;
+  const scope: ParentNode = input?.form || element.closest("form") || document;
+  const besideSecret = Boolean(
+    scope.querySelector('input[type="password" i], input[autocomplete~="one-time-code" i]')
+  );
+  return isSensitiveField({
+    type: input ? input.type : undefined,
+    autocomplete: element.getAttribute("autocomplete") || undefined,
+    name: element.getAttribute("name") || undefined,
+    id: element.id || undefined,
+    label: labelFor(element) || element.getAttribute("aria-label") || undefined,
+    placeholder: element.getAttribute("placeholder") || undefined,
+    inputmode: element.getAttribute("inputmode") || undefined,
+    max_length: input && input.maxLength > 0 ? input.maxLength : undefined,
+    beside_secret: besideSecret,
+    url: location.href
+  });
+}
+
+/** A visible, click-through note on every page Watch Me records. */
+const RECORDING_BANNER_ID = "browserharness-recording-banner";
+
+function showRecordingBanner(): void {
+  if (document.getElementById(RECORDING_BANNER_ID)) return;
+  const host = document.createElement("div");
+  host.id = RECORDING_BANNER_ID;
+  host.setAttribute("aria-live", "polite");
+  host.style.cssText =
+    "all:initial;position:fixed;top:8px;right:8px;z-index:2147483647;pointer-events:none;";
+  const shadow = host.attachShadow({ mode: "closed" });
+  const pill = document.createElement("div");
+  pill.setAttribute("role", "status");
+  pill.textContent =
+    "● BrowserHarness is recording this tab. Passwords and sign-in codes are never recorded. Finish in the side panel.";
+  pill.style.cssText =
+    "font:600 12px/1.4 system-ui,sans-serif;color:#fff;background:#c62828;border-radius:14px;padding:6px 12px;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:360px;";
+  shadow.append(pill);
+  (document.body || document.documentElement).append(host);
+}
+
+function hideRecordingBanner(): void {
+  document.getElementById(RECORDING_BANNER_ID)?.remove();
+}
+
 function takePendingText(
   preferred?: HTMLElement | null
 ): RecordedWorkflowStep | null {
@@ -442,10 +495,7 @@ function takePendingText(
     return null;
   }
 
-  if (
-    isInputElement(element) &&
-    element.type === "password"
-  ) {
+  if (isSensitiveEntry(element)) {
     pendingTextElement = null;
     return null;
   }
@@ -546,12 +596,7 @@ document.addEventListener(
     if (!recording) return;
     const element = interactiveTarget(event.target);
     if (!element || !isTextEntryElement(element)) return;
-    if (
-      isInputElement(element) &&
-      element.type === "password"
-    ) {
-      return;
-    }
+    if (isSensitiveEntry(element)) return;
     pendingTextElement = element;
   },
   { capture: true, signal: contentAbortController.signal }
@@ -1050,6 +1095,7 @@ const contentMessageListener = (
       recording = true;
       pendingTextElement = null;
       lastInputSignature = "";
+      showRecordingBanner();
       sendResponse({
         ok: true,
         data: {
@@ -1064,6 +1110,7 @@ const contentMessageListener = (
       const finalStep = takePendingText();
       recording = false;
       pendingTextElement = null;
+      hideRecordingBanner();
       sendResponse({
         ok: true,
         data: {

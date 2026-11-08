@@ -1,0 +1,372 @@
+{
+  "kind": "browserharness-api-engine-benchmark",
+  "started_at": "2026-10-10T07:47:05.689Z",
+  "environment": {
+    "node": "v22.22.0",
+    "platform": "linux 6.18.44-fc-v114",
+    "cpus": "4 x Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "browser": "Chromium (playwright-core, --headless=new)",
+    "site": "local fixture shop on 127.0.0.1 (apps/bridge/test/fixtures/api-shop.mjs)"
+  },
+  "runs_per_mode": 3,
+  "learning": [
+    {
+      "operation": "search",
+      "ms": 2661,
+      "verification": "verified",
+      "answered_by_tier": 1,
+      "min_tier": 1
+    },
+    {
+      "operation": "orders",
+      "ms": 2641,
+      "verification": "verified",
+      "answered_by_tier": 2,
+      "min_tier": 1
+    },
+    {
+      "operation": "guarded",
+      "ms": 3863,
+      "verification": "verified",
+      "answered_by_tier": 3,
+      "min_tier": 3
+    }
+  ],
+  "measurements": [
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 431
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 436
+    },
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 428
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 488,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 997,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 1002,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 547,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 550,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 546,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 1772,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 1758,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 1754,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 423
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 434
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 420
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 487,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 488,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 489,
+      "tier": 1,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 544,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 571,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 570,
+      "tier": 2,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 1,
+      "term": "monitors",
+      "ok": true,
+      "ms": 1761,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 2,
+      "term": "tablets",
+      "ok": true,
+      "ms": 1753,
+      "tier": 3,
+      "class": "ok"
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "run": 3,
+      "term": "keyboards",
+      "ok": true,
+      "ms": 1743,
+      "tier": 3,
+      "class": "ok"
+    }
+  ],
+  "notes": [
+    "Local fixture only; no real website was measured.",
+    "back_to_back runs include the engine's per-site pacing (1 s minimum between calls to one site); spaced runs wait 1.1 s first, outside the measured time.",
+    "Each measurement is one Bridge /command round trip measured by this script, including the Bridge, the extension and the browser."
+  ],
+  "skill_id": "SK-SITE-API-9FBCF882-9A6",
+  "summary": [
+    {
+      "mode": "browser",
+      "pacing": "back_to_back",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 428,
+      "median_ms": 431,
+      "p90_ms": 436,
+      "max_ms": 436
+    },
+    {
+      "mode": "tier1",
+      "pacing": "back_to_back",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 488,
+      "median_ms": 997,
+      "p90_ms": 1002,
+      "max_ms": 1002,
+      "tiers_used": [
+        1
+      ]
+    },
+    {
+      "mode": "tier2",
+      "pacing": "back_to_back",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 546,
+      "median_ms": 547,
+      "p90_ms": 550,
+      "max_ms": 550,
+      "tiers_used": [
+        2
+      ]
+    },
+    {
+      "mode": "tier3",
+      "pacing": "back_to_back",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 1754,
+      "median_ms": 1758,
+      "p90_ms": 1772,
+      "max_ms": 1772,
+      "tiers_used": [
+        3
+      ]
+    },
+    {
+      "mode": "browser",
+      "pacing": "spaced",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 420,
+      "median_ms": 423,
+      "p90_ms": 434,
+      "max_ms": 434
+    },
+    {
+      "mode": "tier1",
+      "pacing": "spaced",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 487,
+      "median_ms": 488,
+      "p90_ms": 489,
+      "max_ms": 489,
+      "tiers_used": [
+        1
+      ]
+    },
+    {
+      "mode": "tier2",
+      "pacing": "spaced",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 544,
+      "median_ms": 570,
+      "p90_ms": 571,
+      "max_ms": 571,
+      "tiers_used": [
+        2
+      ]
+    },
+    {
+      "mode": "tier3",
+      "pacing": "spaced",
+      "runs": 3,
+      "correct": 3,
+      "min_ms": 1743,
+      "median_ms": 1753,
+      "p90_ms": 1761,
+      "max_ms": 1761,
+      "tiers_used": [
+        3
+      ]
+    }
+  ],
+  "finished_at": "2026-10-10T07:47:52.415Z"
+}

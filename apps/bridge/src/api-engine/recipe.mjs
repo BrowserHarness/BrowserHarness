@@ -1,0 +1,329 @@
+// API Recipe v2: the operation contract a Site Skill recipe carries for a
+// learned website operation (docs/protocols/API-RECIPE-V2.md). It wraps the
+// upstream API Anything Operation (request template, slots, response recipe)
+// with what BrowserHarness needs around it: side-effect class, transport
+// preference, verification evidence and provenance. Serializable and
+// inspectable; never holds a cookie, token or session value.
+import { createHash } from "node:crypto";
+import * as z from "zod/v4";
+import { OperationSchema, ParamSchema, ResponseSchema, SlotSchema, TriggerSchema, MatchSchema, VolatileSchema, RequestSchema } from "../../vendor/api-anything/dist/spec.js";
+import { setAt } from "../../vendor/api-anything/dist/codec.js";
+import { sessionSources } from "./session.mjs";
+import { API_ANYTHING_COMMIT } from "./upstream-adapter.mjs";
+
+export const API_CONTRACT_VERSION = 2;
+export const ENGINE_ID = `browserharness-api-engine/1 (api-anything@${API_ANYTHING_COMMIT.slice(0, 7)})`;
+
+const Tier = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+
+export const SideEffect = z.enum(["read", "write", "unknown"]);
+
+const VerificationCheck = z.object({
+  kind: z.enum(["learned_examples", "unseen_input", "replay", "repair_validation", "health"]),
+  passed: z.boolean(),
+  tier: Tier.optional(),
+  class: z.string().optional(),
+  /** names of the args only; values are in the params' examples when they may be kept */
+  arg_names: z.array(z.string()).default([]),
+  item_count: z.number().int().nonnegative().optional(),
+  detail: z.string().max(500).optional(),
+  checked_at: z.string()
+});
+
+export const ApiOperationContractSchema = z.object({
+  contract_version: z.literal(API_CONTRACT_VERSION),
+  operation_id: z.string().min(1),
+  name: z.string().min(1).max(80),
+  description: z.string().max(500).optional(),
+  origin: z.string().url(),
+  side_effect: SideEffect,
+  side_effect_basis: z.string().max(300),
+  request: RequestSchema,
+  slots: z.array(SlotSchema).default([]),
+  volatile: z.array(VolatileSchema).default([]),
+  params: z.array(ParamSchema).default([]),
+  /** names of the cookie:/session: references the template uses; values are resolved at call time only */
+  session_refs: z.array(z.string()).default([]),
+  /** where each ref's value comes from at call time: a cookie, a page storage key, or only a page */
+  session_sources: z
+    .array(
+      z.object({
+        ref: z.string(),
+        kind: z.enum(["cookie", "storage", "page"]),
+        key: z.string().optional(),
+        path: z.string().optional()
+      })
+    )
+    .default([]),
+  public: z.array(z.string()).optional(),
+  /**
+   * What a write acts on. "fixed": no inputs, so it always acts on the
+   * item(s) named in its learned request (fields, shown before every run).
+   * "parameter": the item is an input the caller must give. A write without
+   * a target is refused before sending.
+   */
+  target: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("fixed"),
+        request: z.string().max(400),
+        fields: z.array(z.object({ at: z.string().max(200), name: z.string().max(80).optional(), value: z.string().max(120) })).max(8),
+        /** the site's own name for the item, from the learned answer ("Akshat (Rice)") */
+        label: z.string().max(80).optional()
+      }),
+      z.object({ kind: z.literal("parameter"), request: z.string().max(400), params: z.array(z.string()).min(1).max(20) })
+    ])
+    .optional(),
+  response: ResponseSchema,
+  match: MatchSchema,
+  trigger: TriggerSchema,
+  min_tier: Tier.default(1),
+  learned_logged_in: z.boolean().default(false),
+  transport: z
+    .object({
+      preference: z.array(Tier).default([1, 2, 3]),
+      /** the tier that last answered ok, remembered per operation */
+      learned_tier: Tier.optional()
+    })
+    .default({ preference: [1, 2, 3] }),
+  verification: z
+    .object({
+      status: z.enum(["unverified", "verified", "failed"]),
+      checks: z.array(VerificationCheck).default([])
+    })
+    .default({ status: "unverified", checks: [] }),
+  provenance: z.object({
+    source: z.enum(["two_example_learning", "watch_me", "network_capture", "repair", "upstream_spec"]),
+    engine: z.string(),
+    learned_at: z.string(),
+    evidence_ids: z.array(z.string()).default([]),
+    warnings: z.array(z.string().max(500)).default([]),
+    parent_operation_id: z.string().optional(),
+    /** the inputs a person typed to teach it (never kept when a param is private), for health checks and repair */
+    example_inputs: z
+      .object({
+        learning: z.array(z.record(z.string(), z.unknown())).max(2),
+        unseen: z.record(z.string(), z.unknown()).optional()
+      })
+      .optional()
+  })
+});
+
+export function parseContract(input) {
+  const result = ApiOperationContractSchema.safeParse(input);
+  if (!result.success) {
+    throw new Error(`API_CONTRACT_INVALID: ${z.prettifyError(result.error).split("\n").slice(0, 6).join("; ")}`);
+  }
+  return result.data;
+}
+
+/** The upstream Operation the vendored codec, http and classifier work on. */
+export function toUpstreamOperation(contract) {
+  return OperationSchema.parse({
+    name: contract.name,
+    ...(contract.description ? { description: contract.description } : {}),
+    request: contract.request,
+    slots: contract.slots,
+    volatile: contract.volatile,
+    trigger: contract.trigger,
+    match: contract.match,
+    response: contract.response,
+    params: contract.params,
+    readOnly: contract.side_effect === "read",
+    ...(contract.public?.length ? { public: contract.public } : {}),
+    minTier: contract.min_tier,
+    learnedLoggedIn: contract.learned_logged_in
+  });
+}
+
+const WRITE_PATH =
+  /(^|[/_.-])(add|create|delete|remove|destroy|update|edit|save|submit|post|send|vote|upvote|downvote|like|unlike|follow|unfollow|subscribe|unsubscribe|purchase|buy|checkout|order|pay|cart|logout|signout|sign-out|register|signup|comment|reply|share|invite|transfer|cancel|book|reserve|archive|mute|block|report)([/_.-]|$)/i;
+const READ_PATH = /(^|[/_.-])(search|query|find|list|lookup|get|fetch|read|autocomplete|suggest|typeahead|browse|filter|results?|feed|details?|info|view)([/_.-]|$)/i;
+
+/** The GraphQL documents and operation names a request carries (JSON body, batched array, or URL). */
+export function graphqlOf(request) {
+  const documents = [];
+  const names = [];
+  const body = typeof request.body === "string" ? request.body : "";
+  let parsed;
+  try {
+    parsed = body ? JSON.parse(body) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  for (const item of Array.isArray(parsed) ? parsed : parsed ? [parsed] : []) {
+    if (!item || typeof item !== "object") continue;
+    if (typeof item.query === "string") documents.push(item.query);
+    if (typeof item.operationName === "string") names.push(item.operationName);
+  }
+  if (!parsed && /^\s*(query|mutation|subscription|fragment|\{)/.test(body)) documents.push(body);
+  try {
+    const url = new URL(request.url);
+    for (const key of ["query"]) {
+      const value = url.searchParams.get(key);
+      if (value && /^\s*(query|mutation|fragment|\{)/.test(value)) documents.push(value);
+    }
+    for (const key of ["operationName", "opname", "operation"]) {
+      const value = url.searchParams.get(key);
+      if (value) names.push(value);
+    }
+  } catch {
+    // no address to read
+  }
+  const headers = request.headers || {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (/^(x-apollo-)?operation-?name$/i.test(key) && typeof value === "string" && value) names.push(value);
+  }
+  return { documents, names };
+}
+
+/**
+ * The kind of a GraphQL document: "mutation" if it defines one anywhere,
+ * "query" if it defines only queries (or is the `{ … }` shorthand). Fragments
+ * alone say nothing.
+ */
+export function graphqlKind(document) {
+  const text = document.replace(/#[^\n]*/g, "").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  if (/(^|[\s}])(mutation|subscription)\s*[A-Za-z_({@]/.test(text)) return "mutation";
+  if (/(^|[\s}])query\s*[A-Za-z_({@]/.test(text) || /^\s*\{/.test(text)) return "query";
+  return undefined;
+}
+
+// an operation name's leading verb (createOrder, AddToCart; not AddressLookup)
+const GQL_WRITE_VERB = /^(create|delete|remove|update|add|set|save|submit|send|post|upsert|insert|edit|cancel|checkout|pay|purchase|follow|unfollow|like|unlike|vote|subscribe|unsubscribe|login|logout|register)(?=[A-Z_0-9]|$)/;
+const GQL_READ_VERB = /^(search|query|get|list|fetch|find|lookup|load|read|browse|autocomplete|suggest)(?=[A-Z_0-9]|$)|(Search|Query|List|Lookup|Details?|Info)$/;
+const verbOf = (name) => name.charAt(0).toLowerCase() + name.slice(1);
+const writeName = (name) => /mutation/i.test(name) || GQL_WRITE_VERB.test(verbOf(name));
+const readName = (name) => GQL_READ_VERB.test(verbOf(name)) || GQL_READ_VERB.test(name);
+
+/**
+ * Conservative side-effect class from evidence, never from the method alone.
+ * A GET to an action-looking path is unknown; a POST is read only with a
+ * GraphQL query, a search-like path, or a person's say-so. `request` is the
+ * request as the page sent it: a learned request's own body can have had its
+ * GraphQL document turned into a template.
+ */
+export function classifySideEffect(request, { operationName, declared } = {}) {
+  if (declared === "write") return { side_effect: "write", basis: "declared a write by the person" };
+  if (declared === "read") return { side_effect: "read", basis: "confirmed read-only by the person" };
+  const method = String(request.method || "GET").toUpperCase();
+  let pathname = "";
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    pathname = "";
+  }
+  const body = typeof request.body === "string" ? request.body : "";
+  const graphql = graphqlOf(request);
+  const names = [...new Set([...(operationName ? [operationName] : []), ...graphql.names])];
+  const kinds = graphql.documents.map(graphqlKind).filter(Boolean);
+  if (kinds.includes("mutation") || names.some(writeName)) {
+    return { side_effect: "write", basis: "GraphQL mutation" };
+  }
+  if (method === "GET" || method === "HEAD") {
+    if (WRITE_PATH.test(pathname)) return { side_effect: "unknown", basis: `${method} to an action-looking path ${pathname}` };
+    return { side_effect: "read", basis: `${method} without an action-looking path` };
+  }
+  if (method === "POST") {
+    // the method says nothing for GraphQL: every operation is a POST
+    if (kinds.length && kinds.every((kind) => kind === "query")) {
+      return { side_effect: "read", basis: `GraphQL query${names[0] ? ` ${names[0]}` : ""}` };
+    }
+    if (READ_PATH.test(pathname) && !WRITE_PATH.test(pathname)) {
+      return { side_effect: "read", basis: `POST to a search-like path ${pathname}` };
+    }
+    if (/persistedQuery/.test(body) && names.some(readName)) {
+      return { side_effect: "read", basis: `persisted GraphQL ${names.find(readName)}` };
+    }
+  }
+  return { side_effect: "unknown", basis: `${method} ${pathname || "request"} without read evidence` };
+}
+
+/** Stable id: origin, method, matcher and name; independent of rotating ids. */
+export function operationId(origin, name, match) {
+  const digest = createHash("sha256")
+    .update(JSON.stringify([origin, name, match?.method || "", match?.host || "", match?.path || "", match?.operationName || ""]))
+    .digest("hex")
+    .slice(0, 16);
+  return `op-${digest}`;
+}
+
+/** Param examples a person typed are kept for health checks unless marked private. */
+function keptParams(params, privateParams = []) {
+  const hidden = new Set(privateParams);
+  return params.map((param) => {
+    if (!hidden.has(param.name)) return param;
+    const { example: _example, ...rest } = param;
+    return { ...rest, description: [rest.description, "example not kept (private)"].filter(Boolean).join("; ") };
+  });
+}
+
+/** A contract from upstream learning output; refs are listed by name only. */
+/**
+ * The learned request with a private input's own value taken out: each of
+ * its slots gets a placeholder (a run fills every slot anyway), so the value
+ * typed while learning is not kept in the contract.
+ */
+function withoutPrivateValues(request, slots, params, privateParams = []) {
+  const hidden = new Set(privateParams);
+  let out = request;
+  for (const slot of slots) {
+    if (!slot.param || !hidden.has(slot.param)) continue;
+    const type = params.find((param) => param.name === slot.param)?.type;
+    const placeholder = type === "number" || type === "integer" ? 0 : type === "boolean" ? false : `{${slot.param}}`;
+    try {
+      out = setAt(out, slot.at, placeholder);
+    } catch {
+      // a slot the learner could not address again: the secret scan below still guards the contract
+    }
+  }
+  return out;
+}
+
+export function contractFromOperation(operation, meta) {
+  const origin = new URL(operation.request.url).origin;
+  const classified = classifySideEffect(meta.observed_request || operation.request, {
+    operationName: operation.match?.operationName,
+    declared: meta.side_effect
+  });
+  const refs = [
+    ...new Set(
+      operation.slots.flatMap((slot) => [
+        ...(slot.ref ? [slot.ref] : []),
+        ...[...(slot.template || "").matchAll(/\{((?:cookie|session):[^{}]+)\}/g)].map((m) => m[1])
+      ])
+    )
+  ].sort();
+  return parseContract({
+    contract_version: API_CONTRACT_VERSION,
+    operation_id: operationId(origin, operation.name, operation.match),
+    name: operation.name,
+    ...(operation.description || meta.description ? { description: meta.description || operation.description } : {}),
+    origin,
+    side_effect: classified.side_effect,
+    side_effect_basis: classified.basis,
+    request: withoutPrivateValues(operation.request, operation.slots, operation.params, meta.private_params),
+    slots: operation.slots,
+    volatile: operation.volatile,
+    params: keptParams(operation.params, meta.private_params),
+    session_refs: refs,
+    session_sources: sessionSources(refs, operation.name, meta.storage || {}),
+    ...(operation.public?.length ? { public: operation.public } : {}),
+    response: operation.response,
+    match: operation.match,
+    trigger: operation.trigger,
+    min_tier: operation.minTier,
+    learned_logged_in: operation.learnedLoggedIn,
+    transport: { preference: [1, 2, 3] },
+    verification: { status: "unverified", checks: [] },
+    provenance: {
+      source: meta.source || "two_example_learning",
+      engine: ENGINE_ID,
+      learned_at: operation.learnedAt || new Date().toISOString(),
+      evidence_ids: meta.evidence_ids || [],
+      warnings: (meta.warnings || []).map((warning) => String(warning).slice(0, 500)).slice(0, 20),
+      ...(meta.parent_operation_id ? { parent_operation_id: meta.parent_operation_id } : {}),
+      ...(meta.example_inputs && !(meta.private_params || []).length ? { example_inputs: meta.example_inputs } : {})
+    }
+  });
+}

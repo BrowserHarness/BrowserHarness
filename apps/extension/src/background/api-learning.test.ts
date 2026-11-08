@@ -1,0 +1,261 @@
+import { describe, expect, it, vi } from "vitest";
+import { fillPageUrl, learnApiOperation, type ApiLearnDeps } from "./api-learning";
+import type { ApiCapture } from "./api-capture";
+import { searchContract } from "../runtime/api-recipe.fixture";
+import { withApiRecipe } from "../runtime/api-recipe";
+
+function capture(url: string): ApiCapture {
+  return {
+    capture_version: 1,
+    final_url: url,
+    locations: [url],
+    exchanges: [],
+    cookies: [{ name: "sid", value: "secret-cookie-value", domain: "shop.example", path: "/", expires: -1, httpOnly: true, secure: true }],
+    storage: { token: "secret-storage-value" }
+  };
+}
+
+function deps(overrides: Partial<ApiLearnDeps> = {}) {
+  const saved: unknown[] = [];
+  const evaluations: unknown[] = [];
+  const executions: unknown[] = [];
+  const base: ApiLearnDeps = {
+    runPage: vi.fn(async (url: string) => capture(url)),
+    bridge: vi.fn(async (action, payload) =>
+      action === "learn"
+        ? { ok: true, data: { contract: { ...searchContract(), verification: { status: "unverified", checks: [] } }, warnings: [], example_fingerprints: ["f1", "f2"], echo: payload } }
+        : { ok: true, data: { contract: searchContract(), check: searchContract().verification.checks.at(-1) } }
+    ),
+    dispatch: vi.fn(async () => ({ ok: true, class: "ok" as const, tier: 2 as const, data: [{ id: "m1" }], item_count: 1, fetched_at: "", fresh: true as const })),
+    loadBase: vi.fn(async () => null),
+    save: vi.fn(async (candidate, reason) => {
+      saved.push({ candidate, reason });
+      return { revision_id: "rev-1" };
+    }),
+    evaluate: vi.fn(async (_id, _revision, entry) => {
+      evaluations.push(entry);
+    }),
+    execution: vi.fn(async (_id, _revision, entry) => {
+      executions.push(entry);
+      return entry;
+    }),
+    now: () => "2026-10-10T06:00:00.000Z",
+    newId: () => "abc123",
+    ...overrides
+  };
+  return { deps: base, saved, evaluations, executions };
+}
+
+const input = {
+  name: "search",
+  page_url: "https://shop.example/search?q={q}",
+  examples: [{ q: "laptops" }, { q: "lap tops & more" }],
+  verify_args: { q: "monitors" }
+};
+
+describe("site_skill learn_api", () => {
+  it("fills {name} holes percent-encoded", () => {
+    expect(fillPageUrl(input.page_url, { q: "lap tops & more" })).toBe("https://shop.example/search?q=lap%20tops%20%26%20more");
+  });
+
+  it("runs the page once per example, learns through the Bridge and saves an unpromoted candidate with its evidence", async () => {
+    const { deps: d, saved, evaluations, executions } = deps();
+    const outcome = await learnApiOperation(d, input);
+    expect(outcome.ok).toBe(true);
+    expect(d.runPage).toHaveBeenNthCalledWith(1, "https://shop.example/search?q=laptops");
+    expect(d.runPage).toHaveBeenNthCalledWith(2, "https://shop.example/search?q=lap%20tops%20%26%20more");
+    const payload = vi.mocked(d.bridge).mock.calls[0][1];
+    expect(payload).toMatchObject({ name: "search", examples: input.examples, trigger: { url: input.page_url }, evidence_ids: ["api-abc123"] });
+    expect(d.dispatch).toHaveBeenCalledWith(expect.objectContaining({ name: "search" }), { q: "monitors" });
+    expect(vi.mocked(d.bridge).mock.calls[1]).toEqual([
+      "verify",
+      expect.objectContaining({ args: { q: "monitors" }, examples: input.examples, example_fingerprints: ["f1", "f2"], response: expect.objectContaining({ tier: 2 }) })
+    ]);
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ reason: "create", candidate: { status: "candidate", lifecycle: { auto_promote: false } } });
+    expect(JSON.stringify(saved)).not.toMatch(/secret-cookie-value|secret-storage-value/);
+    expect(evaluations).toEqual([
+      expect.objectContaining({ kind: "structural-verification", outcome: "passed" }),
+      expect.objectContaining({ kind: "execution", outcome: "passed" })
+    ]);
+    expect(executions).toEqual([expect.objectContaining({ outcome: "passed", parameter_names: ["q"], submitted: false })]);
+    if (outcome.ok) {
+      expect(outcome.data.operation).toMatchObject({ name: "search", side_effect: "read" });
+      expect(outcome.data.result_preview).toEqual([{ id: "m1" }]);
+      expect(outcome.data.answered_by_tier).toBe(2);
+      expect(outcome.data.promotion).toMatch(/Promote it with site_skill promote/);
+    }
+  });
+
+  it("adds to an existing Skill as a refinement revision", async () => {
+    const existing = withApiRecipe(null, {
+      contract: { ...searchContract(), operation_id: "op-other", name: "other" },
+      entry_url: "https://shop.example/",
+      title: "Shop",
+      evidence_id: "old",
+      captured_at: ""
+    });
+    const { deps: d, saved } = deps({ loadBase: vi.fn(async () => ({ candidate: existing, revision_id: "rev-0" })) });
+    const outcome = await learnApiOperation(d, { ...input, id: existing.id });
+    expect(outcome.ok).toBe(true);
+    expect(saved[0]).toMatchObject({ reason: "refinement", candidate: { id: existing.id } });
+    expect((saved[0] as { candidate: { recipes: unknown[] } }).candidate.recipes).toHaveLength(2);
+  });
+
+  it("records a failed verification as failed evidence and says it will not be promoted", async () => {
+    const failedCheck = { kind: "unseen_input", passed: false, tier: 1, class: "ok", arg_names: ["q"], detail: "found nothing", checked_at: "" };
+    const { deps: d, evaluations } = deps({
+      bridge: vi.fn(async (action) =>
+        action === "learn"
+          ? { ok: true, data: { contract: searchContract(), example_fingerprints: [] } }
+          : { ok: true, data: { contract: { ...searchContract(), verification: { status: "failed", checks: [failedCheck] } }, check: failedCheck } }
+      )
+    });
+    const outcome = await learnApiOperation(d, input);
+    expect(outcome.ok).toBe(true);
+    expect(evaluations).toEqual([
+      expect.objectContaining({ kind: "structural-verification", outcome: "failed" }),
+      expect.objectContaining({ kind: "execution", outcome: "failed" })
+    ]);
+    if (outcome.ok) expect(outcome.data.promotion).toMatch(/will not be promoted/);
+  });
+
+  it("refuses writes, bad input and a missing third input before opening any page", async () => {
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ ...input, side_effect: "write" }, "API_LEARN_WRITE_REFUSED"],
+      [{ ...input, name: "two words" }, "API_LEARN_INPUT"],
+      [{ ...input, page_url: "https://shop.example/search" }, "API_LEARN_INPUT"],
+      [{ ...input, page_url: "file:///etc/{q}" }, "API_LEARN_INPUT"],
+      [{ ...input, examples: [{ q: "laptops" }] }, "API_LEARN_INPUT"],
+      [{ ...input, verify_args: undefined }, "API_LEARN_INPUT"]
+    ];
+    for (const [bad, code] of cases) {
+      const { deps: d } = deps();
+      const outcome = await learnApiOperation(d, bad as never);
+      expect(outcome.ok, JSON.stringify(bad)).toBe(false);
+      if (!outcome.ok) expect(outcome.error.code).toBe(code);
+      expect(d.runPage).not.toHaveBeenCalled();
+    }
+  });
+
+  it("passes Bridge errors through and saves nothing", async () => {
+    const { deps: d, saved } = deps({
+      bridge: vi.fn(async () => ({ ok: false, error: { code: "API_LEARN_FAILED", message: "no request carries the example values", details: "[]" } }))
+    });
+    const outcome = await learnApiOperation(d, input);
+    expect(outcome).toMatchObject({ ok: false, error: { code: "API_LEARN_FAILED" } });
+    expect(saved).toHaveLength(0);
+  });
+});
+
+describe("site_skill learn_api: choosing the request (RC1 acceptance F6, F9)", () => {
+  const listed = [
+    { id: 3, request: "POST https://shop.example/api/panel", method: "POST", url: "https://shop.example/api/panel", carries: [], score: 900 },
+    { id: 4, request: "POST https://shop.example/api/playlist/edit", method: "POST", url: "https://shop.example/api/playlist/edit", carries: [], score: 700 }
+  ];
+
+  it("a refusal returns the requests to choose from, and pick_request is passed to the helper app", async () => {
+    const { deps: d, saved } = deps({
+      bridge: vi.fn(async () => ({ ok: false, error: { code: "API_LEARN_FAILED", message: "holds the live cookie", details: JSON.stringify(listed) } }))
+    });
+    const outcome = await learnApiOperation(d, input);
+    expect(outcome).toMatchObject({ ok: false, error: { code: "API_LEARN_FAILED" }, data: { candidates: listed } });
+    expect(saved).toHaveLength(0);
+    const picked = deps();
+    await learnApiOperation(picked.deps, { ...input, pick_request: listed[1].request });
+    expect(vi.mocked(picked.deps.bridge).mock.calls[0][1]).toMatchObject({ pick_request: "POST https://shop.example/api/playlist/edit" });
+  });
+
+  it("learns a page with no input (a signed-in list) from two plain runs and a picked request, checked live with no input", async () => {
+    const noInput = { name: "orders", page_url: "https://shop.example/account/orders" };
+    // without a pick, the page runs and the helper app's refusal lists its requests
+    const unpicked = deps({
+      bridge: vi.fn(async () => ({ ok: false, error: { code: "API_LEARN_PICK_REQUEST", message: "choose one with pick_request", details: JSON.stringify(listed) } }))
+    });
+    expect(await learnApiOperation(unpicked.deps, noInput as never)).toMatchObject({ ok: false, error: { code: "API_LEARN_PICK_REQUEST" }, data: { candidates: listed } });
+    expect(vi.mocked(unpicked.deps.bridge).mock.calls[0][1]).toMatchObject({ examples: [{}, {}] });
+    expect(unpicked.saved).toHaveLength(0);
+    const { deps: d } = deps();
+    const outcome = await learnApiOperation(d, { ...noInput, pick_request: "GET https://shop.example/api/my-orders" } as never);
+    expect(outcome.ok).toBe(true);
+    expect(d.runPage).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ examples: [{}, {}], pick_request: "GET https://shop.example/api/my-orders" });
+    expect(d.dispatch).toHaveBeenCalledWith(expect.anything(), {});
+  });
+
+  it("learns a checkbox write from Watch Me with a picked request, sending nothing", async () => {
+    const write = { ...searchContract(), side_effect: "write" as const, params: [], verification: { status: "unverified" as const, checks: [] } };
+    const box = { recording_id: "box", start_url: "https://shop.example/watch", capture: capture("https://shop.example/watch"), examples: {}, kept_at: 0 };
+    const { deps: d } = deps({
+      watchCapture: vi.fn(() => box),
+      forgetWatch: vi.fn(),
+      bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: [] } }))
+    });
+    const outcome = await learnApiOperation(d, { name: "watch_later", from_watch: ["box"], side_effect: "write", pick_request: 4 } as never);
+    expect(outcome.ok).toBe(true);
+    expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ examples: [{}], side_effect: "write", pick_request: 4 });
+    expect(d.dispatch).not.toHaveBeenCalled();
+    if (outcome.ok) expect(outcome.data.verification.status).toBe("unverified");
+  });
+});
+
+describe("site_skill learn_api from Watch Me", () => {
+  function recording(id: string, search: string) {
+    return {
+      recording_id: id,
+      start_url: "https://shop.example/",
+      capture: capture(`https://shop.example/search?q=${search}`),
+      examples: { search, note: "same" },
+      kept_at: 0
+    };
+  }
+  const kept: Record<string, ReturnType<typeof recording>> = { a: recording("a", "laptops"), b: recording("b", "keyboards") };
+  const watchDeps = (extra: Partial<ApiLearnDeps> = {}) =>
+    deps({ watchCapture: vi.fn((id: string) => kept[id] || null), forgetWatch: vi.fn(), ...extra });
+
+  it("learns from two recordings' captures with the fields typed differently, without running the page", async () => {
+    const { deps: d } = watchDeps();
+    const outcome = await learnApiOperation(d, { name: "search", from_watch: ["a", "b"], verify_args: { search: "monitors" } } as never);
+    expect(outcome.ok).toBe(true);
+    expect(d.runPage).not.toHaveBeenCalled();
+    const payload = vi.mocked(d.bridge).mock.calls[0][1];
+    expect(payload).toMatchObject({ source: "watch_me", examples: [{ search: "laptops" }, { search: "keyboards" }], evidence_ids: ["watch-a"] });
+    expect(payload.trigger).toBeUndefined();
+    expect(payload.captures).toHaveLength(2);
+    expect(d.dispatch).toHaveBeenCalledWith(expect.anything(), { search: "monitors" });
+    // RC2 N7: the captures stay for their 15 minutes, so another pick needs no new recording
+    expect(d.forgetWatch).not.toHaveBeenCalled();
+  });
+
+  it("learns a demonstrated write without sending it, keeping no typed values", async () => {
+    const write = { ...searchContract(), side_effect: "write" as const, verification: { status: "unverified" as const, checks: [] } };
+    const { deps: d, executions } = watchDeps({
+      bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: ["f1"] } }))
+    });
+    const outcome = await learnApiOperation(d, { name: "post", from_watch: ["a"], side_effect: "write", verify_args: { search: "x" } } as never);
+    expect(outcome.ok).toBe(true);
+    expect(d.dispatch).not.toHaveBeenCalled();
+    expect(vi.mocked(d.bridge)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ side_effect: "write", private_params: ["search", "note"] });
+    expect(executions).toHaveLength(0);
+    if (outcome.ok) expect(outcome.data.promotion).toMatch(/never sent to check it/);
+  });
+
+  it("a demonstrated write's typed inputs stay private even with an empty or partial private_params", async () => {
+    for (const given of [[], ["other"]]) {
+      const write = { ...searchContract(), side_effect: "write" as const, verification: { status: "unverified" as const, checks: [] } };
+      const { deps: d } = watchDeps({ bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: [] } })) });
+      await learnApiOperation(d, { name: "post", from_watch: ["a"], side_effect: "write", private_params: given } as never);
+      expect(vi.mocked(d.bridge).mock.calls[0][1].private_params).toEqual(expect.arrayContaining(["search", "note", ...given]));
+    }
+  });
+
+  it("says when a recording's capture is gone or typed nothing different", async () => {
+    const { deps: d } = watchDeps();
+    expect(await learnApiOperation(d, { name: "search", from_watch: ["gone"] } as never)).toMatchObject({ ok: false, error: { code: "API_LEARN_WATCH_MISSING" } });
+    kept.c = { ...recording("c", "laptops") };
+    expect(await learnApiOperation(d, { name: "search", from_watch: ["a", "c"] } as never)).toMatchObject({ ok: false, error: { code: "API_LEARN_INPUT" } });
+    expect(d.bridge).not.toHaveBeenCalled();
+  });
+});

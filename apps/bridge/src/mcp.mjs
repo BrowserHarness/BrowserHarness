@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import { isLongCommand } from "./command-timeouts.mjs";
 
 export const BROWSERHARNESS_MCP_VERSION = "0.1.0";
 
@@ -26,7 +27,7 @@ const TOOL_SPECS = [
     name: optional(z.string(), "Skill name from the list, e.g. \"check-prices\"; omit to list them"),
     details: optional(z.string(), "Extra details for this run, e.g. \"size 9\"")
   }, true],
-  ["site_commands", "List the commands BrowserHarness learned from websites (each has a name, site, kind and parameters), or run one: pass name and parameters. It opens the site in its own tab. read commands return the site's own data; form commands fill and send a form and may need the person's approval in Chrome (APPROVAL_REQUIRED means they must run it from the side panel).", {
+  ["site_commands", "List the commands BrowserHarness learned from websites (each has a name, site, kind and parameters), or run one: pass name and parameters. It opens the site in its own tab. read commands return the site's own data; form commands fill and send a form and may need the person's approval in Chrome (APPROVAL_REQUIRED means they must run it from the side panel). A learned API write that the site accepted answers sent: true with verification: \"unverified\": the request was sent, but nothing confirmed the change. Never report it as done or verified, never send it again; check the site (next_action).", {
     name: optional(z.string(), "Command name from the list, e.g. \"amazon-search\"; omit to list them"),
     parameters: optional(z.record(z.string(), z.unknown()), "Values by parameter name, e.g. {\"q\": \"kettle\"}"),
     args: optional(z.string(), "Or the values as text: \"kettle\" or \"q=kettle page=2\"")
@@ -125,16 +126,23 @@ const TOOL_SPECS = [
     id: optional(z.string(), "Episode id for get/delete"),
     limit: optional(z.number().int().positive(), "Maximum results")
   }],
-  ["site_skill", "Saved website Skills: list, run, create from the current page, verify, history, compare, promote, rollback or delete.", {
+  ["site_skill", "Saved website Skills: list, run, create from the current page, learn a website's own API from two examples or a Watch Me demonstration (learn_api), verify, repair a learned operation the site changed, history, compare, promote, rollback or delete.", {
     action: action(
-      ["list", "get", "create", "verify", "run", "refine", "history", "compare", "promote", "rollback", "delete"],
+      ["list", "get", "create", "learn_api", "verify", "run", "refine", "repair", "history", "compare", "promote", "rollback", "delete"],
       "What to do"
     ),
-    id: optional(z.string(), "Skill id"),
+    id: optional(z.string(), "Skill id (for learn_api: add the operation to this Skill)"),
     revision_id: optional(z.string(), "Specific revision"),
     recipe_id: optional(z.string(), "Recipe to run"),
     parameters: optional(z.record(z.string(), z.unknown()), "Values for run"),
-    name: optional(z.string(), "Name for create")
+    name: optional(z.string(), "Name for create; operation name for learn_api, like search"),
+    page_url: optional(z.string(), "learn_api: the page address with {input} where each input goes"),
+    examples: optional(z.array(z.record(z.string(), z.unknown())), "learn_api/repair: two example inputs with different values"),
+    verify_args: optional(z.record(z.string(), z.unknown()), "learn_api/repair: a third input neither example used, to check the operation live"),
+    skill_name: optional(z.string(), "learn_api: name for a new Skill"),
+    from_watch: optional(z.array(z.string()).max(2), "learn_api: learn from one or two Watch Me recording ids (their api_capture) instead of running the page"),
+    side_effect: optional(z.enum(["read", "write"]), "learn_api: read or write; a write is learned only from Watch Me and asks before every run"),
+    pick_request: optional(z.union([z.string(), z.number().int()]), "learn_api: the request to learn, as a refusal lists it (\"POST https://host/path\", or its id in a Watch Me capture); needed when nothing was typed (a checkbox, a list with no input)")
   }],
   ["cdp", "Raw Chrome DevTools Protocol call; last resort when no other tool fits.", {
     method: z.string().min(1).describe("CDP method, e.g. Page.getLayoutMetrics"),
@@ -196,6 +204,8 @@ export function createBridgeHttpClient(
   {
     fetchImpl = globalThis.fetch,
     commandTimeoutMs = 40_000,
+    // the Bridge waits up to 5 minutes for a learn or a Site Command run; wait a little longer
+    longCommandTimeoutMs = 310_000,
     statusTimeoutMs = 3_000
   } = {}
 ) {
@@ -252,7 +262,7 @@ export function createBridgeHttpClient(
             action,
             args
           }),
-          signal: AbortSignal.timeout(commandTimeoutMs)
+          signal: AbortSignal.timeout(isLongCommand({ action, args }) ? Math.max(longCommandTimeoutMs, commandTimeoutMs) : commandTimeoutMs)
         });
 
         const body = await responseBody(response);
@@ -405,11 +415,20 @@ export function siteToolName(name) {
   return `browserharness_site_${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
 }
 
+/** What `browserharness-bridge site <name>` prints for a run that is not printed as JSON. */
+export function siteRunText(data) {
+  if (data.kind === "read") return `${data.output ?? ""}\n`;
+  if (data.verification === "unverified") {
+    return `Sent to ${data.site}; the site answered HTTP ${data.http_status ?? "?"}, but the change is NOT verified. Check the site yourself and do not send it again.\n`;
+  }
+  return `${data.submitted ? "Filled and sent the form" : "Filled the form without sending it"} on ${data.site}.\n`;
+}
+
 export function siteToolDescription(command) {
   const what =
     command.kind === "read"
       ? "Returns the site's own data in one call (read-only)."
-      : "Fills and sends a form on the site; may need the person's approval in Chrome.";
+      : "Fills and sends a form on the site; may need the person's approval in Chrome. If it answers verification: \"unverified\", the request was sent but the change is not confirmed: do not resend; check the site.";
   const trust = command.status === "proven" ? "" : " BrowserHarness is still testing this command; check the result.";
   return `${command.title} on ${command.site}. ${what}${trust} Opens the site in its own tab.`;
 }

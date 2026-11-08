@@ -66,6 +66,10 @@ BrowserHarness extension. Pages, cookies and logins stay on their computer.
 - \`APPROVAL_REQUIRED\` means the user must approve that action (sending,
   buying, deleting, submitting) in the BrowserHarness side panel. Tell them
   what you are about to do and wait; never work around it.
+- \`sent: true\` with \`verification: "unverified"\` means a write reached the
+  site and it answered success, but nothing confirmed the change happened.
+  It is not a completed task: never send it again, say it was sent but not
+  verified, and check the site (\`next_action\`).
 - Logins, CAPTCHAs and 2FA: ask the user to complete them in Chrome, then
   observe again. Never type passwords you were not given for that purpose.
 - If the same action fails twice on an unchanged page, try a different

@@ -58,3 +58,8 @@ Current mandatory suites cover:
 
 ## User acceptance rule
 Do not ask the user to install another build for every individual fix. Batch related fixes into a stability candidate and request the smallest possible acceptance check only after the full gate passes.
+
+## Native API engine gate
+`npm run gate:api-engine` runs, locally and never on GitHub Actions: the vendored upstream check, Bridge and extension tests, typecheck, build, Bridge bundle, MV3 contract and the real-Chromium fixture test (`smoke:api-engine`). `--quick` skips the browser test. Fixture results never count as real-site acceptance.
+
+For the three real-Chromium fixture suites on Windows, install `playwright-core` locally without committing it as a dependency, and use Chrome for Testing (not regular installed Chrome). Set `$env:CHROME` to its `chrome.exe` before running `npm run gate:api-engine`, or run `smoke:api-engine`, `smoke:api-acceptance` and `smoke:watch-me` individually. All scripts use disposable Bridge homes and browser profiles. Local HTTP fixture access must be allowed; a sandbox `EACCES` for `127.0.0.1` is an environment failure.

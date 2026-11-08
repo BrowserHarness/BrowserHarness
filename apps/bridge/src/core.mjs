@@ -2,6 +2,8 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { createPairingManager, extensionIdFromOrigin } from "./pairing.mjs";
+import { apiErrorCode } from "./api-engine/service.mjs";
+import { isLongCommand } from "./command-timeouts.mjs";
 
 export const BRIDGE_PROTOCOL_VERSION = "0.1";
 
@@ -70,11 +72,18 @@ function normalizeCommand(body) {
   ) {
     throw new Error("args must be an object");
   }
+  // the tool's own fields go in args; without args they may sit beside
+  // session and action, but never both, so nothing is dropped unseen
+  const { session: _session, action: _action, title: _title, args, ...rest } = body;
+  const beside = Object.keys(rest);
+  if (args !== undefined && beside.length) {
+    throw new Error(`${beside.join(", ")} must go inside args`);
+  }
 
   return {
     session: body.session.trim(),
     action: body.action.trim(),
-    args: body.args || {},
+    args: args || rest,
     title:
       typeof body.title === "string" && body.title.trim()
         ? body.title.trim()
@@ -87,7 +96,9 @@ export function createBridgeServer({
   port = 10087,
   token,
   commandTimeoutMs = 30_000,
+  longCommandTimeoutMs = 300_000,
   mcpManager = null,
+  apiEngine = null,
   llmManager = null,
   allowRemote = false,
   onExtensionEvent = null,
@@ -214,7 +225,10 @@ export function createBridgeServer({
           extension_version: extensionMeta?.extension_version || "",
           remote_mode: !isLoopbackHost(host),
           mcp_client_enabled: Boolean(mcpManager),
-          mcp_servers_configured: configuredMcpServers
+          mcp_servers_configured: configuredMcpServers,
+          // Availability, startup failures, exits and operation errors per server.
+          mcp_server_health: mcpManager?.diagnostics?.() || {},
+          api_engine_enabled: Boolean(apiEngine)
         });
         return;
       }
@@ -438,7 +452,7 @@ export function createBridgeServer({
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error("Bridge command timed out"));
-      }, commandTimeoutMs);
+      }, isLongCommand(command) ? Math.max(longCommandTimeoutMs, commandTimeoutMs) : commandTimeoutMs);
 
       pending.set(id, { resolve, reject, timer });
       target.send(
@@ -742,6 +756,33 @@ export function createBridgeServer({
           return;
         }
 
+        if (message.type === "api_request" && typeof message.id === "string") {
+          const send = (body) => ws.send(JSON.stringify({ type: "api_result", id: message.id, ...body }));
+          if (extension !== ws) {
+            send({ ok: false, error: { code: "API_EXTENSION_REQUIRED", message: "API engine requests must come from the paired BrowserHarness extension" } });
+            return;
+          }
+          if (!apiEngine) {
+            send({ ok: false, error: { code: "API_ENGINE_UNAVAILABLE", message: "This BrowserHarness Bridge has no API engine" } });
+            return;
+          }
+          try {
+            // `approved` is the extension's record that the person approved this write
+            const data = await apiEngine.handle(message.action, message.payload, { approved: message.approved === true });
+            send({ ok: true, data });
+          } catch (error) {
+            send({
+              ok: false,
+              error: {
+                code: apiErrorCode(error),
+                message: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+                ...(Array.isArray(error?.candidates) ? { candidates: error.candidates } : {})
+              }
+            });
+          }
+          return;
+        }
+
         if (message.type === "chat_notify" && typeof message.app === "string" && typeof message.text === "string") {
           if (ws === extension) await onExtensionEvent?.(message);
           return;
@@ -761,7 +802,11 @@ export function createBridgeServer({
             ok: Boolean(message.ok),
             ...(message.ok
               ? { data: message.data }
-              : { error: message.error }),
+              : {
+                  error: message.error,
+                  // what to do next (next_action, failure class, repair hints) travels with a failure too
+                  ...(message.data !== undefined ? { data: message.data } : {})
+                }),
             // The page as it looks after the action, when the extension sent it.
             ...(message.ok && message.page ? { page: message.page } : {})
           });
