@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyTaskIntent } from "./intent";
+import { classifyTaskIntent, replyAsksForBrowser } from "./intent";
 
 describe("classifyTaskIntent", () => {
   it.each([
@@ -32,7 +32,8 @@ describe("classifyTaskIntent", () => {
     "search the tea shop for green tea and add it to the cart",
     "sign me up for the webinar",
     "subscribe me to their newsletter",
-    "save these results to a csv"
+    "save these results to a csv",
+    "Use DuckDuckGo Lite to find 3 quiet beaches in South Goa."
   ])("routes browser work: %s", (prompt) => {
     expect(classifyTaskIntent(prompt)).toBe("browser");
   });
@@ -56,5 +57,12 @@ describe("tasks on named sites, shopping and follow-ups", () => {
     expect(classifyTaskIntent("proceed", { continuing: true })).toBe("browser");
     expect(classifyTaskIntent("Go ahead and repeat for the other competitors", { continuing: true })).toBe("browser");
     expect(classifyTaskIntent("why is the sky blue?", { continuing: true })).toBe("chat");
+  });
+});
+
+describe("replyAsksForBrowser", () => {
+  it("spots a tool call written as chat text", () => {
+    expect(replyAsksForBrowser("I will search.\n\n<tool_call> <function=browser_navigate> <parameter=url> https://lite.duckduckgo.com </parameter> </function> </tool_call>")).toBe(true);
+    expect(replyAsksForBrowser("Palolem and Agonda are quiet beaches in South Goa.")).toBe(false);
   });
 });

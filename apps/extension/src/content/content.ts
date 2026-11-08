@@ -262,6 +262,24 @@ function recordedAttributes(
   return attributes;
 }
 
+// Only expose search fields to the planner so it can verify search typing.
+// General text, contact and sign-in fields may contain private information.
+function shareableValue(element: HTMLElement): string | undefined {
+  if (!(isInputElement(element) || element instanceof HTMLTextAreaElement)) return undefined;
+  if (isInputElement(element) && !["text", "search"].includes(element.type.toLowerCase())) return undefined;
+  const autocomplete = (element.getAttribute("autocomplete") || "").toLowerCase();
+  if (/cc-|password|one-time-code/.test(autocomplete)) return undefined;
+  const fieldName = element.getAttribute("name") || "";
+  const isSearch =
+    (isInputElement(element) && element.type.toLowerCase() === "search") ||
+    element.getAttribute("role") === "searchbox" ||
+    /^(q|query|search|searchterm|search_query)$/i.test(fieldName) ||
+    element.closest('form[role="search"], [role="search"]') !== null;
+  if (!isSearch) return undefined;
+  const value = (element as HTMLInputElement | HTMLTextAreaElement).value.trim();
+  return value ? value.slice(0, 120) : undefined;
+}
+
 function locatorFor(element: HTMLElement): WorkflowLocator {
   const risk = riskForElement(element);
   return {
@@ -619,6 +637,7 @@ function observe(tabId: number) {
       disabled:
         "disabled" in element &&
         Boolean((element as HTMLButtonElement | HTMLInputElement).disabled),
+      ...(shareableValue(element) ? { value: shareableValue(element) } : {}),
       ...riskForElement(element)
     };
     });

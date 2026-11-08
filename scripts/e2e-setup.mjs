@@ -39,7 +39,7 @@ fs.writeFileSync(
   path.join(home, ".browserharness-bridge", "config.json"),
   JSON.stringify({ host: "127.0.0.1", port, allow_remote: false, token: "setup-" + Math.random().toString(36).slice(2) })
 );
-const env = { ...process.env, HOME: home, USERPROFILE: home, BROWSERHARNESS_BUNDLED_NODE: "1" };
+const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming"), LOCALAPPDATA: path.join(home, "AppData", "Local"), BROWSERHARNESS_BUNDLED_NODE: "1" };
 delete env.NODE_OPTIONS;
 
 check(

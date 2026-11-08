@@ -22,9 +22,13 @@ if (!fs.existsSync(path.join(dist, "manifest.json"))) {
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "bh-sub-"));
 const argLog = path.join(work, "args.log");
-const fakeCli = path.join(work, "fake-claude");
+// Windows cannot run a #! script: stand in with the .cmd script npm writes for a CLI.
+const windows = process.platform === "win32";
+const fakeScript = path.join(work, windows ? "fake-claude.js" : "fake-claude");
+const fakeCli = windows ? path.join(work, "fake-claude.cmd") : fakeScript;
+if (windows) fs.writeFileSync(fakeCli, '@ECHO off\r\nnode  "%dp0%\\fake-claude.js" %*\r\n');
 fs.writeFileSync(
-  fakeCli,
+  fakeScript,
   `#!/usr/bin/env node
 const fs = require("node:fs");
 let input = "";
