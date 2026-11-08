@@ -103,6 +103,29 @@ test("R5-4: a GraphQL query sent as POST is learned as a read", () => {
   assert.match(contract.side_effect_basis, /GraphQL query/);
 });
 
+test("R5-4: automatic GraphQL search ignores a higher-scoring request with write evidence in either capture order", () => {
+  for (const insertFirst of [true, false]) {
+    const capture = (q) => {
+      const run = gatewayRun(q, `https://learn.example/search?query=${q}`);
+      const competing = exchange(3, "POST", "https://learn.example/graphql-gateway?opname=CreateDynamicFilterSkillGroups", {
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operationName: "CreateDynamicFilterSkillGroups", variables: { query: q }, query: "mutation CreateDynamicFilterSkillGroups($query: String!) { createDynamicFilterSkillGroups(query: $query) { id } }" }),
+        response: { data: { createDynamicFilterSkillGroups: [{ id: q, description: "x".repeat(9000) }] } }
+      });
+      if (insertFirst) run.exchanges.splice(1, 0, competing);
+      else run.exchanges.push(competing);
+      return run;
+    };
+    const { contract } = learnApiOperation({
+      name: "course_search",
+      captures: [capture("python"), capture("statistics")],
+      examples: [{ q: "python" }, { q: "statistics" }]
+    });
+    assert.equal(contract.side_effect, "read", `insertFirst=${insertFirst}: ${contract.side_effect_basis}`);
+    assert.equal(contract.match.operationName, "Search", `insertFirst=${insertFirst}`);
+  }
+});
+
 test("R5-4: GraphQL classification reads the document, names and batches, not the method", () => {
   const post = (body, url = "https://x.example/graphql") => classifySideEffect({ method: "POST", url, body: JSON.stringify(body) });
   assert.equal(post({ query: "query Search { a }" }).side_effect, "read");

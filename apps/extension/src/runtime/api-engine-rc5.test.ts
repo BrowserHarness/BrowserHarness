@@ -6,13 +6,29 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../background/cdp-manager", () => ({ cdpCommand: vi.fn(), subscribeCdpEvents: vi.fn(() => () => undefined) }));
 vi.mock("../background/page-evaluate", () => ({ evaluatePageExpression: vi.fn() }));
 import { dispatchApiOperation, type ApiDispatchDeps } from "./api-dispatch";
-import type { ApiCallResult, ApiOperationContract } from "./api-recipe";
+import { apiWriteApprovalMessage, type ApiCallResult, type ApiOperationContract } from "./api-recipe";
 import { searchContract } from "./api-recipe.fixture";
 import { captureRecords, MAX_CAPTURE_EXCHANGES } from "../background/api-capture";
 import { noteWatchStart, takeWatchStart } from "../background/api-watch";
 import type { NetworkRecord } from "../background/network-capture";
 import type { SiteCommand } from "./site-commands";
 import { siteCommandAnswer } from "../ui/site-command-answer";
+
+describe("RC5 real-site scenario 7: cross-host approval", () => {
+  it("names the website and the different API destination before a write", () => {
+    const contract: ApiOperationContract = {
+      ...searchContract(),
+      name: "save_item",
+      origin: "https://api.partner.example",
+      side_effect: "write",
+      side_effect_basis: "explicitly declared a write"
+    };
+    const message = apiWriteApprovalMessage("Partner Site", "https://www.partner.example", contract);
+    expect(message).toContain("on www.partner.example (it sends to api.partner.example)");
+    expect(message).toContain("may change data there");
+    expect(message).not.toContain("Always allow");
+  });
+});
 
 describe("R5-1: Watch Me learns from what the demonstration did, not the tab's history", () => {
   const record = (index: number, startedAt: number, url = `https://monorail-edge.example/v1/produce?n=${index}`): NetworkRecord => ({

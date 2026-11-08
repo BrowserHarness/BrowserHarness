@@ -553,7 +553,14 @@ export function learnApiOperation(input) {
       const order = new Map(run1.exchanges.map((exchange, index) => [exchange.id, index]));
       const full = ranked.filter((candidate) => candidate.hits.length >= (ranked[0]?.hits.length ?? 0));
       const prefer = (pool, test) => (pool.some(test) ? pool.filter(test) : pool);
-      const pool = prefer(prefer(full, (candidate) => !isAutocomplete(candidate)), (candidate) => !isPage(candidate));
+      const data = prefer(prefer(full, (candidate) => !isAutocomplete(candidate)), (candidate) => !isPage(candidate));
+      // A search page may send a mutation-looking GraphQL request carrying the
+      // same input as its actual search. A read must never auto-pick a known
+      // write just because its response is larger or happens to arrive later.
+      const pool = input.side_effect === "write" ? data : prefer(data, (candidate) => {
+        const exchange = run1.exchanges.find((item) => item.id === candidate.id);
+        return exchange && classifySideEffect(exchange.request, { operationName: candidate.operationName }).side_effect === "read";
+      });
       const top = Math.max(...pool.map((candidate) => candidate.score));
       const tied = pool.filter((candidate) => candidate.score === top);
       const chosen = tied.reduce((last, candidate) => ((order.get(candidate.id) ?? 0) > (order.get(last.id) ?? 0) ? candidate : last), tied[0]);
