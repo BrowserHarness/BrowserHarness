@@ -39,7 +39,7 @@ async function evaluateIn(url, expression) {
 }
 
 /** Starts everything; `check(name, ok, detail)` records setup steps. */
-export async function startHarness({ check = () => undefined, title = "API engine test" } = {}) {
+export async function startHarness({ check = () => undefined, title = "API engine test", shopFactory, setupFixtureSession = true } = {}) {
   for (const file of [path.join(dist, "manifest.json"), bundle]) {
     if (!fs.existsSync(file)) {
       console.error("Build first: npm run build && npm run build:bridge");
@@ -79,7 +79,7 @@ export async function startHarness({ check = () => undefined, title = "API engin
     return body;
   };
 
-  const shop = await startApiShop();
+  const shop = shopFactory ? await shopFactory() : await startApiShop();
   let ctx;
   const close = async () => {
     await ctx?.close().catch(() => undefined);
@@ -98,8 +98,9 @@ export async function startHarness({ check = () => undefined, title = "API engin
       headless: false,
       args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, "--headless=new", "--no-sandbox", `--remote-debugging-port=${debugPort}`]
     });
-    // a signed-in-looking session on the shop, to prove its values are not kept
-    await ctx.addCookies([{ name: "sid", value: SESSION_COOKIE, url: shop.origin }]);
+    // The historical API fixtures intentionally inject a synthetic session;
+    // the commerce lab signs in through the actual website instead.
+    if (setupFixtureSession) await ctx.addCookies([{ name: "sid", value: SESSION_COOKIE, url: shop.origin }]);
     const sw = ctx.serviceWorkers()[0] || (await ctx.waitForEvent("serviceworker", { timeout: 15000 }));
     const extId = sw.url().split("/")[2];
     const side = await ctx.newPage();
@@ -117,7 +118,7 @@ export async function startHarness({ check = () => undefined, title = "API engin
     check("extension pairs with the Bridge", lastJson(paired.stdout)?.paired === true, paired.stderr.trim());
     const shopPage = await ctx.newPage();
     await shopPage.goto(`${shop.origin}/search`);
-    await shopPage.evaluate((value) => localStorage.setItem("authToken", value), STORAGE_TOKEN);
+    if (setupFixtureSession) await shopPage.evaluate((value) => localStorage.setItem("authToken", value), STORAGE_TOKEN);
     await shopPage.close();
     /**
      * Opens the person's real side panel (with a click, as a person would) and
