@@ -140,4 +140,10 @@ describe("hosted models", () => {
     expect(text).not.toContain('"element_id"');
     expect(renderObservationForPrompt(busyPage(100), LOCAL_BUDGET)).toContain("first 70 shown");
   });
+
+  it("show what a text box already holds, so typing isn't repeated", () => {
+    const page = busyPage(1);
+    page.elements[0] = { ...page.elements[0], role: "textbox", tag: "input", value: "Panaji weather" };
+    expect(renderObservationForPrompt(page)).toContain('<input> value="Panaji weather"');
+  });
 });

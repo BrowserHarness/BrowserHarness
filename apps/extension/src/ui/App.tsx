@@ -189,7 +189,7 @@ import type {
   AdaptiveReplayDependencies,
   AdaptiveReplayToolExecution
 } from "../runtime/adaptive-replay";
-import { classifyTaskIntent } from "../runtime/intent";
+import { classifyTaskIntent, replyAsksForBrowser } from "../runtime/intent";
 import type { ToolName } from "../runtime/protocol";
 import {
   finalizeRecordedSteps,
@@ -1326,10 +1326,13 @@ export function App({ fullPage = false }: { fullPage?: boolean }) {
             finishActivity(fallbackActivity);
           }
 
-          addAssistantMessage(routed.result);
-          await saveHistory(typed, routed.result, spaceId);
-          learnFactsInBackground(primary);
-          return;
+          if (!replyAsksForBrowser(routed.result)) {
+            addAssistantMessage(routed.result);
+            await saveHistory(typed, routed.result, spaceId);
+            learnFactsInBackground(primary);
+            return;
+          }
+          // The AI wants to use the browser: do the task there instead.
         } catch (error) {
           finishActivity(activity, cancelled.current ? "done" : "error");
           throw error;

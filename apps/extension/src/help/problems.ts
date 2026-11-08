@@ -66,7 +66,16 @@ const statusIn = (message: string): number | undefined => {
 };
 
 /** Turn an error from connecting to or testing an AI into a Problem. */
+// "the AI service" must not become "the the AI service" or "your the AI service".
+const the = (service: string) => (/^(the|your) /.test(service) ? service : `the ${service}`);
+const your = (service: string) => (/^(the|your) /.test(service) ? service.replace(/^the /, "your ") : `your ${service}`);
+
 export function diagnoseAi(error: unknown, context: AiContext = {}): Problem {
+  const problem = diagnose(error, context);
+  return { ...problem, title: problem.title.charAt(0).toUpperCase() + problem.title.slice(1) };
+}
+
+function diagnose(error: unknown, context: AiContext): Problem {
   const detail = messageOf(error).trim();
   const status = statusIn(detail);
   const service = context.service || (context.local ? context.app || "your AI app" : "the AI service");
@@ -105,6 +114,18 @@ export function diagnoseAi(error: unknown, context: AiContext = {}): Problem {
       detail
     };
   }
+  if (status === 413 || /request too large/i.test(detail)) {
+    return {
+      title: `The page is too big for ${your(service)} plan`,
+      reason: `On your plan, often a free one, ${service} only takes a limited amount of text per request, and this page needs more.`,
+      fixes: [
+        "Ask about a shorter page, or one part of this page.",
+        `Or choose a model with a higher limit, or raise your limit on ${the(service)} website.`
+      ],
+      guide: "ai-page-too-big",
+      detail
+    };
+  }
   if (status === 401 || status === 402 || /unauthori[sz]ed|invalid api key|incorrect api key|invalid_api_key|authentication|insufficient credits|payment required/i.test(detail)) {
     if (context.local) {
       return {
@@ -123,7 +144,7 @@ export function diagnoseAi(error: unknown, context: AiContext = {}): Problem {
       title: `${service} said no to your key`,
       reason: "The secret key is wrong or was deleted, or your account needs credit before it can be used.",
       fixes: [
-        `Open your ${service} account on its website and check it has credit.`,
+        `Open ${your(service)} account on its website and check it has credit.`,
         "Make a new secret key there and paste it here, with nothing extra before or after it.",
         "Press Test and save again."
       ],
@@ -148,7 +169,7 @@ export function diagnoseAi(error: unknown, context: AiContext = {}): Problem {
     return {
       title: `${service} refused the request`,
       reason: "Your account isn't allowed to use this model, or the service blocked the request.",
-      fixes: [`Check on the ${service} website that your account may use this model.`, "Or choose another model."],
+      fixes: [`Check on ${the(service)} website that your account may use this model.`, "Or choose another model."],
       guide: "ai-key-rejected",
       detail
     };
@@ -166,7 +187,7 @@ export function diagnoseAi(error: unknown, context: AiContext = {}): Problem {
     return {
       title: `${service} is busy, or your limit is used up`,
       reason: "The service is getting too many requests right now, or your plan's limit for today is reached.",
-      fixes: ["Wait a minute and try again.", `If it keeps happening, check your plan or credit on the ${service} website.`, "Or add a Backup AI under Your AI."],
+      fixes: ["Wait a minute and try again.", `If it keeps happening, check your plan or credit on ${the(service)} website.`, "Or add a Backup AI under Your AI."],
       guide: "ai-busy-or-limit",
       detail
     };
