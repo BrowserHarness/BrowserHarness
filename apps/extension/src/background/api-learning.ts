@@ -322,13 +322,17 @@ async function learnAndSave(deps: ApiLearnDeps, input: ApiLearnInput, run: Learn
   const recipeId = apiRecipeFromContract(contract, candidate.site.entry_url).id;
   const saved = await deps.save(candidate, base ? "refinement" : "create");
   const verified = contract.verification.status === "verified";
-  await deps.evaluate(candidate.id, saved.revision_id, {
-    kind: "structural-verification",
-    outcome: verified ? "passed" : "failed",
-    detail: verified
-      ? `API contract ${contract.operation_id}: both learning runs and an unseen input answered`
-      : `API contract ${contract.operation_id} did not verify: ${check?.detail || contract.verification.status}`
-  });
+  // A demonstrated write is deliberately never replayed for verification.
+  // Keep it pending rather than recording an evaluation failure before it runs.
+  if (contract.side_effect !== "write" || contract.verification.status !== "unverified") {
+    await deps.evaluate(candidate.id, saved.revision_id, {
+      kind: "structural-verification",
+      outcome: verified ? "passed" : "failed",
+      detail: verified
+        ? `API contract ${contract.operation_id}: both learning runs and an unseen input answered`
+        : `API contract ${contract.operation_id} did not verify: ${check?.detail || contract.verification.status}`
+    });
+  }
   if (check?.class) {
     // the unseen-input call was a real, live call of the recipe
     await deps.evaluate(candidate.id, saved.revision_id, {

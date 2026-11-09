@@ -74,6 +74,9 @@ export function siteCommandAnswer(command: SiteCommand, result: ToolResult<unkno
   const output = data.output;
   const rows = rowsIn(output);
   const note = data.truncated ? "\n\nThe site returned more than fits here, so the end is cut off." : "";
+  const emptyList = Array.isArray(output) && output.length === 0 ||
+    (isRecord(output) && ["results", "items"].some((key) => Array.isArray(output[key]) && output[key].length === 0));
+  if (!rows && emptyList) return `**/${command.name}** on ${command.site}: 0 results.${note}`;
   if (rows) {
     const more = rows.length > MAX_ROWS ? `\n\nShowing the first ${MAX_ROWS} of ${rows.length}.` : "";
     return `**/${command.name}** on ${command.site}: ${rows.length} result${rows.length === 1 ? "" : "s"}.\n\n${markdownTable(rows)}${more}${note}`;

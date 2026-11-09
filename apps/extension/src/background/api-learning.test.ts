@@ -187,7 +187,7 @@ describe("site_skill learn_api: choosing the request (RC1 acceptance F6, F9)", (
   it("learns a checkbox write from Watch Me with a picked request, sending nothing", async () => {
     const write = { ...searchContract(), side_effect: "write" as const, params: [], verification: { status: "unverified" as const, checks: [] } };
     const box = { recording_id: "box", start_url: "https://shop.example/watch", capture: capture("https://shop.example/watch"), examples: {}, kept_at: 0 };
-    const { deps: d } = deps({
+    const { deps: d, evaluations } = deps({
       watchCapture: vi.fn(() => box),
       forgetWatch: vi.fn(),
       bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: [] } }))
@@ -196,6 +196,7 @@ describe("site_skill learn_api: choosing the request (RC1 acceptance F6, F9)", (
     expect(outcome.ok).toBe(true);
     expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ examples: [{}], side_effect: "write", pick_request: 4 });
     expect(d.dispatch).not.toHaveBeenCalled();
+    expect(evaluations).toEqual([]);
     if (outcome.ok) expect(outcome.data.verification.status).toBe("unverified");
   });
 });
@@ -230,7 +231,7 @@ describe("site_skill learn_api from Watch Me", () => {
 
   it("learns a demonstrated write without sending it, keeping no typed values", async () => {
     const write = { ...searchContract(), side_effect: "write" as const, verification: { status: "unverified" as const, checks: [] } };
-    const { deps: d, executions } = watchDeps({
+    const { deps: d, evaluations, executions } = watchDeps({
       bridge: vi.fn(async () => ({ ok: true, data: { contract: write, warnings: [], example_fingerprints: ["f1"] } }))
     });
     const outcome = await learnApiOperation(d, { name: "post", from_watch: ["a"], side_effect: "write", verify_args: { search: "x" } } as never);
@@ -238,6 +239,7 @@ describe("site_skill learn_api from Watch Me", () => {
     expect(d.dispatch).not.toHaveBeenCalled();
     expect(vi.mocked(d.bridge)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(d.bridge).mock.calls[0][1]).toMatchObject({ side_effect: "write", private_params: ["search", "note"] });
+    expect(evaluations).toEqual([]);
     expect(executions).toHaveLength(0);
     if (outcome.ok) expect(outcome.data.promotion).toMatch(/never sent to check it/);
   });

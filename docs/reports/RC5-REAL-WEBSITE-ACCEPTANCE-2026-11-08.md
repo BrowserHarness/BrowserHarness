@@ -1,6 +1,6 @@
 # Native API Engine RC5 — real-website acceptance, 2026-11-08
 
-**Release decision: NO MERGE.** Four of the eight real-site scenarios passed, two were partial, one was blocked by the absence of an authenticated account in the disposable Chrome profile, and one did not encounter the required real-world drift. This is acceptance evidence for the local `codex/rc5-integration` candidate (base `1d47512`, plus the GraphQL auto-selection correction), not a claim about a released build.
+**November 8 decision: NO MERGE.** Four of the eight real-site scenarios passed, two were partial, one was blocked by the absence of an authenticated account in the disposable Chrome profile, and one did not encounter the required real-world drift. This is acceptance evidence for the local `codex/rc5-integration` candidate (base `1d47512`, plus the GraphQL auto-selection correction), not a claim about a released build. The November 9 scoped release decision and its qualifications are recorded below.
 
 Environment: Windows 11; Chrome for Testing in isolated, disposable profiles; the built BrowserHarness extension and locally running Bridge. Public websites were visited directly. GitHub Actions were not used. No personal sign-in credentials were copied into the profiles. Guest-cart tests used a disposable cart, never checked out, and cleared it after the test.
 
@@ -51,8 +51,16 @@ This satisfies scenario **7, external cross-host API with a real write consent c
 
 For scenario 6, the user accepted the **controlled HTTP commerce lab** as scoped RC5 drift-and-repair release evidence. That lab passed **26/26**, including actual API endpoint migration detection, verified repair, and explicit promotion. **Natural third-party endpoint drift remains NOT TRIGGERED** and is expressly waived as a release criterion for this RC5 review. This scope decision does not reclassify the public-site scenario as PASS or establish natural drift behavior on a third-party site.
 
-## Merge blockers and next acceptance
+## Scoped release-gate acceptance — 2026-11-09
 
-The external cross-host write gate passed on DemoBlaze. The controlled-lab drift waiver is recorded above. The remaining release gate is the **corrected authenticated Toolshop profile-isolation end-to-end check**, which requires an authorized rerun after the safety-check rejection; the 15/16 first run and its incorrect guest redirect assertion cannot be recorded as 16/16. Keep R5-7 (pre-run write status), R5-8 (write inference without explicit `side_effect`), and R5-9 (empty-list rendering) on the known-issues list and disposition them before merging. **PR #54 remains DRAFT — NO MERGE.**
+The user accepted the existing authenticated Toolshop evidence as **scoped RC5 release-gate evidence**. The original live run remains **15/16** with one incorrect test assertion about the guest `/account` URL; an independent read-only guest inspection established the actual Sign in page and `/users/me` 401 response. The corrected end-to-end script **was not run** because the external login attempt was blocked by platform safety checks. The public-site scenario 8 remains **PARTIAL**, with no claim of a 16/16 rerun. This is an explicit evidence qualification for release review, not a retroactive public-site PASS.
+
+The user also accepted the **26/26 controlled HTTP commerce lab** as scoped drift-and-repair release evidence. The public scenario 6 remains **NOT TRIGGERED**, with natural third-party drift waived for RC5. DemoBlaze cross-host write acceptance remains **13/13 PASS**. The public-site assessment stays **6 PASS, 1 PARTIAL, 1 NOT TRIGGERED**.
+
+The final issue review addressed R5-7 by leaving a newly demonstrated, intentionally unverified write in its pending state rather than recording a failed structural check before any execution, and R5-9 by rendering empty direct lists and common empty result wrappers as **0 results**. R5-8 is **deferred**: Watch Me write learning still requires an explicit `side_effect: "write"`. Inferring a write from ambiguous captures would affect request selection and treatment of private inputs; that change needs its own guarded acceptance cohort. Existing explicit-write learning and per-run approval remain the RC5 path.
+
+**Post-fix local verification on November 9:** `npm run gate:api-engine` passed pinned upstream checks, **151/151 Bridge tests**, **832/832 extension tests**, typecheck, builds, MV3 validation, **48/48** real-Chromium API-engine checks, **23/23** approval checks, and **26/26** Watch Me checks. A separate `npm run smoke:commerce-lab` passed **26/26** including authenticated isolation, endpoint repair, and cross-host write approval. All ran locally without GitHub Actions or external credentials.
+
+PR #54 can proceed through review using these scoped gates. Its merge record must retain the 15/16 Toolshop qualification, the controlled drift waiver, and the R5-8 deferral.
 
 The source scripts used for reproducible live checks are `scripts/rc5-real-site-acceptance.mjs` and `scripts/rc5-panel-watch-real.mjs`. They are manual tests against external sites and must never run automatically in CI. Re-run the cart portion only with permission to alter and clear the disposable guest cart.
