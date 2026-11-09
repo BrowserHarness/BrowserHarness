@@ -2,6 +2,7 @@
 // command with typed parameters, like `amazon-search --q kettle`. The side
 // panel runs it with /name, coding agents get it as a tool, and the Bridge
 // CLI runs it with `browserharness-bridge site <name>`.
+import { apiRecipeNeedsApproval, describeWriteTarget, recipeKind } from "./api-recipe";
 import type { SiteSkillParameterType, SiteSkillRecipe } from "./site-skill";
 import { listSiteSkillFamilies, type SiteSkillFamilyRecord } from "./site-skill-store";
 import { loadAllSkills } from "./skills";
@@ -30,6 +31,20 @@ export interface SiteCommand {
   entry_url: string;
   /** read: fetches the site's own data, never changes anything. form: fills and sends a form. */
   kind: "read" | "form";
+  /** false for a learned API operation (API Recipe v2): it runs without opening the site */
+  needs_page?: boolean;
+  /** ui (forms), api (the site's own requests) or hybrid */
+  recipe_kind?: "ui" | "api" | "hybrid";
+  /** a learned API operation: how it was checked and how it is sent */
+  api?: {
+    operation_id: string;
+    side_effect: "read" | "write" | "unknown";
+    verification: "unverified" | "verified" | "failed";
+    learned_tier?: 1 | 2 | 3;
+    min_tier: 1 | 2 | 3;
+    /** a write: what it acts on, in words (a fixed item, or the inputs given) */
+    target?: string;
+  };
   status: "proven" | "testing" | "check failed";
   skill_id: string;
   revision_id: string;
@@ -75,6 +90,11 @@ export function siteLabel(origin: string): string {
 
 /** "GET /api/v2/products/search" → "products-search"; a form → its name. */
 export function recipeLabel(recipe: SiteSkillRecipe): string {
+  const operation = recipe.steps.find((step) => step.kind === "api_operation");
+  // a learned operation has its own name ("searchProducts" → "search-products")
+  if (operation?.kind === "api_operation") {
+    return slug(operation.contract.name.replace(/([a-z0-9])([A-Z])/g, "$1-$2")) || "data";
+  }
   if (recipe.form_index < 0) {
     const segments = recipe.action
       .split("/")
@@ -157,6 +177,11 @@ export function buildSiteCommands(
       }
     })();
 
+    // a learned operation takes the plain name; the form it was watched on
+    // keeps "-form" (RC3: /site-add-to-cart filled the form instead)
+    const learned = new Set(
+      candidate.recipes.filter((item) => recipeKind(item) !== "ui").map((item) => recipeLabel(item))
+    );
     for (const recipe of candidate.recipes) {
       const key = `${family.id}:${recipe.id}`;
       const executions = (family.executions || []).filter((item) => item.recipe_id === recipe.id);
@@ -168,7 +193,24 @@ export function buildSiteCommands(
         site,
         origin: candidate.site.origin,
         entry_url: recipe.entry_url || candidate.site.entry_url,
-        kind: recipe.form_index < 0 ? "read" : "form",
+        // a learned API write runs like a form: it asks the person first
+        kind: recipe.form_index < 0 && !apiRecipeNeedsApproval(recipe) ? "read" : "form",
+        recipe_kind: recipeKind(recipe),
+        ...((): Partial<SiteCommand> => {
+          const step = recipe.steps.find((item) => item.kind === "api_operation");
+          if (!step || step.kind !== "api_operation") return {};
+          return {
+            needs_page: false,
+            api: {
+              operation_id: step.contract.operation_id,
+              side_effect: step.contract.side_effect,
+              verification: step.contract.verification.status,
+              ...(step.contract.side_effect !== "read" ? { target: describeWriteTarget(step.contract) } : {}),
+              ...(step.contract.transport.learned_tier ? { learned_tier: step.contract.transport.learned_tier } : {}),
+              min_tier: step.contract.min_tier
+            }
+          };
+        })(),
         status,
         skill_id: family.id,
         revision_id: revisionId,
@@ -178,7 +220,9 @@ export function buildSiteCommands(
         worked: executions.filter((item) => item.outcome === "passed").length
       };
       const renamed = slug(names[key] || "");
-      pending.push({ base: renamed || `${siteLabel(candidate.site.origin)}-${recipeLabel(recipe)}`, command });
+      const label = recipeLabel(recipe);
+      const own = recipeKind(recipe) === "ui" && learned.has(label) ? `${label}-form` : label;
+      pending.push({ base: renamed || `${siteLabel(candidate.site.origin)}-${own}`, command });
     }
   }
 
@@ -296,6 +340,8 @@ export function describeSiteCommand(command: SiteCommand) {
     site: command.site,
     kind: command.kind,
     status: command.status,
+    ...(command.needs_page === false ? { runs_without_page: true } : {}),
+    ...(command.api?.target ? { acts_on: command.api.target } : {}),
     usage: usage(command),
     parameters: command.parameters.map((parameter) => ({
       name: parameter.name,
@@ -311,3 +357,45 @@ export function describeSiteCommand(command: SiteCommand) {
 }
 
 export const SITE_COMMAND_NAMES_KEY = NAMES_KEY;
+
+/**
+ * What a site command answers after its Site Skill run. A write the site
+ * accepted keeps its `sent`, `verification: "unverified"` and `next_action`:
+ * an HTTP 200 is never presented as a verified change.
+ */
+export function siteCommandAnswer(
+  command: Pick<SiteCommand, "name" | "site" | "kind">,
+  data: unknown
+): Record<string, unknown> {
+  const result = (data || {}) as {
+    run?: { submitted?: boolean; executed_steps?: number; output?: Record<string, unknown> & { api?: { tier?: number; class?: string; item_count?: number } } };
+    sent?: boolean;
+    verification?: string;
+    next_action?: string;
+  };
+  const run = result.run;
+  return {
+    command: command.name,
+    site: command.site,
+    kind: command.kind,
+    ...(run?.output
+      ? {
+          ...(command.kind === "form" ? { submitted: Boolean(run.submitted) } : {}),
+          http_status: run.output.http_status,
+          truncated: run.output.truncated,
+          output: run.output.data,
+          // a learned operation: which tier answered (plain HTTP, the page's request, or the page)
+          ...(run.output.api
+            ? { tier: run.output.api.tier, class: run.output.api.class, ...(run.output.api.item_count !== undefined ? { item_count: run.output.api.item_count } : {}) }
+            : {})
+        }
+      : { submitted: Boolean(run?.submitted), steps: run?.executed_steps ?? 0 }),
+    ...(result.verification === "unverified"
+      ? {
+          sent: result.sent === true,
+          verification: "unverified",
+          next_action: result.next_action || "the site accepted the request; check the site to confirm the change, and do not resend it"
+        }
+      : {})
+  };
+}

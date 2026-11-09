@@ -1,0 +1,397 @@
+#!/usr/bin/env node
+// Local real-Chromium test of the native API engine: the built extension runs
+// a local stand-in shop twice in background tabs (two example searches), the
+// Bridge learns the request behind the results, checks it live with a third
+// search, and the saved recipe then runs without opening the site. Covers a
+// plain GET API, a persisted GraphQL query, signed-in and page-only reads,
+// repair, and learning from Watch Me demonstrations (a search and a write). No AI model, no internet.
+// Requires: npm run build, npm run build:bridge, playwright-core. Never runs on GitHub Actions.
+import { startHarness, SESSION_COOKIE, STORAGE_TOKEN } from "./lib/api-engine-harness.mjs";
+
+const results = [];
+const timings = [];
+const check = (name, ok, detail = "") => {
+  results.push(ok);
+  console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
+};
+
+let harness;
+try {
+  harness = await startHarness({ check });
+  const { ctx, side, shop, command, inSidePanel } = harness;
+
+  const tabsBefore = ctx.pages().length;
+  const learned = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    name: "search",
+    page_url: `${shop.origin}/search?q={q}`,
+    examples: [{ q: "laptops" }, { q: "keyboards" }],
+    verify_args: { q: "monitors" },
+    skill_name: "Fixture shop"
+  });
+  timings.push(["learn_api (2 page runs + learn + live check)", learned.elapsed_ms]);
+  check(
+    "learn_api learns the GET search from two runs and verifies it with a third input",
+    learned.ok && learned.data.verification.status === "verified" && learned.data.operation.side_effect === "read",
+    JSON.stringify(learned.error || learned.data?.verification).slice(0, 400)
+  );
+  check("the third input's live answer is that input's data", JSON.stringify(learned.data?.result_preview || "").includes("27 inch monitor"));
+  check("the background tabs it used are closed", ctx.pages().length === tabsBefore, `${tabsBefore} → ${ctx.pages().length}`);
+  const sentQueries = shop.state.requests.filter((item) => item.path === "/api/search").map((item) => new URLSearchParams(item.search).get("q"));
+  check("both example runs and the live check reached the shop's API", ["laptops", "keyboards", "monitors"].every((q) => sentQueries.includes(q)), sentQueries.join(","));
+
+  const graph = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: learned.data?.candidate_id,
+    name: "searchProducts",
+    page_url: `${shop.origin}/gql-search?q={q}`,
+    examples: [{ q: "laptops" }, { q: "keyboards" }],
+    verify_args: { q: "tablets" }
+  });
+  check(
+    "a persisted GraphQL query is learned into the same Skill",
+    graph.ok && graph.data.verification.status === "verified" && graph.data.candidate_id === learned.data?.candidate_id,
+    JSON.stringify(graph.error || graph.data?.verification).slice(0, 400)
+  );
+
+  const library = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.siteSkillLibrary.v2"))["browserharness.siteSkillLibrary.v2"]);
+  const stored = JSON.stringify(library);
+  check("no cookie or storage value is stored in the Skill library", !stored.includes(SESSION_COOKIE) && !stored.includes(STORAGE_TOKEN));
+  const family = library?.families?.find((item) => item.id === learned.data?.candidate_id);
+  check("the Skill stays a candidate: nothing was promoted", family && !family.active_revision_id && family.revisions.length === 2, JSON.stringify(family?.active_revision_id));
+
+  const before = shop.state.requests.length;
+  const runStarted = performance.now();
+  const ran = await command("agent", "site_skill", { action: "run", id: learned.data?.candidate_id, recipe_id: learned.data?.recipe_id, parameters: { q: "tablets" } });
+  timings.push(["site_skill run of the learned GET (tier 1)", Math.round(performance.now() - runStarted)]);
+  check(
+    "the learned recipe runs without a tab and returns fresh data",
+    ran.ok && ran.data.run.output.api.tier === 1 && JSON.stringify(ran.data.run.output.data).includes("Slate tablet"),
+    JSON.stringify(ran.error || ran.data?.run?.output).slice(0, 300)
+  );
+  check("it sent one request with the new input", shop.state.requests.slice(before).length === 1 && shop.state.requests.at(-1).search.includes("q=tablets"));
+
+  const listed = await command("agent", "site_commands");
+  const names = (listed.data?.commands || []).map((item) => item.name);
+  const cmd = listed.data?.commands?.find((item) => item.name === "local-search");
+  check("each learned operation is a named read command", cmd?.kind === "read" && names.includes("local-search-products"), names.join(", "));
+  const pagesBefore = ctx.pages().length;
+  const viaCommand = await command("agent", "site_commands", { name: "local-search-products", parameters: { q: "monitors" } });
+  check(
+    "the GraphQL command runs and opens no tab",
+    viaCommand.ok && ctx.pages().length === pagesBefore && JSON.stringify(viaCommand.data).includes("34 inch ultrawide monitor"),
+    JSON.stringify(viaCommand.error || viaCommand.data || "").slice(0, 300)
+  );
+
+  // Hybrid execution: a signed-in API (plain HTTP has no session, the page does)
+  const orders = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: learned.data?.candidate_id,
+    name: "orders",
+    page_url: `${shop.origin}/orders?q={q}`,
+    examples: [{ q: "laptops" }, { q: "keyboards" }],
+    verify_args: { q: "monitors" }
+  });
+  check(
+    "a signed-in read verifies through the page (tier 2) after plain HTTP answers auth",
+    orders.ok && orders.data.verification.status === "verified" && orders.data.answered_by_tier === 2,
+    JSON.stringify(orders.error || orders.data?.verification).slice(0, 400)
+  );
+  const orderRunStarted = performance.now();
+  const orderRun = await command("agent", "site_skill", { action: "run", id: learned.data?.candidate_id, recipe_id: orders.data?.recipe_id, parameters: { q: "tablets" } });
+  timings.push(["site_skill run of the signed-in read (remembered tier 2)", Math.round(performance.now() - orderRunStarted)]);
+  check(
+    "the next run goes straight to the remembered page tier",
+    orderRun.ok && orderRun.data.run.output.api.tier === 2 && JSON.stringify(orderRun.data.run.output.data).includes("Slate tablet"),
+    JSON.stringify(orderRun.error || orderRun.data?.run?.output).slice(0, 300)
+  );
+  check("the session cookie is still not stored anywhere in the library", !JSON.stringify(await side.evaluate(async () => chrome.storage.local.get(null))).includes(SESSION_COOKIE));
+
+  // A signed-in list with no input (RC1 acceptance F6, F9): the first learn
+  // lists the page's requests, the second learns the one picked
+  const unpicked = await command("learn-api", "site_skill", { action: "learn_api", name: "my_orders", page_url: `${shop.origin}/account/orders` });
+  const listedRequests = unpicked.data?.candidates || [];
+  const ordersRequest = listedRequests.find((item) => /\/api\/my-orders$/.test(item.request || ""));
+  check(
+    "a page with no input lists its requests to choose from, with no values",
+    !unpicked.ok && unpicked.error?.code === "API_LEARN_PICK_REQUEST" && ordersRequest && !JSON.stringify(listedRequests).includes(SESSION_COOKIE),
+    JSON.stringify(unpicked.error || unpicked.data).slice(0, 400)
+  );
+  const myOrders = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: learned.data?.candidate_id,
+    name: "my_orders",
+    page_url: `${shop.origin}/account/orders`,
+    pick_request: ordersRequest?.request
+  });
+  check(
+    "the picked no-input read verifies live with real data through the page",
+    myOrders.ok && myOrders.data.verification.status === "verified" && myOrders.data.answered_by_tier === 2 && myOrders.data.operation.params.length === 0,
+    JSON.stringify(myOrders.error || myOrders.data?.verification).slice(0, 400)
+  );
+  check("the session cookie is not stored after learning the list", !JSON.stringify(await side.evaluate(async () => chrome.storage.local.get(null))).includes(SESSION_COOKIE));
+
+  // A per-load signature: only the page itself can make the request (tier 3)
+  const guarded = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: learned.data?.candidate_id,
+    name: "guarded",
+    page_url: `${shop.origin}/guarded?q={q}`,
+    examples: [{ q: "laptops" }, { q: "keyboards" }],
+    verify_args: { q: "monitors" }
+  });
+  check(
+    "a request with a per-load signature is learned as page-only and verifies through the page (tier 3)",
+    guarded.ok && guarded.data.operation.min_tier === 3 && guarded.data.verification.status === "verified" && guarded.data.answered_by_tier === 3,
+    JSON.stringify(guarded.error || guarded.data?.verification).slice(0, 400)
+  );
+  const guardedStarted = performance.now();
+  const guardedRun = await command("agent", "site_skill", { action: "run", id: learned.data?.candidate_id, recipe_id: guarded.data?.recipe_id, parameters: { q: "tablets" } });
+  timings.push(["site_skill run of the page-only read (tier 3)", Math.round(performance.now() - guardedStarted)]);
+  check(
+    "it runs through the page and returns fresh data",
+    guardedRun.ok && guardedRun.data.run.output.api.tier === 3 && JSON.stringify(guardedRun.data.run.output.data).includes("Slate tablet"),
+    JSON.stringify(guardedRun.error || guardedRun.data?.run?.output).slice(0, 300)
+  );
+
+  // Health, drift and repair: the active revision never changes on its own
+  const skillId = learned.data?.candidate_id;
+  const promoted = await command("agent", "site_skill", { action: "promote", id: skillId });
+  check("the verified Skill can be promoted on request", promoted.ok, JSON.stringify(promoted.error || "").slice(0, 300));
+  const activeBefore = (await side.evaluate(async () => (await chrome.storage.local.get("browserharness.siteSkillLibrary.v2"))["browserharness.siteSkillLibrary.v2"])).families.find((item) => item.id === skillId).active_revision_id;
+  const health = await command("agent", "site_skill", { action: "verify", id: skillId });
+  check(
+    "site_skill verify calls each learned read live with a taught input",
+    health.ok && health.data.health.length === 5 && health.data.health.every((item) => item.passed),
+    JSON.stringify(health.data?.health || health.error).slice(0, 400)
+  );
+
+  shop.state.searchPath = "/api/v2/search";
+  const drifted = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: learned.data?.recipe_id, parameters: { q: "tablets" } });
+  check(
+    "when the site moves its API, the run fails as endpoint drift and suggests repair",
+    !drifted.ok && drifted.error?.code === "API_ENDPOINT_DRIFT" && drifted.data?.repair_recommended === true && /site_skill repair/.test(drifted.data?.next_action),
+    JSON.stringify(drifted).slice(0, 300)
+  );
+  const repairStarted = performance.now();
+  const repaired = await command("agent", "site_skill", { action: "repair", id: skillId, recipe_id: learned.data?.recipe_id });
+  timings.push(["site_skill repair (2 page runs + learn + live check)", Math.round(performance.now() - repairStarted)]);
+  check(
+    "repair learns it again from its page as a verified candidate revision",
+    repaired.ok && repaired.data.verification === "verified" && repaired.data.changes.some((item) => item.includes("/api/v2/search")),
+    JSON.stringify(repaired.error || repaired.data).slice(0, 400)
+  );
+  const libraryAfter = await side.evaluate(async () => (await chrome.storage.local.get("browserharness.siteSkillLibrary.v2"))["browserharness.siteSkillLibrary.v2"]);
+  const familyAfter = libraryAfter.families.find((item) => item.id === skillId);
+  check("the active revision is unchanged by the repair", familyAfter.active_revision_id === activeBefore && familyAfter.latest_revision_id === repaired.data?.proposed_revision_id);
+  const stillActive = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: learned.data?.recipe_id, parameters: { q: "tablets" } });
+  check("until promoted, runs still use the active revision", !stillActive.ok && stillActive.error.code === "API_ENDPOINT_DRIFT");
+  const promotedRepair = await command("agent", "site_skill", { action: "promote", id: skillId, revision_id: repaired.data?.proposed_revision_id });
+  const afterRepair = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: repaired.data?.recipe_id, parameters: { q: "tablets" } });
+  check(
+    "after promotion the repaired operation answers from the new endpoint",
+    promotedRepair.ok && afterRepair.ok && JSON.stringify(afterRepair.data.run.output.data).includes("Slate tablet"),
+    JSON.stringify(promotedRepair.error || afterRepair.error || "").slice(0, 300)
+  );
+  const again = await command("agent", "site_skill", { action: "repair", id: skillId, recipe_id: repaired.data?.recipe_id });
+  check("repairs are bounded: an immediate second repair waits", !again.ok && again.error.code === "API_REPAIR_COOLDOWN", JSON.stringify(again.error));
+  shop.state.field = "products";
+  const schema = await command("agent", "site_skill", { action: "run", id: skillId, recipe_id: repaired.data?.recipe_id, parameters: { q: "tablets" } });
+  check("a renamed response field is schema drift", !schema.ok && schema.error.code === "API_SCHEMA_DRIFT", JSON.stringify(schema.error));
+  shop.state.field = "items";
+
+  const write = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    name: "addToCart",
+    page_url: `${shop.origin}/search?q={q}`,
+    examples: [{ q: "laptops" }, { q: "keyboards" }],
+    verify_args: { q: "monitors" },
+    side_effect: "write"
+  });
+  check("learn_api refuses to learn a write by running it", !write.ok && write.error.code === "API_LEARN_WRITE_REFUSED" && shop.state.writes === 0);
+
+  // Watch Me: the person's own demonstration is the learning run
+  const tabIdOf = (url) => side.evaluate(async (prefix) => (await chrome.tabs.query({})).find((tab) => tab.url?.startsWith(prefix))?.id, url);
+  const watch = async (url, act) => {
+    const page = await ctx.newPage();
+    await page.goto(url);
+    await page.bringToFront();
+    const tabId = await tabIdOf(url);
+    const started = await side.evaluate((id) => chrome.runtime.sendMessage({ type: "WATCH_START", tab_id: id }), tabId);
+    await act(page);
+    await page.waitForTimeout(1500);
+    const stopped = await side.evaluate(() => chrome.runtime.sendMessage({ type: "WATCH_STOP" }));
+    await page.close();
+    return { started, stopped };
+  };
+  const searchDemo = (term) =>
+    watch(`${shop.origin}/search`, async (page) => {
+      await page.getByLabel("Search").fill("");
+      await page.getByLabel("Search").pressSequentially(term, { delay: 20 });
+      await page.keyboard.press("Enter");
+      await page.waitForURL(/q=/);
+      await page.locator("#results li").first().waitFor({ timeout: 10000 });
+    });
+  const demoA = await searchDemo("laptops");
+  const demoB = await searchDemo("keyboards");
+  const capA = demoA.stopped?.data?.api_capture;
+  check(
+    "a Watch Me recording keeps its network capture for learning, naming inputs but not values",
+    demoA.started?.ok && capA?.data_requests >= 1 && capA?.inputs?.length === 1 && !JSON.stringify(capA).includes("laptops"),
+    JSON.stringify(demoA.started?.error || capA || demoA.stopped?.error).slice(0, 300)
+  );
+  const watchLearnStarted = performance.now();
+  const fromWatch = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    name: "watchedSearch",
+    from_watch: [capA?.recording_id, demoB.stopped?.data?.api_capture?.recording_id],
+    verify_args: { [capA?.inputs?.[0] || "search"]: "monitors" },
+    skill_name: "Watched shop"
+  });
+  timings.push(["learn_api from two Watch Me recordings (learn + live check, no page runs)", Math.round(performance.now() - watchLearnStarted)]);
+  check(
+    "learn_api learns the search from two Watch Me demonstrations and verifies it live",
+    fromWatch.ok && fromWatch.data.verification.status === "verified" && fromWatch.data.contract.provenance.source === "watch_me",
+    JSON.stringify(fromWatch.error || fromWatch.data?.verification).slice(0, 400)
+  );
+
+  const writesBefore = shop.state.writes;
+  const cartDemo = await watch(`${shop.origin}/cart`, async (page) => {
+    await page.locator("#note").pressSequentially("gift wrap please", { delay: 10 });
+    await page.locator("#add").click();
+    await page.locator("#done").filter({ hasText: "Added" }).waitFor({ timeout: 10000 });
+  });
+  check("the demonstrated write happened once, by the person", shop.state.writes === writesBefore + 1);
+  const cartLearned = await command("learn-api", "site_skill", {
+    action: "learn_api",
+    id: fromWatch.data?.candidate_id,
+    name: "addToCart",
+    from_watch: [cartDemo.stopped?.data?.api_capture?.recording_id],
+    side_effect: "write"
+  });
+  check(
+    "a write is learned from the demonstration without being sent again, and keeps no typed value",
+    cartLearned.ok && cartLearned.data.operation.side_effect === "write" && shop.state.writes === writesBefore + 1 && !JSON.stringify(cartLearned.data.contract).includes("gift wrap please"),
+    JSON.stringify(cartLearned.error || cartLearned.data?.operation).slice(0, 400)
+  );
+  const cartRun = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: cartLearned.data?.recipe_id, parameters: { note: "no rush" } });
+  check(
+    "running the learned write without approval asks first and sends nothing",
+    !cartRun.ok && /APPROVAL/.test(cartRun.error?.code || "") && shop.state.writes === writesBefore + 1,
+    String(JSON.stringify(cartRun.error)).slice(0, 300)
+  );
+
+  // Approval for a write comes only from the person's own side panel: a page
+  // open in a tab cannot claim it (how a 2xx write is then recorded, sent and
+  // unverified, is covered by the extension's unit tests)
+  shop.state.acceptWithoutChange = true;
+  const claimed = await side.evaluate(
+    async ({ id, recipe }) => chrome.runtime.sendMessage({ type: "BROWSER_TOOL", tool: "site_skill", input: { action: "run", id, recipe_id: recipe, parameters: { note: "no rush" } }, approval_granted: true }),
+    { id: fromWatch.data?.candidate_id, recipe: cartLearned.data?.recipe_id }
+  );
+  shop.state.acceptWithoutChange = false;
+  check(
+    "a page in a tab cannot claim approval for a learned write; nothing is sent",
+    claimed?.ok === false && claimed.error?.code === "APPROVAL_REQUIRED" && !shop.state.unappliedWrites && shop.state.writes === writesBefore + 1,
+    String(JSON.stringify(claimed?.error)).slice(0, 300)
+  );
+
+  // The person approves the learned write in their side panel and runs it as
+  // a named site command; the site answers 200 but changes nothing. The
+  // command's answer must say sent and unverified, and nothing is resent.
+  const writeCommand = (await command("agent", "site_commands")).data?.commands?.find((item) => item.kind !== "read" && /cart/i.test(item.name));
+  shop.state.acceptWithoutChange = true;
+  const approvedCommand = await inSidePanel(
+    `chrome.runtime.sendMessage(${JSON.stringify({ type: "BROWSER_TOOL", tool: "site_commands", input: { name: writeCommand?.name, parameters: { [writeCommand?.parameters?.[0]?.name || "note"]: "no rush" } }, approval_granted: true })})`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  shop.state.acceptWithoutChange = false;
+  check(
+    "a named write command approved in the side panel, answered 200 with no change, says sent and unverified (not done)",
+    approvedCommand?.ok === true &&
+      approvedCommand.data?.http_status === 200 &&
+      approvedCommand.data?.sent === true &&
+      approvedCommand.data?.verification === "unverified" &&
+      /do not resend/.test(approvedCommand.data?.next_action || "") &&
+      shop.state.writes === writesBefore + 1,
+    String(JSON.stringify(approvedCommand)).slice(0, 500)
+  );
+  check("the approved write was sent exactly once and never resent", shop.state.unappliedWrites === 1);
+
+  // A read in the same Skill that passes afterwards does not make the write promotable
+  const laterRead = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id, parameters: { [capA?.inputs?.[0] || "search"]: "monitors" } });
+  const readHealth = await command("agent", "site_skill", { action: "verify", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id });
+  const promoteMixed = await command("agent", "site_skill", { action: "promote", id: fromWatch.data?.candidate_id });
+  check(
+    "a passing read afterwards does not make the revision with the unverified write promotable",
+    laterRead.ok && readHealth.ok && !promoteMixed.ok && promoteMixed.error?.code === "SITE_SKILL_PROMOTION_EVIDENCE_REQUIRED" && /never verified/.test(promoteMixed.error?.message || ""),
+    String(JSON.stringify({ health: readHealth.ok || readHealth.error, promote: promoteMixed.error || promoteMixed.data?.promotion_gate || "promoted" })).slice(0, 500)
+  );
+
+  // RC2 review: a checkbox write (no typed input) is fixed to the video it
+  // was learned on; on another video's page it never silently acts on that one
+  const VIDEO_A = "jNQXAC9IVRw";
+  const VIDEO_B = "dQw4w9WgXcQ";
+  const editsTo = (video) => shop.state.requests.filter((item) => item.path === "/api/playlist/edit" && item.body.includes(video)).length;
+  const boxDemo = await watch(`${shop.origin}/watch?v=${VIDEO_A}`, async (page) => {
+    await page.locator("#later").check();
+    await page.locator("#saved").filter({ hasText: "Saved" }).waitFor({ timeout: 10000 });
+  });
+  const boxId = boxDemo.stopped?.data?.api_capture?.recording_id;
+  check("the person ticked Watch later once for video A", editsTo(VIDEO_A) === 1 && Boolean(boxId), JSON.stringify(boxDemo.stopped?.data?.api_capture || boxDemo.stopped?.error).slice(0, 300));
+  const boxUnpicked = await command("learn-api", "site_skill", { action: "learn_api", id: fromWatch.data?.candidate_id, name: "watchLater", from_watch: [boxId], side_effect: "write" });
+  const editRequest = (boxUnpicked.data?.candidates || []).find((item) => /\/api\/playlist\/edit$/.test(item.request || ""));
+  check(
+    "a recording that typed nothing lists its requests to pick from",
+    !boxUnpicked.ok && boxUnpicked.error?.code === "API_LEARN_PICK_REQUEST" && Boolean(editRequest),
+    JSON.stringify(boxUnpicked.error || boxUnpicked.data).slice(0, 300)
+  );
+  const boxLearned = await command("learn-api", "site_skill", { action: "learn_api", id: fromWatch.data?.candidate_id, name: "watchLater", from_watch: [boxId], side_effect: "write", pick_request: editRequest?.request });
+  check(
+    "the picked checkbox write is learned as fixed to video A, sending nothing",
+    boxLearned.ok && boxLearned.data.operation.target?.kind === "fixed" && boxLearned.data.operation.target.fields.some((field) => field.value === VIDEO_A) && editsTo(VIDEO_A) === 1,
+    JSON.stringify(boxLearned.error || boxLearned.data?.operation).slice(0, 400)
+  );
+  // the person is now on video B's page
+  const pageB = await ctx.newPage();
+  await pageB.goto(`${shop.origin}/watch?v=${VIDEO_B}`);
+  const askB = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: boxLearned.data?.recipe_id });
+  check(
+    "its approval prompt names video A, not the page being viewed",
+    !askB.ok && askB.error?.code === "APPROVAL_REQUIRED" && askB.error.message.includes(VIDEO_A) && /not on the page you are viewing/.test(askB.error.message),
+    String(JSON.stringify(askB.error)).slice(0, 400)
+  );
+  const runB = await inSidePanel(
+    `chrome.runtime.sendMessage(${JSON.stringify({ type: "BROWSER_TOOL", tool: "site_skill", input: { action: "run", id: fromWatch.data?.candidate_id, recipe_id: boxLearned.data?.recipe_id, parameters: { video: VIDEO_B } }, approval_granted: true })})`
+  );
+  check(
+    "approved but asked to act on video B, it refuses and sends nothing",
+    runB?.ok === false && editsTo(VIDEO_B) === 0 && editsTo(VIDEO_A) === 1,
+    String(JSON.stringify({ runB, a: editsTo(VIDEO_A), b: editsTo(VIDEO_B) })).slice(0, 600)
+  );
+  const runA = await inSidePanel(
+    `chrome.runtime.sendMessage(${JSON.stringify({ type: "BROWSER_TOOL", tool: "site_skill", input: { action: "run", id: fromWatch.data?.candidate_id, recipe_id: boxLearned.data?.recipe_id }, approval_granted: true })})`
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  check(
+    "approved as learned, it acts on video A once and says sent, unverified",
+    runA?.ok === true && editsTo(VIDEO_A) === 2 && editsTo(VIDEO_B) === 0 && runA.data?.sent === true && runA.data?.verification === "unverified",
+    String(JSON.stringify({ a: editsTo(VIDEO_A), b: editsTo(VIDEO_B), sent: runA?.data?.sent, verification: runA?.data?.verification, error: runA?.error })).slice(0, 600)
+  );
+  await pageB.close();
+
+  // Helpers (read-only Task DAG workers) may run learned API reads only
+  const helperRead = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: fromWatch.data?.recipe_id, parameters: { [capA?.inputs?.[0] || "search"]: "tablets" }, api_read_only: true });
+  check("a helper can run a learned API read", helperRead.ok && JSON.stringify(helperRead.data?.run?.output?.data).includes("Slate tablet"), String(JSON.stringify(helperRead.error || helperRead.data?.run?.output)).slice(0, 300));
+  const helperWrite = await command("agent", "site_skill", { action: "run", id: fromWatch.data?.candidate_id, recipe_id: cartLearned.data?.recipe_id, parameters: { note: "x" }, api_read_only: true });
+  check("a helper cannot run a learned write", !helperWrite.ok && helperWrite.error?.code === "SUBAGENT_SCOPE_DENIED" && shop.state.writes === writesBefore + 1, String(JSON.stringify(helperWrite.error)).slice(0, 300));
+} catch (error) {
+  check("API engine e2e ran without crashing", false, error instanceof Error ? error.stack : String(error));
+} finally {
+  await harness?.close();
+}
+
+for (const [label, ms] of timings) console.log(`TIME ${label}: ${ms} ms`);
+const passed = results.filter(Boolean).length;
+console.log(`\n${passed}/${results.length} API engine checks passed`);
+process.exit(passed === results.length ? 0 : 1);

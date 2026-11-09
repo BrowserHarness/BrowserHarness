@@ -34,6 +34,7 @@ import {
 import { BUILT_IN_COMMANDS } from "../runtime/slash-commands";
 import { loadPreferences, updatePreferences } from "../settings/preferences";
 import { loadSiteCommands, renameSiteCommand, usage, type SiteCommand } from "../runtime/site-commands";
+import { siteCommandDetail } from "./site-command-detail";
 import { deleteWorkflow, loadWorkflows, type SavedWorkflow } from "../runtime/workflows";
 import {
   deleteSiteSkillCandidate,
@@ -77,6 +78,7 @@ export function SkillsView({
   const [recordings, setRecordings] = useState<SavedWorkflow[]>([]);
   const [siteSkills, setSiteSkills] = useState<SiteSkillCandidateSummary[]>([]);
   const [siteCommands, setSiteCommands] = useState<SiteCommand[]>([]);
+  const [apiTiers, setApiTiers] = useState<Record<string, { tier: 1 | 2 | 3 }>>({});
   const [editingCommand, setEditingCommand] = useState<{ key: string; name: string } | null>(null);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const [notice, setNotice] = useState<{ severity: "success" | "error"; text: string } | null>(null);
@@ -93,6 +95,12 @@ export function SkillsView({
     setRecordings(await loadWorkflows());
     setSiteSkills(await listSiteSkillCandidateSummaries().catch(() => []));
     setSiteCommands(await loadSiteCommands().catch(() => []));
+    setApiTiers(
+      await chrome.storage.local
+        .get("browserharness.apiTransport.v1")
+        .then((stored) => (stored["browserharness.apiTransport.v1"] || {}) as Record<string, { tier: 1 | 2 | 3 }>)
+        .catch(() => ({}))
+    );
   };
 
   const finishCommandRename = async () => {
@@ -455,7 +463,7 @@ export function SkillsView({
                             onBlur={() => void finishCommandRename()}
                           />
                         ) : (
-                          <Tooltip title={`${command.kind === "read" ? "Gets data" : "Fills a form"}. ${usage(command)}`} describeChild>
+                          <Tooltip title={`${siteCommandDetail(command, apiTiers[command.api?.operation_id || ""]?.tier).what}. ${usage(command)}`} describeChild>
                             <Chip
                               size="small"
                               label={`/${command.name}`}
@@ -465,7 +473,7 @@ export function SkillsView({
                           </Tooltip>
                         )}
                         <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-                          {command.kind === "read" ? "gets data" : "fills a form"}
+                          {siteCommandDetail(command, apiTiers[command.api?.operation_id || ""]?.tier).caption}
                           {command.runs ? ` · worked ${command.worked} of ${command.runs}` : ""}
                         </Typography>
                         <Tooltip title="Rename command">

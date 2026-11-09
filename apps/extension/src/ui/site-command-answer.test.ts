@@ -36,6 +36,14 @@ describe("site command answers", () => {
     expect(answer).toContain("| Kettle |");
   });
 
+  it("reports an empty list plainly without showing raw JSON", () => {
+    expect(siteCommandAnswer(command, { ok: true, data: { output: [] } })).toBe("**/shop-search** on shop.example.com: 0 results.");
+    expect(siteCommandAnswer(command, { ok: true, data: { output: { results: [] } } })).toContain("0 results.");
+    expect(siteCommandAnswer(command, { ok: true, data: { output: { items: [] } } })).toContain("0 results.");
+    expect(siteCommandAnswer(command, { ok: true, data: { output: { results: [], items: [{ name: "Kettle" }] } } })).toContain("| Kettle |");
+    expect(siteCommandAnswer(command, { ok: true, data: { output: { errors: [], count: 3 } } })).toContain('"count": 3');
+  });
+
   it("explains failures, forms and other data", () => {
     expect(
       siteCommandAnswer(command, { ok: false, error: { code: "SITE_SKILL_VERIFICATION_FAILED", message: "no longer matches" } })

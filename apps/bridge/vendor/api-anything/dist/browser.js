@@ -1,0 +1,1063 @@
+/**
+ * The browser layer: installed Chrome via playwright-core, one persistent profile per process.
+ * Produces raw Exchanges for the learner (tier 3 / create / heal) and runs tier-2 page fetches.
+ */
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
+import { chromium, } from "../playwright-unavailable.js";
+import { botWall } from "./classify.js";
+import { home, siteOf, writePrivate } from "./session.js";
+let current;
+let headlessUA;
+const originPages = new Map();
+// Chrome locks a profile to one process. A long-lived process (the MCP server) releases it after
+// this much idle time (an agent's calls are seconds apart, so Chrome would mostly relaunch anyway),
+// and a second process waits up to LOCK_WAIT_MS for it.
+const IDLE_CLOSE_MS = 3_000;
+const LOCK_WAIT_MS = 15_000;
+const LOCKED = /ProcessSingleton|profile (directory )?is already in use|SingletonLock/i;
+/** Another process holds api-anything's Chrome profile. */
+export class ProfileInUse extends Error {
+    constructor(dir) {
+        super(`the api-anything Chrome profile is in use by another process (an MCP server or another api-anything command): ${dir}`);
+        this.name = "ProfileInUse";
+    }
+}
+let users = 0;
+let idleTimer;
+function scheduleIdleClose() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => void (users === 0 && closeBrowser()), IDLE_CLOSE_MS);
+    idleTimer.unref();
+}
+/** Mark the browser busy; the returned function releases it (and starts the idle clock). */
+function hold() {
+    users++;
+    clearTimeout(idleTimer);
+    let released = false;
+    return () => {
+        if (released)
+            return;
+        released = true;
+        if (--users === 0)
+            scheduleIdleClose();
+    };
+}
+async function launch(profileDir, options) {
+    const until = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+        try {
+            return await chromium.launchPersistentContext(profileDir, options);
+        }
+        catch (e) {
+            if (!LOCKED.test(e.message))
+                throw e;
+            if (Date.now() > until)
+                throw new ProfileInUse(profileDir);
+            await sleep(500);
+        }
+    }
+}
+/** The installed Chrome: the paths Playwright's "chrome" channel launches. */
+function chromePath() {
+    const env = process.env;
+    const candidates = process.platform === "darwin"
+        ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+        : process.platform === "win32"
+            ? [env.LOCALAPPDATA, env.PROGRAMFILES, env["PROGRAMFILES(X86)"]]
+                .filter((d) => !!d)
+                .map((d) => join(d, "Google", "Chrome", "Application", "chrome.exe"))
+            : ["/opt/google/chrome/chrome"];
+    return candidates.find((p) => existsSync(p));
+}
+/** Checked up front so callers can skip cleanly. */
+export const chromeAvailable = () => !!chromePath();
+// Default headless UA says "HeadlessChrome/<v>" and x.com answers 403. sec-ch-ua already
+// carries "Google Chrome", so only the UA string needs the fix.
+async function probeHeadlessUA() {
+    const b = await chromium.launch({ channel: "chrome", headless: true });
+    try {
+        const p = await b.newPage();
+        return (await p.evaluate(() => navigator.userAgent)).replace("HeadlessChrome", "Chrome");
+    }
+    finally {
+        await b.close();
+    }
+}
+/**
+ * The user agent a headless Chrome is given. Asking Chrome means starting it once more (most of a
+ * cold call's time), so the answer is kept under the home, by the binary's path, modification time
+ * and size: an update changes those, and then, or when the file cannot be read, Chrome is asked again.
+ */
+export async function headlessUserAgent() {
+    const file = join(home(), "chrome-ua.json");
+    let key;
+    try {
+        const bin = chromePath();
+        const s = statSync(bin);
+        key = `${bin}:${s.mtimeMs}:${s.size}`;
+        const kept = JSON.parse(readFileSync(file, "utf8"));
+        if (kept.key === key && typeof kept.ua === "string" && /Chrome\/\d/.test(kept.ua) && !/Headless/.test(kept.ua))
+            return kept.ua;
+    }
+    catch {
+        /* nothing kept, or nothing usable */
+    }
+    const ua = await probeHeadlessUA();
+    try {
+        if (key)
+            writePrivate(file, JSON.stringify({ key, ua }));
+    }
+    catch {
+        /* a home that cannot be written: asked again next time */
+    }
+    return ua;
+}
+/**
+ * The process-wide persistent context. A different profileDir or headless mode closes the old one
+ * first, since Chrome locks a profile to one running instance.
+ */
+export function openBrowser({ profileDir, headless = true, }) {
+    if (users === 0)
+        scheduleIdleClose();
+    if (current && current.profileDir === profileDir && current.headless === headless)
+        return current.ctx;
+    const prev = current;
+    const ctx = (async () => {
+        if (prev)
+            await closeContext(prev.ctx);
+        if (headless)
+            headlessUA ??= await headlessUserAgent();
+        const c = await launch(profileDir, {
+            channel: "chrome",
+            headless,
+            userAgent: headless ? headlessUA : undefined,
+            viewport: headless ? undefined : null,
+            // A service worker's fetches bypass routing (so write interception) and hide requests from capture.
+            serviceWorkers: "block",
+            // Playwright's own SIGTERM handler keeps the process alive; Chrome exits with its pipe anyway.
+            handleSIGTERM: false,
+        });
+        c.on("close", () => {
+            if (current?.ctx === ctx)
+                current = undefined;
+        });
+        return c;
+    })();
+    current = { profileDir, headless, ctx };
+    ctx.catch(() => {
+        if (current?.ctx === ctx)
+            current = undefined;
+    });
+    return ctx;
+}
+async function closeContext(ctx) {
+    try {
+        await (await ctx).close();
+    }
+    catch {
+        // launch failed or already closed
+    }
+}
+/**
+ * Close the shared context. Call it before a normal exit: an open context keeps the event loop
+ * alive. On signals and hard exits Playwright kills the Chrome it launched by itself.
+ */
+export async function closeBrowser() {
+    const c = current;
+    current = undefined;
+    originPages.clear();
+    if (c)
+        await closeContext(c.ctx);
+}
+const toStored = (c) => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path,
+    expires: c.expires,
+    httpOnly: c.httpOnly,
+    secure: c.secure,
+    sameSite: c.sameSite,
+});
+function siteCookies(cookies, url) {
+    const site = siteOf(new URL(url).hostname);
+    return cookies
+        .filter((c) => {
+        const d = c.domain.replace(/^\./, "");
+        return d === site || d.endsWith(`.${site}`);
+    })
+        .map(toStored);
+}
+/** The profile's current cookies for url's site: the cheap auth refresh, no page load. */
+export async function profileCookies({ url, profileDir, }) {
+    const release = hold();
+    try {
+        const ctx = await openBrowser({ profileDir });
+        return siteCookies(await ctx.cookies(), url);
+    }
+    finally {
+        release();
+    }
+}
+/** Put imported cookies into api-anything's own Chrome profile, so tier 2/3 and heals are logged in too. */
+export async function addCookiesToProfile(cookies, profileDir) {
+    if (!cookies.length)
+        return;
+    const release = hold();
+    try {
+        const ctx = await openBrowser({ profileDir });
+        // Playwright wants a domain that starts with a dot or an exact host; a leading-dot domain plus path is safe.
+        await ctx.addCookies(cookies.map((c) => ({
+            name: c.name,
+            value: c.value,
+            domain: c.domain,
+            path: c.path || "/",
+            expires: c.expires > 0 ? c.expires : undefined,
+            httpOnly: c.httpOnly,
+            secure: c.secure,
+            sameSite: c.sameSite,
+        })));
+    }
+    finally {
+        release();
+    }
+}
+/** Clear one site's cookies from the profile: any host under the registrable domain. */
+export async function clearProfileCookies(site, profileDir) {
+    const release = hold();
+    try {
+        const ctx = await openBrowser({ profileDir });
+        const esc = site.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        await ctx.clearCookies({ domain: new RegExp(`(^|\\.)${esc}$`) });
+    }
+    finally {
+        release();
+    }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Binary resources: their bodies are never useful to the learner and are not valid UTF-8. A stream's never ends.
+const NO_BODY = new Set(["image", "media", "font", "stylesheet", "eventsource", "websocket"]);
+const QUIET_MS = 500;
+// Streams never finish; a request open this long is a long poll or a hung tracker, not the data.
+const LONG_LIVED = new Set(["eventsource", "websocket"]);
+const LONG_MS = 3000;
+// An endpoint hit more often than this is polling or a beacon: its repeats are not "still loading".
+const REPEATS = 2;
+// Pages that fetch their data a moment after load (deferred hydration): how long to wait for a first XHR.
+const FIRST_XHR_MS = 2000;
+// With an op's match: how long a quiet page may go without firing it before the run gives up on it.
+const MATCH_GRACE_MS = 3000;
+// How long a bot challenge's interstitial may take to solve itself and load the real page.
+const CHALLENGE_WAIT_MS = 15_000;
+const socketGuards = new WeakMap();
+/**
+ * Drop WebSocket messages a page sends while `guard` says so, in every page of the context (a
+ * popup's socket opens before a per-page route could be set). One context-wide route, installed
+ * once; returns the function that removes this guard.
+ * ponytail: a socket can't be traced to its page, so a concurrent run's sends are guarded too
+ * while a write is being learned; that errs on the side of not sending.
+ */
+async function guardSockets(ctx, guard) {
+    let g = socketGuards.get(ctx);
+    if (!g) {
+        const guards = new Set();
+        const ready = ctx.routeWebSocket(/.*/, (ws) => {
+            const server = ws.connectToServer();
+            ws.onMessage((m) => {
+                const ex = {
+                    id: 0,
+                    resourceType: "websocket",
+                    request: { method: "SEND", url: ws.url(), headers: {} },
+                };
+                if (![...guards].some((drop) => drop(ex)))
+                    server.send(m);
+            });
+        });
+        g = { guards, ready };
+        socketGuards.set(ctx, g);
+    }
+    g.guards.add(guard);
+    await g.ready;
+    return () => g.guards.delete(guard);
+}
+// How long a page gets to be emptied, and then to close, before the run ends without waiting for it.
+const SEAL_MS = 5000;
+/** A call into a page, given up on after a while: a hung renderer answers nothing, and evaluate() and close() have no timeout. */
+const within = (p, otherwise) => {
+    let timer;
+    const late = new Promise((r) => {
+        timer = setTimeout(() => r(otherwise), SEAL_MS);
+    });
+    // cleared when the call settles first: a timer left running keeps the process alive for its 5 s
+    return Promise.race([p.catch(() => otherwise), late]).finally(() => clearTimeout(timer));
+};
+const tabRecords = new WeakMap();
+export function tabsOf(ctx) {
+    let record = tabRecords.get(ctx);
+    if (!record) {
+        record = (async () => {
+            const browser = ctx.browser();
+            if (!browser)
+                throw new Error("this browser gives no session to watch its tabs through");
+            const cdp = await browser.newBrowserCDPSession();
+            const tabs = {
+                openerOf: new Map(),
+                watchers: new Set(),
+                sync: async () => (await cdp.send("Target.getTargets")).targetInfos.forEach(note),
+                close: (targetId) => cdp.send("Target.closeTarget", { targetId }),
+            };
+            const note = (t) => void (t.openerId && tabs.openerOf.set(t.targetId, t.openerId));
+            cdp.on("Target.targetCreated", (e) => note(e.targetInfo));
+            cdp.on("Target.targetDestroyed", ({ targetId }) => {
+                const opener = tabs.openerOf.get(targetId);
+                tabs.openerOf.delete(targetId);
+                if (opener)
+                    for (const [id, by] of tabs.openerOf)
+                        if (by === targetId)
+                            tabs.openerOf.set(id, opener);
+                for (const changed of [...tabs.watchers])
+                    changed();
+            });
+            await cdp.send("Target.setDiscoverTargets", { discover: true });
+            return tabs;
+        })();
+        tabRecords.set(ctx, record);
+        record.catch(() => tabRecords.delete(ctx));
+    }
+    return record;
+}
+async function tap(ctx, page, drop) {
+    const cdp = await ctx.newCDPSession(page);
+    const answers = new Set();
+    /** the request each chain of redirects started from, by network id */
+    const chains = new Map();
+    cdp.on("Fetch.requestPaused", (e) => {
+        const ex = {
+            id: 0,
+            resourceType: e.resourceType.toLowerCase(),
+            request: {
+                method: e.request.method,
+                url: e.request.url + (e.request.urlFragment ?? ""),
+                headers: Object.fromEntries(Object.entries(e.request.headers).map(([k, v]) => [k.toLowerCase(), v])),
+                body: e.request.postData,
+            },
+        };
+        const { requestId } = e;
+        // A hop goes on under its request's network id. Chrome marks it with redirectedRequestId, but
+        // not a cross-origin fetch's: the id seen before is what tells it.
+        const via = e.networkId ? chains.get(e.networkId) : undefined;
+        if (e.networkId && !via)
+            chains.set(e.networkId, ex);
+        const answer = (drop(ex, !!e.networkId && !via && !e.redirectedRequestId, via)
+            ? cdp.send("Fetch.failRequest", { requestId, errorReason: "Aborted" })
+            : cdp.send("Fetch.continueRequest", { requestId })).catch(() => { }); // the request or its page is gone
+        answers.add(answer);
+        void answer.then(() => answers.delete(answer));
+    });
+    const enable = () => cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
+    await enable();
+    return {
+        id: (await cdp.send("Target.getTargetInfo")).targetInfo.targetId,
+        async answered() {
+            // a round trip through the browser: every request it paused before this has been reported
+            await enable().catch(() => { });
+            await Promise.all(answers);
+        },
+    };
+}
+/** A page load that treats "this URL is a download" as loaded (the request is still captured). */
+async function goto(page, url, referer) {
+    try {
+        await page.goto(url, { waitUntil: "domcontentloaded", ...(referer ? { referer } : {}) });
+    }
+    catch (e) {
+        if (!/Download is starting|net::ERR_ABORTED/.test(e.message))
+            throw e;
+    }
+}
+async function runStep(page, s) {
+    const need = (v, what) => {
+        if (!v)
+            throw new Error(`trigger step "${s.action}" needs ${what}`);
+        return v;
+    };
+    switch (s.action) {
+        case "click":
+            return page.click(need(s.selector, "a selector"));
+        case "fill":
+            return page.fill(need(s.selector, "a selector"), s.value ?? "");
+        case "press":
+            return s.selector ? page.press(s.selector, need(s.value, "a key")) : page.keyboard.press(need(s.value, "a key"));
+        case "wait":
+            if (s.selector)
+                await page.waitForSelector(s.selector);
+            else
+                await page.waitForTimeout(s.ms ?? 1000);
+            return;
+        case "goto":
+            return goto(page, need(s.value ?? s.selector, "a url in value"));
+    }
+}
+/** The request body as the server gets it: a gzip/deflate/br-encoded body (YouTube's innertube) decoded. */
+function requestBody(req) {
+    const enc = (req.headers()["content-encoding"] ?? "").toLowerCase();
+    const buf = enc ? req.postDataBuffer() : null;
+    if (buf) {
+        try {
+            return (enc.includes("gzip") ? gunzipSync(buf) : enc.includes("br") ? brotliDecompressSync(buf) : inflateSync(buf)).toString("utf8");
+        }
+        catch {
+            /* not really encoded: fall through */
+        }
+    }
+    return req.postData() ?? undefined;
+}
+/** Load the trigger in the browser and return every exchange it caused, with bodies and cookies. */
+export async function runTrigger(o) {
+    const timeout = o.timeoutMs ?? 30_000;
+    const deadline = Date.now() + timeout;
+    const release = hold();
+    let ctx;
+    let page;
+    let tabs;
+    try {
+        ctx = await openBrowser(o);
+        // a guarded run does not start without the browser's record of who opens which tab
+        if (o.intercept)
+            tabs = await tabsOf(ctx);
+        page = await ctx.newPage();
+    }
+    catch (e) {
+        release();
+        throw e;
+    }
+    page.setDefaultTimeout(timeout);
+    const exchanges = [];
+    let acting = false;
+    const intercept = o.intercept;
+    // Set when the run ends: from then on nothing its pages send may leave.
+    let sealed = false;
+    /** each guarded page's tap, once attached (undefined when that failed) */
+    const taps = new Map();
+    /** the DevTools targets of the pages the run holds, closed ones included */
+    const held = new Set();
+    const cover = (p) => {
+        if (!intercept || taps.has(p))
+            return;
+        const drop = (ex, routed, via) => {
+            // What a route will see is the route's to judge, until the run ends: then this is the last word.
+            if (routed && !sealed)
+                return false;
+            // Once sealed everything is stopped, but only what the guard itself stops joins the capture:
+            // a write a page sends as it leaves can be learned, the rest of a closing page's traffic is noise.
+            if (!intercept(ex, acting, via))
+                return sealed;
+            exchanges.push({ ...ex, id: exchanges.length + 1, aborted: true });
+            return true;
+        };
+        const attached = tap(ctx, p, drop).then((t) => {
+            held.add(t.id);
+            return t;
+        }, () => undefined);
+        taps.set(p, attached);
+    };
+    /**
+     * The open tabs that pages of the run opened (and the tabs those opened, through closed ones too)
+     * which the run does not hold: Playwright has not reported them yet, or reported them when their
+     * opener was already closed.
+     */
+    const strays = () => {
+        if (!tabs)
+            return [];
+        const kin = new Set(held);
+        for (let n = -1; n !== kin.size;) {
+            n = kin.size;
+            for (const [id, opener] of tabs.openerOf)
+                if (kin.has(opener))
+                    kin.add(id);
+        }
+        return [...kin].filter((id) => !held.has(id));
+    };
+    /**
+     * Whether a tab that has no page yet can be this run's, with the record brought up to date first
+     * (so that a tab the browser has only just opened is in it). When the browser cannot be asked, or
+     * does not answer in time, it can: the request is waiting on this, and so is its tab.
+     */
+    const mayOwnNewTab = async () => {
+        const asked = tabs?.sync().then(() => true);
+        return !asked || !(await within(asked, false)) || strays().length > 0;
+    };
+    // This run's pages: its own and any popup they open. The context is shared with concurrent runs.
+    const own = new Set([page]);
+    const ownerOf = (req) => {
+        try {
+            return req.frame().page();
+        }
+        catch {
+            return undefined; // a service worker's request, or a new tab's first navigation (its page comes later)
+        }
+    };
+    /** pages found to be no stray of the run: not asked about again (who opened a tab does not change) */
+    const foreign = new WeakSet();
+    /** Whether a page is one of the run's strays, by its target: Playwright's opener() is null once the opener closed. */
+    const stray = async (p) => {
+        if (!strays().length || foreign.has(p))
+            return false;
+        const cdp = await ctx.newCDPSession(p).catch(() => undefined);
+        const id = (await cdp?.send("Target.getTargetInfo").catch(() => undefined))?.targetInfo.targetId;
+        void cdp?.detach().catch(() => { });
+        if (!id)
+            return false; // already closing: nothing left of it to guard
+        const yes = strays().includes(id);
+        if (!yes)
+            foreign.add(p);
+        return yes;
+    };
+    const adopt = async (p) => {
+        if (!p || own.has(p))
+            return !!p;
+        const opener = await p.opener().catch(() => null);
+        if ((opener && own.has(opener)) || (await stray(p))) {
+            own.add(p);
+            cover(p);
+        }
+        return own.has(p);
+    };
+    const mine = (req) => {
+        const p = ownerOf(req);
+        return !!p && own.has(p);
+    };
+    /** top-level documents of the run's first page, in order */
+    const docs = [];
+    /** response bodies being read, so a guard can wait for the latest document's */
+    const bodies = new Map();
+    /** every URL the first page's main frame had, history API changes included (an SPA's pushState) */
+    const locations = new Set();
+    const onNavigated = (f) => void (f === page.mainFrame() && locations.add(f.url()));
+    page.on("framenavigated", onNavigated);
+    const byReq = new Map();
+    const reads = [];
+    const pending = new Map();
+    // Resolves when the first page starts its next document: the old one's requests never finish then.
+    let navigated = () => { };
+    let nextDoc = new Promise((r) => (navigated = r));
+    const hits = new Map();
+    let lastActivity = Date.now();
+    const describe = (req) => ({
+        id: 0,
+        resourceType: req.resourceType(),
+        request: { method: req.method(), url: req.url(), headers: req.headers(), body: requestBody(req) },
+    });
+    const record = (req) => {
+        let ex = byReq.get(req);
+        if (!ex) {
+            ex = { ...describe(req), id: exchanges.length + 1 };
+            exchanges.push(ex);
+            byReq.set(req, ex);
+        }
+        return ex;
+    };
+    // Never let one stuck body read (streams, long-poll) hold the whole capture.
+    const bounded = (p) => reads.push(Promise.race([p, new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now())).unref())]));
+    /** A new tab's aborted first navigation joins the capture once its page shows the tab was this run's. */
+    const claim = async (req) => {
+        for (const end = Date.now() + 2000; !ownerOf(req) && Date.now() < end;)
+            await sleep(50);
+        if (await adopt(ownerOf(req)))
+            record(req).aborted = true;
+    };
+    const onRequest = (req) => {
+        if (!mine(req))
+            return;
+        const ex = record(req);
+        if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+            docs.push(ex);
+            // A challenge's verify POST, cut off by the reload it triggered, would hold "quiet" and the body reads.
+            for (const r of pending.keys())
+                if (r !== req)
+                    pending.delete(r);
+            navigated();
+            nextDoc = new Promise((r) => (navigated = r));
+        }
+        // allHeaders() is what went on the wire: cookie, sec-fetch-*, origin, referer.
+        bounded(req.allHeaders().then((h) => (ex.request.headers = h), () => { }));
+        let endpoint = req.url();
+        try {
+            const u = new URL(endpoint);
+            endpoint = `${req.method()} ${u.origin}${u.pathname}`;
+        }
+        catch {
+            /* keep the raw url */
+        }
+        const n = (hits.get(endpoint) ?? 0) + 1;
+        hits.set(endpoint, n);
+        if (LONG_LIVED.has(req.resourceType()) || n > REPEATS)
+            return;
+        pending.set(req, Date.now());
+        lastActivity = Date.now();
+    };
+    const onDone = (req) => {
+        if (pending.delete(req))
+            lastActivity = Date.now();
+    };
+    // Bodies must be read here: after the next navigation the browser discards them.
+    const onResponse = (res) => {
+        if (!mine(res.request()))
+            return;
+        const ex = record(res.request());
+        const read = (async () => {
+            const headers = await res.allHeaders().catch(() => res.headers());
+            const body = NO_BODY.has(ex.resourceType) ? undefined : await res.text().catch(() => undefined);
+            ex.response = { status: res.status(), headers, body, contentType: headers["content-type"] ?? "" };
+        })();
+        bodies.set(ex, read);
+        // a body its document outlives by 2 s is not coming (Playwright never settles it)
+        const gone = nextDoc.then(() => sleep(2000));
+        bounded(Promise.race([read, gone]));
+    };
+    /** adoptions under way: a tab that has just been reported is not in `own` yet */
+    const adopting = new Set();
+    const onPage = (p) => {
+        const a = adopt(p).catch(() => { });
+        adopting.add(a);
+        void a.then(() => adopting.delete(a));
+    };
+    ctx.on("page", onPage);
+    ctx.on("request", onRequest);
+    ctx.on("requestfinished", onDone);
+    ctx.on("requestfailed", onDone);
+    ctx.on("response", onResponse);
+    // The latest top-level document of this run's first page, when it is a bot challenge's interstitial.
+    const walled = () => {
+        const d = docs.at(-1);
+        return (!!d?.response &&
+            !!botWall({ status: d.response.status, headers: d.response.headers, body: d.response.body ?? "" }));
+    };
+    /** walled(), once the latest document's body is in (bounded: a stuck read is not a wall) */
+    const walledNow = async () => {
+        const d = docs.at(-1);
+        if (d && !d.response)
+            await Promise.race([bodies.get(d), sleep(3000)]);
+        return walled();
+    };
+    // A JS challenge solves itself by POSTing a proof (AWS WAF's mp_verify, Cloudflare's
+    // challenge-platform), then reloads: while it is on screen, the steps are not acting yet.
+    const actingNow = async () => acting && !(await walledNow());
+    /** requests the guard has been asked about and not answered yet */
+    let deciding = 0;
+    // Context-wide, so a popup the run opens is covered too; other runs' requests pass through.
+    const guard = intercept
+        ? async (route) => {
+            deciding++;
+            try {
+                const req = route.request();
+                const owner = ownerOf(req);
+                // A new tab's first navigation is routed before its page exists, and Playwright reports
+                // the page only once that navigation commits: waiting for the owner would wait forever.
+                // The browser says who opened each tab, though not which tab a request is from: the
+                // request is judged as this run's own unless the run has no stray tab. Two runs opening
+                // a tab at the same moment cannot be told apart, and then stopping the other run's tab
+                // is the lesser harm.
+                const orphan = !owner && !req.serviceWorker();
+                if (orphan ? !(await mayOwnNewTab()) : !(await adopt(owner)))
+                    return await route.fallback();
+                const ex = orphan ? describe(req) : record(req);
+                if (!intercept(ex, await actingNow()))
+                    return await route.fallback();
+                ex.aborted = true;
+                if (orphan)
+                    bounded(claim(req));
+                return await route.abort();
+            }
+            finally {
+                deciding--;
+            }
+        }
+        : undefined;
+    const quiet = () => ![...pending.values()].some((t) => Date.now() - t < LONG_MS) && Date.now() - lastActivity >= QUIET_MS;
+    const idle = async (capMs = timeout) => {
+        const end = Math.min(deadline, Date.now() + capMs);
+        while (Date.now() < end && !quiet())
+            await sleep(50);
+    };
+    const answered = () => exchanges.some((e) => o.match(e) && (e.response || e.aborted));
+    let dropSocketSends;
+    const waitForData = async () => {
+        if (o.match) {
+            // The op's own request answering is the signal; then a short settle.
+            // A page quiet for a few seconds without it is not going to send it (a login wall, a 404 page).
+            while (Date.now() < deadline && !answered() && !(quiet() && Date.now() - lastActivity > MATCH_GRACE_MS))
+                await sleep(50);
+            await sleep(o.settleMs ?? 300);
+            await idle(3000);
+            return;
+        }
+        await idle();
+        await sleep(o.settleMs ?? 300);
+        await idle();
+        if (!exchanges.some((e) => e.resourceType === "xhr" || e.resourceType === "fetch")) {
+            const end = Math.min(deadline, Date.now() + FIRST_XHR_MS);
+            while (Date.now() < end && !exchanges.some((e) => e.resourceType === "xhr" || e.resourceType === "fetch"))
+                await sleep(50);
+            await idle();
+        }
+    };
+    /** Wait (bounded) for a challenge interstitial to solve itself; true when a real document replaced it. */
+    const outwait = async () => {
+        if (!(await walledNow()))
+            return false;
+        const end = Math.min(deadline, Date.now() + CHALLENGE_WAIT_MS);
+        const seen = docs.length;
+        while (Date.now() < end && (docs.length === seen || !docs.at(-1).response || walled()))
+            await sleep(100);
+        return docs.length > seen && !walled();
+    };
+    /** Nothing of the run is left open: neither a page it holds nor a stray tab. */
+    const gone = () => [...own].every((p) => p.isClosed()) && !strays().length;
+    /**
+     * The end of a run, as one sequence; true when every page of the run is known to be closed.
+     * A guarded run's pages are emptied before they are closed, with their sessions and the guards
+     * still live. A page that is being closed still sends (its pagehide handlers fire a beacon, a
+     * client re-sends what the guard just failed), and by then nothing stops it: Playwright calls no
+     * route handler for a page once close() was called, and Chrome sends a request that is paused in
+     * a session on to the network when the session detaches. So each page goes to about:blank under
+     * the seal first: its document unloads here, what it sends last fails, and the page that is
+     * closed afterwards has nothing left to send. A tab of the run that has no page (Playwright has
+     * not reported it, or its opener was closed by the time it did) is closed through the browser.
+     * Pages keep being adopted meanwhile, and this goes round until there is nothing new; no round
+     * starts after 15 s, but one under way runs its waits out. Each wait has its own 5 s: for the adoptions and taps under way, for
+     * a page to be emptied and for its tap's answers, for the browser's list of tabs, for a stray
+     * to close; and after the rounds, for each page's close(). The wait for the guard's requests
+     * in flight ends with the rounds. A page that will not be emptied or closed does not hold the
+     * run: the caller then leaves the guards in place.
+     */
+    const closePages = async () => {
+        if (guard) {
+            sealed = true;
+            const tapOf = (p) => within(Promise.resolve(taps.get(p)), undefined);
+            const emptied = new Set();
+            for (const end = Date.now() + 3 * SEAL_MS; Date.now() < end;) {
+                await within(Promise.all([...adopting, ...taps.values()]), []);
+                const fresh = [...own].filter((p) => !emptied.has(p) && !p.isClosed());
+                for (const p of fresh) {
+                    emptied.add(p);
+                    // A round trip through the new document, then (in `answered`) through the browser:
+                    // whatever the old one sent as it unloaded has been paused and failed before either returns.
+                    const blank = p.goto("about:blank", { timeout: SEAL_MS }).then(() => true);
+                    if (await within(blank, false))
+                        await within(p.evaluate(() => 0), 0);
+                    await within(Promise.resolve((await tapOf(p))?.answered()), undefined);
+                }
+                while (deciding > 0 && Date.now() < end)
+                    await sleep(20);
+                // Through the browser's own session: a stray has no page to close it by, and the page
+                // that opened it may be gone.
+                await within(Promise.resolve(tabs?.sync()), undefined);
+                const lost = strays();
+                for (const id of lost)
+                    await within(Promise.resolve(tabs?.close(id)), undefined);
+                if (!fresh.length && !lost.length)
+                    break;
+                if (lost.length)
+                    await sleep(20); // until the browser reports them gone
+            }
+        }
+        await Promise.all([...own].map((p) => within(p.close(), undefined)));
+        return gone();
+    };
+    try {
+        if (guard)
+            await ctx.route("**/*", guard);
+        // A chat "send" goes over an open socket, where no HTTP route sees it; a popup's socket too.
+        if (intercept)
+            dropSocketSends = await guardSockets(ctx, (ex) => intercept(ex, acting));
+        // in place before the first document, so that what it defers (fetchLater) passes through it
+        cover(page);
+        if (intercept && !(await within(Promise.resolve(taps.get(page)), undefined)))
+            throw new Error("could not attach the request guard to the page");
+        if (o.softFrom) {
+            await goto(page, o.softFrom);
+            await idle(5000);
+            const from = page.url();
+            const before = exchanges.length;
+            // A link the app rendered goes through its router; otherwise the history API plus popstate,
+            // which client routers (React Router, TanStack, Next) listen to. An injected <a> would not be routed.
+            const routing = page.evaluate((u) => {
+                const link = [...document.querySelectorAll("a[href]")].find((a) => a.href === u && (!a.target || a.target === "_self"));
+                if (link)
+                    return link.click();
+                try {
+                    history.pushState({}, "", u);
+                    dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+                }
+                catch {
+                    /* cross-origin: fall through to a plain load */
+                }
+            }, o.url);
+            await within(routing, undefined);
+            await idle(5000);
+            // ponytail: "fired anything" is the routed signal; a page whose analytics fire on pushState fools it.
+            const routed = exchanges.slice(before).some((e) => ["xhr", "fetch", "document"].includes(e.resourceType));
+            if (!routed)
+                await goto(page, o.url, from);
+        }
+        else {
+            await goto(page, o.url);
+        }
+        acting = true;
+        // steps typed into a challenge interstitial would time out on selectors the real page has
+        if (o.steps?.length)
+            await outwait();
+        for (const s of o.steps ?? [])
+            await runStep(page, s);
+        await waitForData();
+        // A JS challenge (AWS WAF, Cloudflare) solves itself and reloads, often after a second or more:
+        // judging now would take the interstitial for the page. Wait (bounded) for a real document.
+        if (await outwait())
+            await waitForData();
+        // Bodies still arriving get a short grace, not the whole budget: a hung long poll is not the data.
+        const grace = new Promise((r) => setTimeout(r, Math.min(5000, Math.max(0, deadline - Date.now()))).unref());
+        const settled = (async () => {
+            for (let n = -1; n !== reads.length;) {
+                n = reads.length;
+                await Promise.allSettled(reads);
+            }
+        })();
+        await Promise.race([settled, grace]);
+        // Tokens an SPA keeps in web storage (not the jar); learning turns a request repeating one into a session: ref.
+        const storage = await within(page.evaluate(() => Object.fromEntries([localStorage, sessionStorage]
+            .flatMap((s) => Object.keys(s).map((k) => [k, s.getItem(k) ?? ""]))
+            .filter(([, v]) => v.length <= 16_384))), {});
+        return {
+            exchanges,
+            cookies: siteCookies(await ctx.cookies(), o.url),
+            finalUrl: page.url(),
+            storage,
+            locations: [...locations],
+        };
+    }
+    finally {
+        page.off("framenavigated", onNavigated);
+        ctx.off("request", onRequest);
+        ctx.off("requestfinished", onDone);
+        ctx.off("requestfailed", onDone);
+        ctx.off("response", onResponse);
+        const lift = async () => {
+            ctx.off("page", onPage);
+            if (guard)
+                await ctx.unroute("**/*", guard).catch(() => { });
+            dropSocketSends?.();
+        };
+        // New tabs are still adopted while the run ends: one opened now is the run's to close as well.
+        // The pages are closed before the guards are lifted: an open page still sends (a client's
+        // retry; Chrome reloads an aborted navigation's error page after a second), and unrouting
+        // releases what is paused.
+        if (await closePages())
+            await lift();
+        else {
+            // Not known to be closed (a hung renderer, a close that failed): the guards stay until the
+            // run's pages and its stray tabs are all gone, whichever goes last. That includes the socket
+            // guard, though it drops every run's sends: a page that is still open can still write, and
+            // time passing is no sign that it cannot. The browser is released regardless.
+            const retire = () => {
+                if (!gone())
+                    return;
+                tabs?.watchers.delete(retire);
+                void lift();
+            };
+            tabs?.watchers.add(retire);
+            for (const p of own)
+                p.once("close", retire);
+        }
+        release();
+    }
+}
+/**
+ * The redirect a page's manual fetch() got, read from what Playwright saw of it: the page itself is
+ * told nothing, not even the status. The page (or another call) may have sent the same request at
+ * the same moment; when their redirects differ, which one is this call's cannot be told.
+ */
+async function redirectOf(seen, hop, url) {
+    const bare = (u) => u.split("#")[0];
+    const mine = () => seen.filter((res) => {
+        const req = res.request();
+        return req.method() === hop.method && bare(req.url()) === bare(url) && (req.postData() ?? hop.body) === hop.body;
+    });
+    for (const end = Date.now() + 1000; !mine().length && Date.now() < end;)
+        await sleep(20);
+    const answers = await Promise.all(mine().map(async (res) => ({ status: res.status(), headers: await res.allHeaders().catch(() => res.headers()) })));
+    if (new Set(answers.map((a) => `${a.status} ${a.headers.location ?? ""}`)).size !== 1) {
+        const why = answers.length
+            ? "the page sent the same request at the same time and their redirects differ, so this one's cannot be told apart"
+            : "its answer was not seen, so where it leads is unknown";
+        // the origin only: the address is the filled request's, and can hold a session's value
+        throw new Error(`not following a redirect from ${new URL(url).origin}: ${why}`);
+    }
+    return { ...answers[0], body: "", url, location: answers[0].headers.location };
+}
+/** A page on `origin` to fetch from: its root, or a blank stand-in when the root redirects elsewhere (api.* to www). */
+async function originPage(ctx, origin, left) {
+    let page = originPages.get(origin);
+    if (page && !page.isClosed())
+        return page;
+    page = await ctx.newPage();
+    await page.goto(origin, { waitUntil: "domcontentloaded", timeout: left() }).catch(() => { });
+    let here = "";
+    try {
+        here = new URL(page.url()).origin;
+    }
+    catch {
+        /* about:blank */
+    }
+    if (here !== origin) {
+        // Same-origin is what matters for fetch(): serve a blank document at an unused path, never sent to the site.
+        const blank = `${origin}/__api_anything_blank__`;
+        await page.route(blank, (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title></title>" }));
+        await page.goto(blank, { waitUntil: "domcontentloaded", timeout: left() });
+    }
+    originPages.set(origin, page);
+    return page;
+}
+/** Tier 2: fetch() from inside a page on the site origin, so TLS, cookies and sec-fetch are the browser's own. */
+export async function pageFetch(o) {
+    const timeoutMs = o.timeoutMs ?? 30_000;
+    const release = hold();
+    try {
+        const ctx = await openBrowser(o);
+        const once = async (page, hop, left) => {
+            const redirects = [];
+            const onResponse = (res) => void (res.status() >= 300 && res.status() < 400 && redirects.push(res));
+            page.on("response", onResponse);
+            const run = page.evaluate(async ({ url, method, headers, body, left }) => {
+                const r = await fetch(url, {
+                    method,
+                    headers,
+                    body,
+                    credentials: "include",
+                    redirect: "manual",
+                    signal: AbortSignal.timeout(left),
+                });
+                if (r.type === "opaqueredirect")
+                    return { opaque: true, url: r.url };
+                const h = {};
+                r.headers.forEach((v, k) => {
+                    h[k] = v;
+                });
+                return { opaque: false, status: r.status, headers: h, body: await r.text(), url: r.url };
+            }, { ...hop, left });
+            // the page itself can hang (a stuck renderer): the budget holds either way
+            let timer;
+            const late = new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`no response within ${timeoutMs} ms`)), left + 1000);
+            });
+            try {
+                const r = await Promise.race([run, late]);
+                return r.opaque ? await redirectOf(redirects, hop, r.url) : { ...r, location: undefined };
+            }
+            catch (e) {
+                if (/TimeoutError|timed out|signal timed out/i.test(e.message))
+                    throw new Error(`no response within ${timeoutMs} ms`);
+                throw e;
+            }
+            finally {
+                clearTimeout(timer);
+                page.off("response", onResponse);
+            }
+        };
+        // One deadline for the whole call from here, with Chrome up: the origin page's load, every hop
+        // of the fetch and a recovery after the page navigated all draw on it.
+        const deadline = Date.now() + timeoutMs;
+        const left = () => Math.max(1, deadline - Date.now());
+        let page = await originPage(ctx, o.origin, left);
+        const fetchHop = async (hop) => {
+            try {
+                return await once(page, hop, left());
+            }
+            catch (e) {
+                if (!o.retryOnNavigation || !/Execution context was destroyed|navigat/i.test(e.message))
+                    throw e;
+                // waitForFunction outlives a context swap (a bare load-state wait can resolve on the old document)
+                await page
+                    .waitForFunction(() => document.readyState !== "loading", undefined, { timeout: left() })
+                    .catch(() => { });
+                // it may have landed on another origin (a challenge's redirect): start from a fresh page on ours
+                let here = "";
+                try {
+                    here = new URL(page.url()).origin;
+                }
+                catch {
+                    /* about:blank */
+                }
+                if (here !== o.origin) {
+                    originPages.delete(o.origin);
+                    await page.close().catch(() => { });
+                    page = await originPage(ctx, o.origin, left);
+                }
+                return await once(page, hop, left());
+            }
+        };
+        // Pseudo-headers are invalid names for fetch(); forbidden ones (cookie, host, ...) the browser drops itself.
+        const headers = Object.fromEntries(Object.entries(o.headers).filter(([k]) => !k.startsWith(":")));
+        const body = o.method === "GET" || o.method === "HEAD" ? undefined : o.body;
+        let hop = { url: o.url, method: o.method, headers, body };
+        const t0 = performance.now();
+        let redirected = false;
+        // Redirects are taken by hand, as at tier 1; how many is the policy's to say.
+        for (let hops = 0;; hops++) {
+            const { location, ...r } = await fetchHop(hop);
+            redirected ||= !!location;
+            if (!location || !o.redirect)
+                return { ...r, ms: Math.round(performance.now() - t0), ...(redirected ? { redirected } : {}) };
+            hop = o.redirect(hop, r.status, location, hops);
+        }
+    }
+    finally {
+        release();
+    }
+}
+/**
+ * Open `url` headed so the user can sign in. Resolves when they close the window or press Enter
+ * in the terminal; what counts as logged in is the caller's call. Returns the site's cookies.
+ */
+export async function login({ url, profileDir, waitForEnter = true, }) {
+    const release = hold();
+    try {
+        return await loginWindow(url, profileDir, waitForEnter);
+    }
+    finally {
+        release();
+    }
+}
+async function loginWindow(url, profileDir, waitForEnter) {
+    const ctx = await openBrowser({ profileDir, headless: false });
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(url);
+    // Closing the last window closes the context, after which cookies can't be read, so keep a snapshot.
+    let snapshot = await ctx.cookies();
+    const poll = setInterval(() => ctx.cookies().then((c) => (snapshot = c), () => { }), 1000);
+    let onEnter = () => { };
+    try {
+        await new Promise((resolve) => {
+            onEnter = resolve;
+            ctx.once("close", () => resolve());
+            page.once("close", () => resolve());
+            // The MCP server's stdin is its transport; only the CLI reads Enter.
+            if (waitForEnter) {
+                process.stdin.once("data", onEnter);
+                process.stdin.resume();
+            }
+        });
+        snapshot = await ctx.cookies().catch(() => snapshot);
+    }
+    finally {
+        clearInterval(poll);
+        if (waitForEnter) {
+            process.stdin.off("data", onEnter);
+            process.stdin.pause();
+        }
+        await closeBrowser();
+    }
+    return siteCookies(snapshot, url);
+}

@@ -20,6 +20,8 @@ import {
   SITE_SKILL_LIBRARY_KEY
 } from "./site-skill-store";
 import type { SiteCandidateSkill } from "./site-skill";
+import { apiRecipeFromContract } from "./api-recipe";
+import { searchContract } from "./api-recipe.fixture";
 
 let store: Record<string, unknown>;
 
@@ -318,6 +320,37 @@ describe("versioned Site Skill storage", () => {
         verification_status: "verified"
       })
     ]);
+  });
+
+  it("a read that passed never makes up for a write that was sent but not verified", async () => {
+    const id = "SK-SITE-MIXED";
+    const read = apiRecipeFromContract({ ...searchContract(), operation_id: "op-read", name: "search" }, "https://example.com/");
+    const write = apiRecipeFromContract({ ...searchContract(), operation_id: "op-write", name: "addToCart", side_effect: "write" }, "https://example.com/");
+    expect(read.id).not.toBe(write.id);
+    await saveSiteSkillCandidate({ ...candidate(id), recipes: [read, write] }, { reason: "create", created_at: "2026-09-28T05:00:00.000Z" });
+    const rev = `${id}:r1`;
+    const run = async (recipeId: string, outcome: "passed" | "unverified", at: string) => {
+      await recordSiteSkillEvaluation(id, rev, { kind: "execution", outcome, recorded_at: at });
+      await recordSiteSkillExecutionEvidence(id, rev, { recipe_id: recipeId, started_at: at, finished_at: at, outcome, executed_steps: 1, submitted: outcome === "unverified", parameter_names: [] });
+    };
+    // the write is sent (approved) and the site answers 2xx: unverified
+    await run(write.id, "unverified", "2026-09-28T05:01:00.000Z");
+    // then the read runs and its live check passes
+    await run(read.id, "passed", "2026-09-28T05:02:00.000Z");
+    await recordSiteSkillEvaluation(id, rev, { kind: "structural-verification", outcome: "passed", recorded_at: "2026-09-28T05:03:00.000Z" });
+
+    const gate = await getSiteSkillPromotionGate(id);
+    expect(gate).toMatchObject({ eligible: false, structural_verification: "passed", execution: "passed" });
+    expect(gate?.reasons).toEqual([`write “${write.name}” was sent but its change was never verified`]);
+    await expect(promoteSiteSkillRevision(id, rev)).rejects.toThrow("was sent but its change was never verified");
+
+    // a UI or read-only Skill is unaffected: the same history without the write promotes
+    const plain = "SK-SITE-READONLY";
+    await saveSiteSkillCandidate({ ...candidate(plain), recipes: [read] }, { reason: "create", created_at: "2026-09-28T05:00:00.000Z" });
+    await recordSiteSkillEvaluation(plain, `${plain}:r1`, { kind: "execution", outcome: "passed", recorded_at: "2026-09-28T05:02:00.000Z" });
+    await recordSiteSkillExecutionEvidence(plain, `${plain}:r1`, { recipe_id: read.id, started_at: "2026-09-28T05:02:00.000Z", outcome: "passed", executed_steps: 1, submitted: false, parameter_names: [] });
+    await recordSiteSkillEvaluation(plain, `${plain}:r1`, { kind: "structural-verification", outcome: "passed", recorded_at: "2026-09-28T05:03:00.000Z" });
+    expect((await getSiteSkillPromotionGate(plain))?.eligible).toBe(true);
   });
 
   it("keeps execution pinned to the active revision when a newer candidate is created", async () => {
