@@ -31,8 +31,45 @@ export const APPROVAL_CHOICES: Choice<ApprovalMode>[] = [
         deleted email, can't be taken back. Most people should keep “Ask me only before important steps”.
       </>
     )
+  },
+  {
+    value: "guarded",
+    title: "Autopilot, protected (for an agent's own computer)",
+    description:
+      "It never stops to ask, for anything it does, including for AI agents connected through the Bridge. To protect you from websites that try to trick it, it will still never pay, order, type a password, card number or code, or change account security on its own: those stop the task instead.",
+    warning: (
+      <>
+        Only for a computer and Chrome profile set aside for the agent, not your own. Messages it sends and data it
+        deletes can't be taken back.
+      </>
+    )
+  },
+  {
+    value: "full",
+    title: "Full control, including payments (for an agent's own computer)",
+    description:
+      "It never stops to ask, for anything. It can pay, place orders, use saved cards, type passwords and change account settings on its own.",
+    warning: (
+      <>
+        Nothing protects you from a mistake or from a website that tricks it. Use only on a computer set aside for the
+        agent, signed in only to accounts it should use, with a prepaid or virtual card that has a low spending limit.
+      </>
+    )
   }
 ];
+
+const AUTOPILOT_CONFIRM: Partial<Record<ApprovalMode, { title: string; body: string; confirmLabel: string }>> = {
+  guarded: {
+    title: "Turn on protected autopilot?",
+    body: "BrowserHarness will send, submit and delete without asking you, including for agents connected through the Bridge. It still won't pay, order or handle passwords and codes on its own. Only use this on a computer set aside for the agent.",
+    confirmLabel: "Yes, turn it on"
+  },
+  full: {
+    title: "Give it full control, including payments?",
+    body: "BrowserHarness will do anything a task needs without asking: pay with saved cards, place orders, type passwords and change account security. A mistake or a tricky website can cost real money. Only use this on a computer set aside for the agent, with a card that has a low limit.",
+    confirmLabel: "Yes, give full control"
+  }
+};
 
 export function SafetyPage(_props: SectionProps) {
   const [mode, setMode] = useState<ApprovalMode>(DEFAULT_PREFERENCES.approvalMode);
@@ -52,6 +89,11 @@ export function SafetyPage(_props: SectionProps) {
   }, []);
 
   const choose = async (next: ApprovalMode) => {
+    const warning = AUTOPILOT_CONFIRM[next];
+    if (warning && next !== mode) {
+      const ok = await confirm({ ...warning, danger: true });
+      if (!ok) return;
+    }
     setMode(next);
     await updatePreferences({ approvalMode: next });
     saved(`Saved. ${APPROVAL_CHOICES.find((choice) => choice.value === next)?.title}`);
@@ -130,8 +172,8 @@ export function SafetyPage(_props: SectionProps) {
           </Typography>
           <Box>
             <Note kind="tip" title="Good to know">
-              Whatever you choose above, it asks you before paying for something or changing a password or account
-              security, except on websites you allowed.
+              Unless you chose “Full control, including payments”, it asks you before paying for something or changing
+              a password or account security, except on websites you allowed.
             </Note>
           </Box>
         </SettingsCard>

@@ -48,6 +48,34 @@ export function describeAction(
   }
 }
 
+const TYPING_TOOLS = new Set(["type", "trusted_type", "send_keys", "trusted_key"]);
+
+export function isTypingTool(tool: string): boolean {
+  return TYPING_TOOLS.has(tool);
+}
+const SECRET_FIELD =
+  /\b(password|passcode|pin|cvv|cvc|security code|card number|credit card|debit card|expiry|expiration|one[- ]time code|otp|2fa|verification code|iban|routing|account number)\b/i;
+
+/**
+ * Level 4: typing into a password, card or one-time-code field. The
+ * question names the field so ALWAYS_ASK keeps it for the person, which
+ * stops a page from steering the agent into handing over a secret.
+ */
+export function secretFieldQuestion(
+  observation: PageObservation,
+  tool: ToolName,
+  input: Record<string, unknown>
+): string | null {
+  if (!TYPING_TOOLS.has(tool) || typeof input.element_id !== "string") return null;
+  const element = observation.elements.find(
+    (item) => item.element_id === input.element_id || item.semantic_ref === input.element_id
+  );
+  if (!element) return null;
+  const isSecret = element.type === "password" || SECRET_FIELD.test(element.accessible_name || "");
+  if (!isSecret) return null;
+  return `Type into the password or card field “${element.accessible_name || element.type || "this field"}” on ${hostOf(observation.url)}`;
+}
+
 /**
  * The approval question for an action under the chosen mode, or null when it
  * may go ahead. `riskyDescription` is what the normal rules would ask.
@@ -59,6 +87,10 @@ export function approvalFor(
   tool: ToolName,
   input: Record<string, unknown>
 ): string | null {
+  if (mode === "guarded") {
+    const secret = secretFieldQuestion(observation, tool, input);
+    if (secret) return secret;
+  }
   if (mode === "every") {
     if (riskyDescription) return riskyDescription;
     // Looking around (scroll, wait, read) never needs a question.
@@ -81,9 +113,23 @@ export function asksEveryTime(description: string): boolean {
   return EVERY_TIME.test(description);
 }
 
-/** Whether a question can be answered yes without the person, in automatic mode. */
+/**
+ * Whether a question can be answered yes without the person:
+ * - auto (level 3): not payments/account security, not "every time" writes
+ * - guarded (level 4): everything except payments/passwords/account security
+ * - full (level 5): everything
+ */
 export function autoApproves(mode: ApprovalMode, description: string): boolean {
-  return mode === "auto" && !ALWAYS_ASK.test(description) && !asksEveryTime(description);
+  switch (mode) {
+    case "full":
+      return true;
+    case "guarded":
+      return !ALWAYS_ASK.test(description);
+    case "auto":
+      return !ALWAYS_ASK.test(description) && !asksEveryTime(description);
+    default:
+      return false;
+  }
 }
 
 /**
@@ -96,8 +142,8 @@ export function approvalShortcut(
   host: string,
   grants: SiteGrant[]
 ): "auto" | "site" | null {
-  if (asksEveryTime(description)) return null;
   if (autoApproves(mode, description)) return "auto";
+  if (asksEveryTime(description)) return null;
   if (host && isHostGranted(grants, host)) return "site";
   return null;
 }

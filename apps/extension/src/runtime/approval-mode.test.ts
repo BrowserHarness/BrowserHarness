@@ -34,6 +34,42 @@ describe("approval modes", () => {
     expect(autoApproves("risky", "Submit this form")).toBe(false);
   });
 
+  it("answers everything at level 4 except payments, passwords and account security", () => {
+    expect(autoApproves("guarded", "Submit this form on example.com")).toBe(true);
+    expect(autoApproves("guarded", "Run Site Skill “X” operation “Y” on a.com? It may change data there (not known to be read-only).")).toBe(true);
+    expect(autoApproves("guarded", "Activate “Place order” on shop.example.com")).toBe(false);
+    expect(autoApproves("guarded", "Activate “Change password”")).toBe(false);
+  });
+
+  it("answers everything at level 5, payments included", () => {
+    expect(autoApproves("full", "Activate “Place order” on shop.example.com")).toBe(true);
+    expect(autoApproves("full", "Type into the password or card field “Card number” on a.com")).toBe(true);
+    expect(autoApproves("full", "Run Site Skill “X” operation “Y” on a.com? It may change data there (not known to be read-only).")).toBe(true);
+  });
+
+  it("level 3 still asks for every-time writes", () => {
+    expect(autoApproves("auto", "Run Site Skill “X” operation “Y” on a.com? It may change data there (not known to be read-only).")).toBe(false);
+  });
+
+  it("level 4 keeps password and card fields for the person", () => {
+    const form: PageObservation = {
+      ...page,
+      elements: [
+        { element_id: "@p", tag: "input", role: "textbox", type: "password", accessible_name: "Your secret", visible: true, disabled: false },
+        { element_id: "@c", tag: "input", role: "textbox", accessible_name: "Card number", visible: true, disabled: false },
+        { element_id: "@n", tag: "input", role: "textbox", accessible_name: "Full name", visible: true, disabled: false }
+      ]
+    };
+    const pw = approvalFor("guarded", null, form, "type", { element_id: "@p", text: "x" });
+    const card = approvalFor("guarded", null, form, "trusted_type", { element_id: "@c", text: "4" });
+    expect(pw).toMatch(/password or card field/);
+    expect(card).toMatch(/password or card field/);
+    expect(autoApproves("guarded", pw!)).toBe(false);
+    expect(approvalFor("guarded", null, form, "type", { element_id: "@n", text: "Ann" })).toBeNull();
+    expect(approvalFor("full", null, form, "type", { element_id: "@p", text: "x" })).toBeNull();
+    expect(approvalFor("auto", null, form, "type", { element_id: "@p", text: "x" })).toBeNull();
+  });
+
   it("describes typing without the whole text", () => {
     expect(describeAction(page, "type", { element_id: "@e1", text: "x".repeat(100) })).toMatch(/^Type “x{60}” into/);
   });

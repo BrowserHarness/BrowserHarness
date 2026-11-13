@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
+  bridgeAutoApproves,
   extensionPageApprovalGranted,
   isRiskyTrustedLabel
 } from "./approval-grant";
+
+describe("Bridge agents at autopilot levels", () => {
+  it("stays blocked below level 4", () => {
+    for (const mode of ["risky", "every", "auto"] as const) {
+      expect(bridgeAutoApproves(mode, "Submit this form on a.com")).toBe(false);
+    }
+  });
+
+  it("level 4 answers ordinary steps but not payments or passwords", () => {
+    expect(bridgeAutoApproves("guarded", "Trusted click “Send” requires explicit approval.")).toBe(true);
+    expect(bridgeAutoApproves("guarded", "Trusted click “Place order” requires explicit approval.")).toBe(false);
+    expect(bridgeAutoApproves("guarded", "Type into the password or card field “Password” on a.com")).toBe(false);
+  });
+
+  it("level 5 answers everything", () => {
+    expect(bridgeAutoApproves("full", "Trusted click “Place order” requires explicit approval.")).toBe(true);
+  });
+});
 
 describe("privileged trusted-input approval grants", () => {
   const extensionId = "browserharness-extension-id";
