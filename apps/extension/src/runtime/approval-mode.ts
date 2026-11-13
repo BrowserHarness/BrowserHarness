@@ -54,7 +54,12 @@ export function isTypingTool(tool: string): boolean {
   return TYPING_TOOLS.has(tool);
 }
 const SECRET_FIELD =
-  /\b(password|passcode|pin|cvv|cvc|security code|card number|credit card|debit card|expiry|expiration|one[- ]time code|otp|2fa|verification code|iban|routing|account number)\b/i;
+  /\b(password|passcode|pin code|pin number|cvv|cvc|security code|card number|credit card|debit card|card expiry|expiry date|expiration date|one[- ]time code|otp|2fa|verification code|iban|routing number|account number)\b/i;
+/**
+ * A bank PIN is written "PIN". A plain "pin" is a Pinterest Pin, a map pin
+ * or a pinned post, which is ordinary work at level 4.
+ */
+const BANK_PIN = /\bPIN\b/;
 
 /**
  * Level 4: typing into a password, card or one-time-code field. The
@@ -71,7 +76,8 @@ export function secretFieldQuestion(
     (item) => item.element_id === input.element_id || item.semantic_ref === input.element_id
   );
   if (!element) return null;
-  const isSecret = element.type === "password" || SECRET_FIELD.test(element.accessible_name || "");
+  const name = element.accessible_name || "";
+  const isSecret = element.type === "password" || SECRET_FIELD.test(name) || BANK_PIN.test(name);
   if (!isSecret) return null;
   return `Type into the password or card field “${element.accessible_name || element.type || "this field"}” on ${hostOf(observation.url)}`;
 }
