@@ -163,7 +163,7 @@ import {
   type ToolExecutionOptions
 } from "./approval-grant";
 import { loadPreferences, type ApprovalMode } from "../settings/preferences";
-import { secretFieldQuestion } from "../runtime/approval-mode";
+import { isTypingTool, secretFieldQuestion } from "../runtime/approval-mode";
 import { runExternalMcpTool } from "./mcp-tools";
 import { enqueueRemoteTask } from "../runtime/remote-queue";
 import {
@@ -3558,7 +3558,7 @@ async function handleBridgeCommand(
 
   // Level 4 keeps passwords, card numbers and one-time codes for the person,
   // for Bridge agents too.
-  if (approvalMode === "guarded" && typeof command.args.element_id === "string") {
+  if (approvalMode === "guarded" && isTypingTool(tool) && typeof command.args.element_id === "string") {
     const observed = await runTool("observe_page", {}, command.session, command.title);
     const secret =
       observed.ok && observed.data
@@ -3602,9 +3602,9 @@ async function handleBridgeCommand(
         : element?.enter_requires_approval;
 
     if (requiresApproval) {
-      const reason =
-        element?.approval_reason ||
-        `Activate “${element?.accessible_name || "this control"}”`;
+      // The control's own name is part of the reason, so "Submit this form"
+      // on a “Pay now” button still counts as a payment at level 4.
+      const reason = `${element?.approval_reason || "Activate"} “${element?.accessible_name || "this control"}”`;
       if (bridgeAutoApproves(approvalMode, reason)) {
         bridgeApproved = true;
         await recordAutopilotApproval(approvalMode, tool, reason, command.session);

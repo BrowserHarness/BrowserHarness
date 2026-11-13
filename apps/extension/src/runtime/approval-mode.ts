@@ -49,6 +49,10 @@ export function describeAction(
 }
 
 const TYPING_TOOLS = new Set(["type", "trusted_type", "send_keys", "trusted_key"]);
+
+export function isTypingTool(tool: string): boolean {
+  return TYPING_TOOLS.has(tool);
+}
 const SECRET_FIELD =
   /\b(password|passcode|pin|cvv|cvc|security code|card number|credit card|debit card|expiry|expiration|one[- ]time code|otp|2fa|verification code|iban|routing|account number)\b/i;
 
