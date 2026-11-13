@@ -157,10 +157,13 @@ import {
   getBrowserWorkingMemory
 } from "../runtime/working-memory";
 import {
+  bridgeAutoApproves,
   extensionPageApprovalGranted,
   isRiskyTrustedLabel,
   type ToolExecutionOptions
 } from "./approval-grant";
+import { loadPreferences, type ApprovalMode } from "../settings/preferences";
+import { secretFieldQuestion } from "../runtime/approval-mode";
 import { runExternalMcpTool } from "./mcp-tools";
 import { enqueueRemoteTask } from "../runtime/remote-queue";
 import {
@@ -3510,6 +3513,29 @@ async function startRemoteTask(args: Record<string, unknown>): Promise<ToolResul
   return { ok: true, data: { id } };
 }
 
+const AUTOPILOT_LOG_KEY = "browserharness.autopilotLog";
+const AUTOPILOT_LOG_LIMIT = 500;
+
+/**
+ * Every approval answered for a Bridge agent at level 4 or 5 is kept (the
+ * last 500), so the person can see afterwards what ran without them.
+ */
+async function recordAutopilotApproval(
+  mode: ApprovalMode,
+  tool: string,
+  reason: string,
+  session?: string
+): Promise<void> {
+  try {
+    const stored = (await chrome.storage.local.get(AUTOPILOT_LOG_KEY))[AUTOPILOT_LOG_KEY];
+    const log = Array.isArray(stored) ? stored : [];
+    log.push({ at: new Date().toISOString(), mode, tool, reason: reason.slice(0, 300), session: session ?? null });
+    await chrome.storage.local.set({ [AUTOPILOT_LOG_KEY]: log.slice(-AUTOPILOT_LOG_LIMIT) });
+  } catch {
+    // The log is a record, never a reason to stop the action.
+  }
+}
+
 async function handleBridgeCommand(
   command: BridgeCommand
 ): Promise<ToolResult & { page?: PageObservation }> {
@@ -3527,6 +3553,21 @@ async function handleBridgeCommand(
   }
 
   const tool = command.action as ToolName;
+  const approvalMode = (await loadPreferences().catch(() => undefined))?.approvalMode ?? "risky";
+  let bridgeApproved = false;
+
+  // Level 4 keeps passwords, card numbers and one-time codes for the person,
+  // for Bridge agents too.
+  if (approvalMode === "guarded" && typeof command.args.element_id === "string") {
+    const observed = await runTool("observe_page", {}, command.session, command.title);
+    const secret =
+      observed.ok && observed.data
+        ? secretFieldQuestion(observed.data as PageObservation, tool, command.args)
+        : null;
+    if (secret) {
+      return { ok: false, error: { code: "APPROVAL_REQUIRED", message: secret } };
+    }
+  }
 
   if (
     tool === "click" ||
@@ -3561,22 +3602,47 @@ async function handleBridgeCommand(
         : element?.enter_requires_approval;
 
     if (requiresApproval) {
-      return {
-        ok: false,
-        error: {
-          code: "APPROVAL_REQUIRED",
-          message:
-            element?.approval_reason ||
-            "This browser action requires explicit user approval in BrowserHarness."
-        }
-      };
+      const reason =
+        element?.approval_reason ||
+        `Activate “${element?.accessible_name || "this control"}”`;
+      if (bridgeAutoApproves(approvalMode, reason)) {
+        bridgeApproved = true;
+        await recordAutopilotApproval(approvalMode, tool, reason, command.session);
+      } else {
+        return {
+          ok: false,
+          error: {
+            code: "APPROVAL_REQUIRED",
+            message:
+              element?.approval_reason ||
+              "This browser action requires explicit user approval in BrowserHarness."
+          }
+        };
+      }
     }
   }
 
   // Agents get the page as it looks after the action, so they do not need
   // a separate observe_page call per step. observe:false turns this off.
   const { observe: returnPage, ...args } = command.args;
-  const result = await runTool(tool, args, command.session, command.title);
+  let result = await runTool(
+    tool,
+    args,
+    command.session,
+    command.title,
+    bridgeApproved ? { approvalGranted: true } : {}
+  );
+  // A gate inside the tool (trusted click, learned API write, external MCP
+  // tool) asked for approval: levels 4 and 5 answer it, once, then retry.
+  if (
+    !bridgeApproved &&
+    !result.ok &&
+    result.error?.code === "APPROVAL_REQUIRED" &&
+    bridgeAutoApproves(approvalMode, result.error.message)
+  ) {
+    await recordAutopilotApproval(approvalMode, tool, result.error.message, command.session);
+    result = await runTool(tool, args, command.session, command.title, { approvalGranted: true });
+  }
   if (!result.ok || returnPage === false || !changesPage(tool, args) || ranWithoutPage(tool, result)) {
     return result;
   }

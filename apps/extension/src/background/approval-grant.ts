@@ -1,3 +1,15 @@
+import { autoApproves } from "../runtime/approval-mode";
+import { isAutopilotMode, type ApprovalMode } from "../settings/preferences";
+
+/**
+ * Whether an APPROVAL_REQUIRED for an agent connected through the Bridge is
+ * answered yes without the person. Only levels 4 and 5 do this: below them
+ * the Bridge has no one to ask, so the action stays blocked.
+ */
+export function bridgeAutoApproves(mode: ApprovalMode, reason: string): boolean {
+  return isAutopilotMode(mode) && autoApproves(mode, reason);
+}
+
 export interface ApprovalMessageSender {
   id?: string;
   url?: string;
