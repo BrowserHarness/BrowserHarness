@@ -70,6 +70,35 @@ describe("approval modes", () => {
     expect(approvalFor("auto", null, form, "type", { element_id: "@p", text: "x" })).toBeNull();
   });
 
+  it("level 4 treats Pinterest Pin fields as ordinary, but a bank PIN as secret", () => {
+    const names = [
+      "Pin title",
+      "Pin description",
+      "Tell everyone what your Pin is about",
+      "Add your title",
+      "Add a destination link",
+      "Choose a board",
+      "Save Pin",
+      "Search Pinterest",
+      "Create Pin"
+    ];
+    for (const name of names) {
+      const form: PageObservation = {
+        ...page,
+        url: "https://www.pinterest.com/pin-creation-tool/",
+        elements: [{ element_id: "@f", tag: "input", role: "textbox", accessible_name: name, visible: true, disabled: false }]
+      };
+      expect(approvalFor("guarded", null, form, "type", { element_id: "@f", text: "Weekly ADHD planner" })).toBeNull();
+    }
+    for (const name of ["PIN", "Enter your PIN", "PIN code", "Card expiry", "CVV"]) {
+      const form: PageObservation = {
+        ...page,
+        elements: [{ element_id: "@f", tag: "input", role: "textbox", accessible_name: name, visible: true, disabled: false }]
+      };
+      expect(approvalFor("guarded", null, form, "type", { element_id: "@f", text: "1" })).toMatch(/password or card field/);
+    }
+  });
+
   it("describes typing without the whole text", () => {
     expect(describeAction(page, "type", { element_id: "@e1", text: "x".repeat(100) })).toMatch(/^Type “x{60}” into/);
   });
